@@ -33,7 +33,17 @@ Build and keep polishing an ultra-light Rust Windows Markdown viewer, fast first
 - Added pure pixel-height viewport logic and native integration. Fixed EOF placement, heading page skips, fixed-byte backward jumps, wrapped-row refill resets and off-screen copy range.
 - Source I/O limits, static CRT, no-network behavior and user-owned default associations are unchanged.
 - Added 4 pure tests (21 total), real-window navigation tests and CI coverage. Heading run: 555 forward / 655 backward pages; wrapped run: 393 forward / 447 backward pages. Both exercise 13 actual font settings. Simulated DPI tests are not multi-monitor validation.
-- Release candidate v0.1.1 passed local fmt/strict Clippy/21 tests/release build, standard UI smoke, both navigation shapes and real 1 GiB smoke (59.60 ms first layout, single warm-cache sample). EXE: 656,896 bytes. Publication record will be added after CI and asset verification. Never replace v0.1.0 assets or tag.
+- Release candidate v0.1.1 passed local fmt/strict Clippy/21 tests/release build, standard UI smoke, both navigation shapes and real 1 GiB smoke (59.60 ms first layout, single warm-cache sample). EXE: 656,896 bytes. Published after CI and asset verification; see below. v0.1.0 assets and tag remain unchanged.
+
+## v0.1.1 publication record — 2026-10-12
+
+- Public release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.1
+- Tag/source: 2f2c002bf0f83f3fcd1e6fd5f0a8b75fbae0a105. GitHub Actions run 38175299658 passed on Windows and Ubuntu; Windows includes both new native navigation shapes.
+- Assets verified uploaded: EXE 656,896 bytes, ZIP 330,197 bytes, SHA256SUMS.txt. GitHub SHA-256 digests match local packages.
+- EXE SHA-256: 4f2355d7b740821e4627e2971bc22622163303abe3c8f84535f2f905cd5f3eca
+- ZIP SHA-256: 27f7afed4fb2cef41d613233c8e95c543531867e1ce69a8cdd74a4a3d0e628f0
+- dumpbin confirms only Windows-provided DLL dependencies. Local distribution path remains dist/FeatherMD.exe; older versioned ZIP is preserved.
+- Next continuation should pick an unfinished item below rather than repeat the completed EOF/paging work.
 
 ## Next high-value polish work (not all required for the initial release)
 
