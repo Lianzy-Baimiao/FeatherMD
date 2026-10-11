@@ -12,7 +12,10 @@ Build and keep polishing an ultra-light Rust Windows Markdown viewer, fast first
 - Tests: 17 core tests including 100 GiB sparse seek; fmt + warning-free Clippy; native hidden-window smoke against 807 B demo and real 1 GiB Markdown; first-layout around 75 ms for the 1 GiB fixture on this machine. See PERFORMANCE.md for exact boundaries.
 - Fixed during testing: UTF-8 scalar split at end of read window, wrap-around search missing overlapping origin, UTF-16 BOM handling, Win32 destruction reentrancy, cross-process test input/capture assumptions.
 - Local machine defaults to GNU Rust but has MSVC/SDK in a custom location. Use cargo +stable-x86_64-pc-windows-msvc and source ignored target/dev-env.ps1; do not publish that machine-specific file. Do not change the global default toolchain.
-- Publishing/CI status will be updated after the first GitHub push.
+- Source published: https://github.com/Lianzy-Baimiao/FeatherMD (main, initial commit 658ea5c).
+- Initial GitHub Actions run 38168176475 passed on Windows and Ubuntu, including the native Windows smoke test.
+- Final 640 KiB EXE revalidated locally: fmt, Clippy with warnings denied, all 17 core tests, release build, small-document and real 1 GiB native smoke all passed. Release packaging/publication is the immediate next step.
+- Hourly continuation remains active after the initial release, using the bounded high-value backlog below; no cosmetic churn.
 
 ## Next high-value polish work (not all required for the initial release)
 
