@@ -1,10 +1,11 @@
 //! Native Win32 shell. All file I/O and searches run off the window thread.
 #![allow(unsafe_op_in_unsafe_fn)]
-use crate::layout::{FontKey, Fonts, Layout};
+use crate::layout::{FontKey, Fonts, Layout, Row};
 use feathermd::{
     document::{Document, Page, SearchResult, human_size},
     markdown,
     settings::{Settings, Theme},
+    viewport::Viewport,
     worker::{Reply, Request, SearchRequest, Workers},
 };
 use std::{
@@ -130,6 +131,7 @@ struct App {
     top: usize,
     anchor: u64,
     loading: bool,
+    pending_scroll: Option<(usize, i32)>,
     width: i32,
     height: i32,
     hits: Vec<HitBox>,
@@ -162,6 +164,7 @@ impl App {
             top: 0,
             anchor: 0,
             loading: false,
+            pending_scroll: None,
             width: 1000,
             height: 760,
             hits: vec![],
@@ -202,6 +205,7 @@ impl App {
         InvalidateRect(self.hwnd, null(), 0);
     }
     unsafe fn open(&mut self, path: PathBuf) {
+        self.pending_scroll = None;
         self.workers.cancel_search();
         self.io_ticket += 1;
         self.loading = true;
@@ -226,6 +230,7 @@ impl App {
         self.invalidate();
     }
     unsafe fn request_page(&mut self, anchor: u64) {
+        self.pending_scroll = None;
         if let Some(doc) = &self.document {
             self.io_ticket += 1;
             self.loading = true;
@@ -251,12 +256,7 @@ impl App {
                 width,
             ));
             ReleaseDC(self.hwnd, dc);
-            if let Some(l) = &self.layout {
-                self.top = l
-                    .rows
-                    .partition_point(|r| r.end <= anchor)
-                    .min(l.rows.len().saturating_sub(1));
-            }
+            self.position(anchor, 0);
             self.selection = None;
             self.scrollbar();
         }
@@ -283,11 +283,16 @@ impl App {
                 }
                 Reply::Page(id, anchor, result) if id == self.io_ticket => {
                     self.loading = false;
+                    let pending = self.pending_scroll.take();
                     match result {
                         Ok(page) => {
                             self.page = Some(page);
                             self.status = "就绪".into();
                             self.relayout(anchor);
+                            if let Some((wrapped_row, delta)) = pending {
+                                self.position(anchor, wrapped_row);
+                                self.scroll(delta);
+                            }
                         }
                         Err(e) => {
                             self.status = format!("读取失败：{e}");
@@ -322,18 +327,62 @@ impl App {
             && anchor < page.end
         {
             self.anchor = anchor;
-            if let Some(l) = &self.layout {
-                self.top = l
-                    .rows
-                    .partition_point(|r| r.end <= anchor)
-                    .min(l.rows.len().saturating_sub(1));
-            }
+            self.position(anchor, 0);
             self.selection = None;
             self.scrollbar();
             self.invalidate();
             return;
         }
         self.request_page(anchor);
+    }
+    fn viewport(&self) -> Viewport<'_, Row> {
+        Viewport::new(
+            self.layout.as_ref().map_or(&[], |l| l.rows.as_slice()),
+            (self.height - self.s(32) - self.content_top() - self.s(12)).max(1),
+        )
+    }
+    fn clamp_top(&mut self) {
+        if self.page.as_ref().is_some_and(|p| p.end >= p.size) {
+            self.top = self.top.min(self.viewport().bottom_top());
+        }
+    }
+    fn position(&mut self, anchor: u64, wrapped_row: usize) {
+        if let Some(l) = &self.layout {
+            let first = l.rows.partition_point(|r| r.end <= anchor);
+            self.top = first.min(l.rows.len().saturating_sub(1));
+            if let Some(row) = l.rows.get(self.top) {
+                let count = l.rows[self.top..]
+                    .iter()
+                    .take_while(|r| r.start == row.start)
+                    .count();
+                self.top += wrapped_row.min(count.saturating_sub(1));
+            }
+        }
+        if self
+            .page
+            .as_ref()
+            .is_some_and(|p| p.end >= p.size && anchor >= p.size.saturating_sub(1))
+        {
+            // The final physical line can wrap into many rows. End targets its tail,
+            // not the first row sharing that source range.
+            self.top = self.viewport().bottom_top();
+        } else {
+            self.clamp_top();
+        }
+    }
+    fn wrapped_row(&self, index: usize) -> usize {
+        self.layout
+            .as_ref()
+            .and_then(|l| {
+                let row = l.rows.get(index)?;
+                Some(index - l.rows.partition_point(|r| r.end <= row.start))
+            })
+            .unwrap_or(0)
+    }
+    unsafe fn page_scroll(&mut self, forward: bool) {
+        let next = self.viewport().page_top(self.top, forward);
+        let delta = next as i32 - self.top as i32;
+        self.scroll(if !forward && delta == 0 { -1 } else { delta });
     }
     unsafe fn scroll(&mut self, delta: i32) {
         if self.loading {
@@ -345,24 +394,40 @@ impl App {
         if l.rows.is_empty() {
             return;
         }
-        if delta < 0 && self.top < delta.unsigned_abs() as usize {
+        if delta < 0
+            && self.top < delta.unsigned_abs() as usize
+            && self.page.as_ref().is_some_and(|p| p.start > 3)
+        {
+            // Refill behind the current row, then apply the original row movement.
+            // Subtracting an arbitrary byte count would skip short lines.
             let current = self.current();
-            if self.page.as_ref().is_some_and(|p| p.start > 3) {
-                self.request_page(current.saturating_sub(4096));
-                return;
-            }
+            let wrapped_row = self.wrapped_row(self.top);
+            self.request_page(current);
+            self.pending_scroll = Some((wrapped_row, delta));
+            return;
         }
-        let next = (self.top as i64 + delta as i64).clamp(0, l.rows.len().saturating_sub(1) as i64)
-            as usize;
+        let requested = self.top as i64 + delta as i64;
+        if delta > 0
+            && requested >= l.rows.len() as i64
+            && let Some(page) = &self.page
+            && page.end < page.size
+        {
+            self.request_page(page.end);
+            return;
+        }
+        let next = requested.clamp(0, l.rows.len().saturating_sub(1) as i64) as usize;
         if delta > 0
             && next + 64 >= l.rows.len()
             && self.page.as_ref().is_some_and(|p| p.end < p.size)
         {
             let anchor = l.rows[next].start;
-            self.request_page(anchor.max(self.current() + 1));
+            let wrapped_row = self.wrapped_row(next);
+            self.request_page(anchor);
+            self.pending_scroll = Some((wrapped_row, 0));
             return;
         }
         self.top = next;
+        self.clamp_top();
         self.anchor = self.current();
         self.scrollbar();
         self.invalidate();
@@ -552,7 +617,8 @@ impl App {
         };
         let range = self.selection.unwrap_or((
             self.top,
-            (self.top + self.visible_rows()).min(layout.rows.len().saturating_sub(1)),
+            (self.top + self.visible_rows().saturating_sub(1))
+                .min(layout.rows.len().saturating_sub(1)),
         ));
         let (a, b) = (range.0.min(range.1), range.0.max(range.1));
         let mut text = String::new();
@@ -586,9 +652,9 @@ impl App {
         self.invalidate();
     }
     fn visible_rows(&self) -> usize {
-        ((self.height - self.content_top() - self.s(30))
-            / self.s(self.settings.font_size + 10).max(1))
-        .max(1) as usize
+        self.viewport()
+            .visible_end(self.top)
+            .saturating_sub(self.top)
     }
     unsafe fn command(&mut self, id: usize) {
         match id {
@@ -638,8 +704,8 @@ impl App {
         match key {
             0x26 => self.scroll(-1),
             0x28 => self.scroll(1),
-            0x21 => self.scroll(-(self.visible_rows() as i32)),
-            0x22 | 0x20 => self.scroll(self.visible_rows() as i32),
+            0x21 => self.page_scroll(false),
+            0x22 | 0x20 => self.page_scroll(true),
             0x24 => self.jump(0),
             0x23 => self.jump(self.page.as_ref().map_or(0, |p| p.size.saturating_sub(1))),
             0x25 => {
@@ -1228,6 +1294,31 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             10 => app.page.as_ref().map_or(0, |p| p.size as isize),
             11 => app.loading as isize,
             12 => app.settings.font_size as isize,
+            13 => app.top as isize,
+            14 => app.wrapped_row(app.top) as isize,
+            17 => app
+                .hits
+                .iter()
+                .rev()
+                .find_map(|h| match h.action {
+                    Hit::Row(i) => Some(app.wrapped_row(i) as isize),
+                    _ => None,
+                })
+                .unwrap_or(-1),
+            15 => app
+                .hits
+                .iter()
+                .rev()
+                .find_map(|h| match h.action {
+                    Hit::Row(i) => app.layout.as_ref()?.rows.get(i).map(|r| r.start as isize),
+                    _ => None,
+                })
+                .unwrap_or(-1),
+            16 => app
+                .hits
+                .iter()
+                .filter(|h| matches!(h.action, Hit::Row(_)))
+                .count() as isize,
             _ => 0,
         },
         WM_ERASEBKGND => 1,
@@ -1315,14 +1406,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             match (wp & 0xffff) as i32 {
                 SB_LINEUP => app.scroll(-1),
                 SB_LINEDOWN => app.scroll(1),
-                SB_PAGEUP => {
-                    let n = app.visible_rows();
-                    app.scroll(-(n as i32));
-                }
-                SB_PAGEDOWN => {
-                    let n = app.visible_rows();
-                    app.scroll(n as i32);
-                }
+                SB_PAGEUP => app.page_scroll(false),
+                SB_PAGEDOWN => app.page_scroll(true),
                 SB_TOP => app.jump(0),
                 SB_BOTTOM => {
                     let n = app.page.as_ref().map_or(0, |p| p.size.saturating_sub(1));

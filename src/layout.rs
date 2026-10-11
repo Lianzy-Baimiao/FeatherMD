@@ -83,6 +83,11 @@ pub struct Row {
     pub height: i32,
     pub kind: Kind,
 }
+impl feathermd::viewport::RowHeight for Row {
+    fn height(&self) -> i32 {
+        self.height
+    }
+}
 pub struct Layout {
     pub rows: Vec<Row>,
     pub max_width: i32,

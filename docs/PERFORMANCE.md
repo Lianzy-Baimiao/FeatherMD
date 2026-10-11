@@ -1,6 +1,6 @@
 # 性能验证记录
 
-日期：2026-10-12（Asia/Shanghai）。Windows 11 Pro x64 / build 26200，Rust 1.99.0 MSVC，Release / LTO / 静态 CRT，本地文件系统。不是通用性能保证。
+日期：2026-10-12（Asia/Shanghai）。Windows 11 Pro x64 / build 26200，Rust 1.99.0 MSVC，Release / LTO / 静态 CRT，本地文件系统。不是通用性能保证。第 1～4 节记录 v0.1.0，v0.1.1 复测见第 5 节。
 
 ## 1. 真实 UTF-8 Markdown 文件，暖缓存
 
@@ -42,7 +42,24 @@ scripts/ui-smoke.ps1 使用隐藏 Windows 原生窗口、隔离的临时便携�
 
 ## 4. 分发体积和依赖
 
-当前 EXE：**655,360 bytes（640 KiB）**。dumpbin /dependents 检查只列出 Windows 自带的 kernel32 / gdi32 / user32 / ntdll / advapi32 / shell32 / comdlg32 / 同步 API-set / bcryptprimitives，无第三方运行库 DLL。
+v0.1.0 EXE：**655,360 bytes（640 KiB）**。dumpbin /dependents 检查只列出 Windows 自带的 kernel32 / gdi32 / user32 / ntdll / advapi32 / shell32 / comdlg32 / 同步 API-set / bcryptprimitives，无第三方运行库 DLL。
+
+## 5. v0.1.1 导航修复复测
+
+同机，2026-10-12。最终 EXE **656,896 bytes（641.5 KiB）**，比 v0.1.0 增加 1.5 KiB；未新增第三方依赖或放宽 I/O/排版窗口限制。
+
+- 21 项 Rust 回归测试通过（17 项原有核心测试 + 4 项视口测试）。
+- 5,000 个标题行：555 次向下 / 655 次向上翻页；300 个中文/emoji 长段落：393 次向下 / 447 次向上翻页。原生 GDI 测试逐次核对实际绘制边界，两个方向均不跳过未显示内容，并确认回到起点/末尾。
+- 两组文档分别验证 13 个可由 +/- 选择的原生字号。纯逻辑测试覆盖字号 12–36 和 96/120/144/192 DPI 比例；**未在多台物理显示器上切换 DPI**。
+- 原始 End 回归先失败（仅绘制 1 行），修复后末屏填满可用行；长段落另测真正到达最终换行尾部。
+- 标准真实窗口烟测和 1 GiB 实体 Markdown 烟测通过，搜索/跳转/切换/退出正常，GDI 句柄稳定。
+
+| 输入 | 创建窗口 | 首分页排版完成 | 首次测试抓图完成 | 进程私有内存 | 工作集 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 807 B 演示文档 | 80.23 ms | 88.28 ms | 116.15 ms | 2.59 MiB | 16.13 MiB |
+| 1 GiB 实体 Markdown | 47.68 ms | 59.60 ms | 70.11 ms | 4.94 MiB | 18.13 MiB |
+
+仍为**单次暖缓存**结果；系统缓存、内存驻留和负载不同，不能据此认定这次导航修复带来了普遍速度/内存提升。复制范围的视口计算有测试，但本轮没有操作用户剪贴板，也没有修改默认关联注册。
 
 ## 复现
 

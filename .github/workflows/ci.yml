@@ -23,7 +23,10 @@ jobs:
       - name: Native Windows smoke test
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/ui-smoke.ps1
+        run: |
+          ./scripts/ui-smoke.ps1
+          ./scripts/navigation-smoke.ps1
+          ./scripts/navigation-smoke.ps1 -Shape wrapped -Output ./test-artifacts/navigation-wrapped
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
@@ -32,3 +35,4 @@ jobs:
             target/release/feathermd.exe
             test-artifacts/*.png
             test-artifacts/ui-smoke.json
+            test-artifacts/navigation*/navigation.json

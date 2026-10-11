@@ -10,7 +10,7 @@
 
 打开一份 Markdown，不应该先启动一个浏览器。
 
-FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测或自动联网。v0.1.0 的 Windows x64 EXE 约 **640 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
+FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测或自动联网。v0.1.1 的 Windows x64 EXE 约 **642 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
 
 **大文件不是先全部载入再显示：** 每次只读取附近 128 KiB，后台读取与搜索，前台只绘制可见行。文件总长度不决定首屏需要分配的内存。
 
@@ -31,6 +31,13 @@ FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测�
 - “移除打开方式注册”只移除 FeatherMD 自己的注册项。
 
 **不会绕过 Windows 保护、覆盖 UserChoice 或偷偷改变你现有的默认程序。** 移动 EXE 后需要重新注册。
+
+### v0.1.1 阅读改进
+
+- End 会显示完整末屏，最后一段很长且自动换行时也能到达真正结尾。
+- PageUp / PageDown 按实际行高翻页并保留重叠行，避免大标题导致漏读。
+- 反向跨缓存分页不再按固定字节后退；中文长段落分页保留当前换行位置。
+- 未选择时复制的范围按真实可见行计算。
 
 ### 快捷键
 
@@ -76,7 +83,7 @@ FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测�
 
 ## 实测摘要
 
-本机 Windows 11 x64，Release 构建、暖缓存、1 GiB 实体 UTF-8 Markdown：
+首版 v0.1.0 基准：本机 Windows 11 x64，Release 构建、暖缓存、1 GiB 实体 UTF-8 Markdown：
 
 - 后台读取 + Markdown 解析首分页，中位数 **1.05 ms**（30 次；不含 GDI 排版）。
 - 隐藏真实窗口测试，启动到首分页排版约 **75 ms**（单次，非冷启动保证）。
@@ -84,6 +91,8 @@ FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测�
 - 100 GiB **稀疏文件**通过首尾/随机读取验证；这不等于扫描了 100 GiB 实际 Markdown 内容。
 
 完整方法、数字和限制见 [PERFORMANCE.md](docs/PERFORMANCE.md)。
+
+v0.1.1 已复测相同 1 GiB 文件，首分页排版 59.60 ms（单次暖缓存），详见性能记录；不把不同轮次的波动解释为普遍性能提升。
 
 ## 从源码构建
 
@@ -100,6 +109,8 @@ cargo +stable-x86_64-pc-windows-msvc build --release
 ~~~powershell
 # 无干扰隐藏窗口测试：主题、真实输入搜索、百分比跳转、GDI 资源、退出
 ./scripts/ui-smoke.ps1
+./scripts/navigation-smoke.ps1
+./scripts/navigation-smoke.ps1 -Shape wrapped -Output ./test-artifacts/navigation-wrapped
 
 # 生成 1 MiB / 64 MiB / 1 GiB 实体测试文件（约占 1.1 GiB）
 ./scripts/make-fixtures.ps1

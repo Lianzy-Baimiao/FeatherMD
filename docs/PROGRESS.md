@@ -27,13 +27,20 @@ Build and keep polishing an ultra-light Rust Windows Markdown viewer, fast first
 - Default-app registry mutation was deliberately not exercised on the development user's system. Document this as an outstanding opt-in integration test, not as a verified end-to-end association change.
 - Initial delivery is complete. Continue meaningful polish via the hourly heartbeat; preserve published assets and tag, and use a new version for future binaries.
 
+## v0.1.1 navigation work — 2026-10-12
+
+- Reproduced the original End defect with a native keyboard/capture test: only one row was painted despite a long document. The wrapped fixture separately exposed End targeting the first visual row of the final physical line.
+- Added pure pixel-height viewport logic and native integration. Fixed EOF placement, heading page skips, fixed-byte backward jumps, wrapped-row refill resets and off-screen copy range.
+- Source I/O limits, static CRT, no-network behavior and user-owned default associations are unchanged.
+- Added 4 pure tests (21 total), real-window navigation tests and CI coverage. Heading run: 555 forward / 655 backward pages; wrapped run: 393 forward / 447 backward pages. Both exercise 13 actual font settings. Simulated DPI tests are not multi-monitor validation.
+- Release candidate v0.1.1 passed local fmt/strict Clippy/21 tests/release build, standard UI smoke, both navigation shapes and real 1 GiB smoke (59.60 ms first layout, single warm-cache sample). EXE: 656,896 bytes. Publication record will be added after CI and asset verification. Never replace v0.1.0 assets or tag.
+
 ## Next high-value polish work (not all required for the initial release)
 
-1. Regression-test long bidirectional scrolling across page edges, selection/copy after wrapping, all zoom levels, and multiple-monitor DPI transitions. Improve end-of-file viewport placement without scanning preceding file contents.
+1. v0.1.1 covers bidirectional heading/wrapped-line cache crossings, EOF placement and 13 native zoom settings. Remaining: selection/copy integration, preserving reading position across resize/zoom, and physical multiple-monitor DPI transitions.
 2. Improve Markdown context continuity on sequential page navigation using bounded cached checkpoints; do not scan entire huge files or make arbitrary jumps wait. Add tests that distinguish sequential correctness from explicitly context-limited random jumps.
 3. Native accessible reading/text selection and keyboard focus ergonomics. Keep any accessibility projection bounded to the viewport.
 4. Assess bounded table layout and local image support only if they do not inflate the binary or block the UI; maintain explicit no-network defaults.
-
 5. Test registration/unregistration in an isolated Windows user/VM; preserve other applications and never touch UserChoice. Update deprecated GitHub Actions runtime versions with verified upstream releases.
 
 ## Guardrails
