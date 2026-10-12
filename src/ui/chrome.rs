@@ -1,6 +1,29 @@
 //! Custom window chrome and quiet reading controls.
 use super::*;
 
+/// Title-bar glyphs shrink with the header (34 px, formerly 40 px).
+const HEADER_ICON: f32 = 0.86;
+/// Caption buttons keep the familiar Windows width; only their height shrank.
+const CAPTION_BUTTON: i32 = 44;
+/// Preview/source capsule through More, in logical pixels.
+const ACTIONS_WIDTH: i32 = 236;
+
+/// Header appearance picker: three basic choices plus the full skin gallery.
+pub(super) const PICKER: [(usize, &str); 4] = [
+    (THEME_LIGHT, "浅色"),
+    (THEME_DARK, "深色"),
+    (THEME_SYSTEM, "跟随系统"),
+    (THEME_MORE, "更多皮肤…"),
+];
+pub(super) fn picker_index(theme: Theme) -> usize {
+    match theme {
+        Theme::Light => 0,
+        Theme::Dark => 1,
+        Theme::System => 2,
+        _ => 3,
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ChromeTone {
     Quiet,
@@ -51,20 +74,17 @@ impl App {
             ChromeTone::Quiet => None,
         };
         if let Some(color) = background {
-            chrome_round(
-                dc,
-                rect,
-                color,
-                self.s(if matches!(tone, ChromeTone::Primary) {
-                    8
-                } else {
-                    6
-                }),
-            );
+            // Radius follows the control height so small header pills stay round.
+            let radius = if matches!(tone, ChromeTone::Primary) {
+                self.s(8)
+            } else {
+                ((rect.bottom - rect.top) / 4).clamp(self.s(4), self.s(6))
+            };
+            chrome_round(dc, rect, color, radius);
         }
         let color = match tone {
             ChromeTone::Selected => p.accent,
-            ChromeTone::Primary => p.bg,
+            ChromeTone::Primary => p.page,
             ChromeTone::Quiet => p.fg,
         };
         self.label(
@@ -91,8 +111,40 @@ impl App {
         smooth::icon(dc, rect, id, color, self.fonts.dpi as f32 / 96.0);
     }
 
+    /// Title-bar glyph at the compact header scale.
+    unsafe fn header_glyph(&self, dc: HDC, rect: RECT, id: usize, color: u32) {
+        let id = if id == MAXIMIZE && IsZoomed(self.hwnd) != 0 {
+            smooth::RESTORE
+        } else {
+            id
+        };
+        smooth::icon(
+            dc,
+            rect,
+            id,
+            color,
+            self.fonts.dpi as f32 / 96.0 * HEADER_ICON,
+        );
+    }
+
+    /// Caption buttons hit-test their full column; hover draws a pill matching the other icons.
+    unsafe fn caption_button(&mut self, dc: HDC, rect: RECT, id: usize, p: Palette) {
+        let middle = (rect.top + rect.bottom) / 2;
+        let pill = chrome_rect(
+            rect.left + self.s(4),
+            middle - self.s(13),
+            rect.right - self.s(4),
+            middle + self.s(13),
+        );
+        self.chrome_button(dc, "", pill, id, ChromeTone::Quiet, p);
+        if let Some(hit) = self.hits.last_mut() {
+            hit.rect = rect;
+        }
+        self.header_glyph(dc, rect, id, p.muted);
+    }
+
     pub(super) fn header_left(&self) -> i32 {
-        self.width - self.s(132) - self.s(260) - 1
+        self.width - self.s(CAPTION_BUTTON * 3) - self.s(ACTIONS_WIDTH) - 1
     }
 
     unsafe fn feather_mark(&self, dc: HDC, rect: RECT, color: u32) {
@@ -110,34 +162,35 @@ impl App {
     }
 
     pub(super) fn theme_menu_rect(&self) -> RECT {
-        let right = self.header_left() + self.s(216);
+        // Right-aligned with the appearance button.
+        let right = self.header_left() + self.s(192);
         // Stay below the native search EDIT HWND; parent painting cannot cover a child window.
         let gap = if self.edit_mode.is_some() { 56 } else { 6 };
         let top = self.s(HEADER_HEIGHT + gap);
-        chrome_rect(right - self.s(224), top, right, top + self.s(198))
+        chrome_rect(right - self.s(224), top, right, top + self.s(250))
     }
 
-    pub(super) fn header_tip(&self) -> Option<&'static str> {
+    pub(super) fn header_tip(&self) -> Option<String> {
         if self.theme_menu.is_some() || self.mouse.is_none_or(|(_, y)| y >= self.s(HEADER_HEIGHT)) {
             return None;
         }
-        Some(match self.hover? {
-            PREVIEW => "预览 · 阅读排版",
-            SOURCE => "源码 · Ctrl+R",
-            OPEN => "打开文档 · Ctrl+O",
-            FIND => "查找 · Ctrl+F",
-            SETTINGS => "更多选项",
-            THEME_PICKER => match self.settings.theme {
-                Theme::System => "外观：跟随系统 · Ctrl+T",
-                Theme::Light => "外观：浅色 · Ctrl+T",
-                Theme::Dark => "外观：深色 · Ctrl+T",
-                Theme::Sepia => "外观：护眼 · Ctrl+T",
-            },
-            MINIMIZE => "最小化",
-            MAXIMIZE => "最大化 / 还原",
-            EXIT => "关闭",
-            _ => return None,
-        })
+        Some(
+            match self.hover? {
+                PREVIEW => "预览 · 阅读排版",
+                SOURCE => "源码 · Ctrl+R",
+                OPEN => "打开文档 · Ctrl+O",
+                FIND => "查找 · Ctrl+F",
+                SETTINGS => "更多选项",
+                THEME_PICKER => {
+                    return Some(format!("外观：{} · Ctrl+T", skin_name(self.settings.theme)));
+                }
+                MINIMIZE => "最小化",
+                MAXIMIZE => "最大化 / 还原",
+                EXIT => "关闭",
+                _ => return None,
+            }
+            .to_string(),
+        )
     }
 
     pub(super) unsafe fn paint_header_overlay(&mut self, dc: HDC, p: Palette) {
@@ -180,22 +233,24 @@ impl App {
                 p.fg,
                 DT_SINGLELINE | DT_VCENTER,
             );
-            for (i, (id, text)) in [
-                (THEME_LIGHT, "浅色"),
-                (THEME_DARK, "深色"),
-                (THEME_SYSTEM, "跟随系统"),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let y = r.top + self.s(38 + i as i32 * 42);
+            for (i, (id, text)) in PICKER.into_iter().enumerate() {
+                // A divider separates the basic choices from the full skin gallery.
+                let gallery = id == THEME_MORE;
+                let y = r.top + self.s(38 + i as i32 * 42 + if gallery { 9 } else { 0 });
+                if gallery {
+                    Self::fill(
+                        dc,
+                        &chrome_rect(
+                            r.left + self.s(16),
+                            y - self.s(6),
+                            r.right - self.s(16),
+                            y - self.s(6) + 1,
+                        ),
+                        p.edge,
+                    );
+                }
                 let row = chrome_rect(r.left + self.s(7), y, r.right - self.s(7), y + self.s(38));
-                let selected = matches!(
-                    (id, self.settings.theme),
-                    (THEME_LIGHT, Theme::Light)
-                        | (THEME_DARK, Theme::Dark)
-                        | (THEME_SYSTEM, Theme::System)
-                );
+                let selected = i == picker_index(self.settings.theme);
                 if selected || i == focus || self.hover == Some(id) {
                     chrome_round(
                         dc,
@@ -213,7 +268,7 @@ impl App {
                         row.left + self.s(37),
                         row.bottom,
                     ),
-                    id,
+                    if gallery { smooth::PALETTE } else { id },
                     color,
                 );
                 self.label(
@@ -230,6 +285,23 @@ impl App {
                     color,
                     DT_SINGLELINE | DT_VCENTER,
                 );
+                if selected && gallery {
+                    // Name the active gallery skin beside its check mark.
+                    self.label(
+                        dc,
+                        skin_name(self.settings.theme),
+                        chrome_rect(
+                            row.left + self.s(118),
+                            row.top,
+                            row.right - self.s(30),
+                            row.bottom,
+                        ),
+                        11,
+                        false,
+                        p.muted,
+                        DT_SINGLELINE | DT_VCENTER | DT_RIGHT,
+                    );
+                }
                 if selected {
                     smooth::icon(
                         dc,
@@ -288,7 +360,7 @@ impl App {
             chrome_round(dc, r, p.fg, self.s(6));
             self.label(
                 dc,
-                text,
+                &text,
                 r,
                 11,
                 false,
@@ -303,15 +375,15 @@ impl App {
         let middle = HEADER_HEIGHT / 2;
         Self::fill(dc, &chrome_rect(1, 1, self.width - 1, bottom), p.panel);
         let left = self.header_left();
-        let controls_left = self.width - self.s(132) - 1;
+        let controls_left = self.width - self.s(CAPTION_BUTTON * 3) - 1;
         let brand = self.document.is_none() || self.width >= self.s(900);
         self.feather_mark(
             dc,
             chrome_rect(
-                self.s(16),
-                self.s(middle - 12),
-                self.s(40),
-                self.s(middle + 12),
+                self.s(14),
+                self.s(middle - 10),
+                self.s(34),
+                self.s(middle + 10),
             ),
             p.accent,
         );
@@ -319,23 +391,23 @@ impl App {
             self.label(
                 dc,
                 "FeatherMD",
-                chrome_rect(self.s(48), 1, self.s(142), bottom),
-                13,
+                chrome_rect(self.s(42), 1, self.s(130), bottom),
+                12,
                 true,
                 p.fg,
                 DT_SINGLELINE | DT_VCENTER,
             );
         }
         if !self.document_name.is_empty() {
-            let x = self.s(if brand { 161 } else { 52 });
+            let x = self.s(if brand { 146 } else { 44 });
             if brand {
                 Self::fill(
                     dc,
                     &chrome_rect(
-                        self.s(147),
-                        self.s(middle - 7),
-                        self.s(147) + 1,
-                        self.s(middle + 7),
+                        self.s(134),
+                        self.s(middle - 6),
+                        self.s(134) + 1,
+                        self.s(middle + 6),
                     ),
                     p.edge,
                 );
@@ -351,26 +423,27 @@ impl App {
                 DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
             );
         }
+        // Concentric radii: capsule 7, segments 5 with a 2 px inset.
         chrome_round(
             dc,
             chrome_rect(
                 left,
-                self.s(middle - 15),
-                left + self.s(76),
-                self.s(middle + 15),
+                self.s(middle - 13),
+                left + self.s(68),
+                self.s(middle + 13),
             ),
             p.code,
-            self.s(8),
+            self.s(7),
         );
         for (offset, id, selected) in [
             (2, PREVIEW, !self.settings.raw),
-            (38, SOURCE, self.settings.raw),
+            (34, SOURCE, self.settings.raw),
         ] {
             let rect = chrome_rect(
                 left + self.s(offset),
-                self.s(middle - 13),
-                left + self.s(offset + 36),
-                self.s(middle + 13),
+                self.s(middle - 11),
+                left + self.s(offset + 32),
+                self.s(middle + 11),
             );
             self.chrome_button(
                 dc,
@@ -384,29 +457,29 @@ impl App {
                 },
                 p,
             );
-            self.chrome_glyph(dc, rect, id, if selected { p.accent } else { p.muted });
+            self.header_glyph(dc, rect, id, if selected { p.accent } else { p.muted });
         }
         Self::fill(
             dc,
             &chrome_rect(
-                left + self.s(86),
-                self.s(middle - 7),
-                left + self.s(86) + 1,
-                self.s(middle + 7),
+                left + self.s(77),
+                self.s(middle - 6),
+                left + self.s(77) + 1,
+                self.s(middle + 6),
             ),
             p.edge,
         );
         for (offset, width, id) in [
-            (96, 36, OPEN),
-            (134, 36, FIND),
-            (172, 44, THEME_PICKER),
-            (218, 36, SETTINGS),
+            (86, 32, OPEN),
+            (122, 32, FIND),
+            (158, 34, THEME_PICKER),
+            (196, 32, SETTINGS),
         ] {
             let rect = chrome_rect(
                 left + self.s(offset),
-                self.s(middle - 15),
+                self.s(middle - 13),
                 left + self.s(offset + width),
-                self.s(middle + 15),
+                self.s(middle + 13),
             );
             self.chrome_button(
                 dc,
@@ -421,25 +494,26 @@ impl App {
                 p,
             );
             let glyph = if id == THEME_PICKER {
-                match self.settings.theme {
+                // Follows a live Settings draft as well as the saved preference.
+                match self.preview.map_or(self.settings.theme, |(theme, _)| theme) {
                     Theme::Light => THEME_LIGHT,
                     Theme::Dark => THEME_DARK,
                     Theme::System => THEME_SYSTEM,
-                    Theme::Sepia => THEME_SEPIA,
+                    _ => smooth::PALETTE,
                 }
             } else {
                 id
             };
             let mut icon = rect;
             if id == THEME_PICKER {
-                icon.right -= self.s(10);
+                icon.right -= self.s(9);
             }
-            self.chrome_glyph(dc, icon, glyph, p.muted);
+            self.header_glyph(dc, icon, glyph, p.muted);
             if id == THEME_PICKER {
-                self.chrome_glyph(
+                self.header_glyph(
                     dc,
                     chrome_rect(
-                        rect.right - self.s(15),
+                        rect.right - self.s(13),
                         rect.top,
                         rect.right - self.s(3),
                         rect.bottom,
@@ -450,10 +524,9 @@ impl App {
             }
         }
         for (index, id) in [MINIMIZE, MAXIMIZE, EXIT].into_iter().enumerate() {
-            let x = controls_left + self.s(index as i32 * 44);
-            let rect = chrome_rect(x, 1, x + self.s(44), bottom);
-            self.chrome_button(dc, "", rect, id, ChromeTone::Quiet, p);
-            self.chrome_window_icon(dc, rect, id, p.muted);
+            let x = controls_left + self.s(index as i32 * CAPTION_BUTTON);
+            let rect = chrome_rect(x, 1, x + self.s(CAPTION_BUTTON), bottom);
+            self.caption_button(dc, rect, id, p);
         }
         Self::fill(
             dc,
@@ -754,7 +827,7 @@ impl App {
             top + self.s(268),
         );
         self.chrome_button(dc, "", action, OPEN, ChromeTone::Primary, p);
-        let foreground = p.bg;
+        let foreground = p.page;
         self.chrome_glyph(
             dc,
             chrome_rect(
@@ -974,5 +1047,64 @@ impl App {
         let edge = CreateSolidBrush(p.edge);
         FrameRect(dc, &chrome_rect(0, 0, self.width, self.height), edge);
         DeleteObject(edge);
+    }
+
+    /// Book-like skins lay the reading column on a sheet; flat skins draw nothing.
+    pub(super) unsafe fn paint_page(&mut self, dc: HDC, p: Palette) {
+        if p.page == p.bg {
+            return;
+        }
+        let left = self.left();
+        let right = left + self.body_width();
+        // Leave the vertical scrollbar track (width - 20) and the sidebar uncovered.
+        let pad = self
+            .s(24)
+            .min(left - self.sidebar_width() - self.s(4))
+            .min(self.width - self.s(22) - right)
+            .max(0);
+        let sheet = chrome_rect(
+            left - pad,
+            self.content_top(),
+            right + pad,
+            self.content_bottom() - self.s(4),
+        );
+        if sheet.right <= sheet.left || sheet.bottom <= sheet.top {
+            return;
+        }
+        // A soft shadow below the sheet, then the paper itself.
+        chrome_round(
+            dc,
+            chrome_rect(
+                sheet.left,
+                sheet.top + self.s(2),
+                sheet.right,
+                sheet.bottom + self.s(2),
+            ),
+            p.edge,
+            self.s(6),
+        );
+        chrome_round(dc, sheet, p.page, self.s(6));
+        // Wide or narrow layouts without a real margin keep the plain sheet.
+        if let Some(rule) = p.ornament.filter(|_| pad >= self.s(12)) {
+            // Double ruled margins, as on a woodblock-printed page.
+            let inset = (pad / 2).max(self.s(4));
+            for (x, width) in [
+                (sheet.left + inset - self.s(4), self.s(2)),
+                (sheet.left + inset, 1),
+                (sheet.right - inset - 1, 1),
+                (sheet.right - inset + self.s(2), self.s(2)),
+            ] {
+                Self::fill(
+                    dc,
+                    &chrome_rect(
+                        x,
+                        sheet.top + self.s(10),
+                        x + width.max(1),
+                        sheet.bottom - self.s(10),
+                    ),
+                    rule,
+                );
+            }
+        }
     }
 }

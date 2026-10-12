@@ -1,7 +1,7 @@
 use feathermd::{
     document::{Document, PAGE_BYTES, SEGMENT_BYTES, SearchResult},
     markdown::{self, Fence, Kind},
-    settings::{Settings, Theme},
+    settings::{Editor, Settings, Theme},
 };
 use std::{
     fs::{self, File},
@@ -13,7 +13,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 #[test]
 fn system_theme_tracks_os_while_explicit_choices_stay_fixed() {
     assert_eq!(Settings::default().theme, Theme::System);
-    for theme in [Theme::System, Theme::Light, Theme::Dark, Theme::Sepia] {
+    for theme in Theme::ALL {
         let settings = Settings {
             theme,
             ..Settings::default()
@@ -29,6 +29,71 @@ fn system_theme_tracks_os_while_explicit_choices_stay_fixed() {
         }
     }
     assert_eq!(Settings::parse("theme=light").theme, Theme::Light);
+}
+#[test]
+fn skins_opacity_and_editor_roundtrip_with_safe_fallbacks() {
+    for (index, theme) in Theme::ALL.into_iter().enumerate() {
+        assert_eq!(theme.index(), index);
+        assert_eq!(Theme::from_key(theme.key()), Some(theme));
+        let parsed = Settings::parse(&format!("theme={}", theme.key()));
+        assert_eq!(parsed.theme, theme);
+    }
+    assert_eq!(Settings::parse("theme=neon").theme, Theme::System);
+    assert!(Theme::Midnight.is_dark() && Theme::Black.is_dark() && Theme::Dark.is_dark());
+    assert!(!Theme::Ancient.is_dark() && !Theme::System.is_dark());
+
+    assert_eq!(Settings::default().opacity, 100);
+    for (text, expected) in [
+        ("100", 100),
+        ("85", 85),
+        ("87", 85),
+        ("88", 90),
+        ("33", 35),
+        ("5", Settings::MIN_OPACITY),
+        ("-40", Settings::MIN_OPACITY),
+        ("250", 100),
+        ("70%", 70),
+    ] {
+        assert_eq!(
+            Settings::parse(&format!("opacity={text}")).opacity,
+            expected
+        );
+    }
+    assert_eq!(Settings::parse("opacity=half").opacity, 100);
+    // A UTF-8 BOM must not hide the first setting.
+    let bom = Settings::parse("\u{feff}theme=light\nfont_size=20");
+    assert_eq!((bom.theme, bom.font_size), (Theme::Light, 20));
+
+    assert_eq!(Settings::default().editor, Editor::System);
+    assert_eq!(Settings::parse("editor=notepad").editor, Editor::Notepad);
+    let program = r"C:\Program Files\Microsoft VS Code\Code.exe";
+    let s = Settings::parse(&format!("theme=ancient\nopacity=75\neditor={program}"));
+    assert_eq!(s.editor, Editor::Program(program.into()));
+    assert_eq!(Settings::parse(&s.serialize()), s);
+    let unicode = r"D:\工具 箱\编辑器=1\Edit.EXE";
+    assert_eq!(Editor::parse(unicode), Editor::Program(unicode.into()));
+    for bad in [
+        "Code.exe",
+        r"\\server\share\edit.exe",
+        r"C:relative\edit.exe",
+        r"C:\tools\edit.bat",
+        r"C:\tools\edit.exe:stream.exe",
+        "C:\\tools\\\"edit\".exe",
+        "C:\\tools\\edit\n.exe",
+        r"C:\tools\*.exe",
+        "C:/tools/edit.exe",
+        r"C:\.exe",
+    ] {
+        assert_eq!(Editor::parse(bad), Editor::System, "{bad:?}");
+    }
+    // A program set in code is validated again before it reaches the INI.
+    let injected = Settings {
+        editor: Editor::Program("C:\\a.exe\nraw=true".into()),
+        ..Settings::default()
+    };
+    let text = injected.serialize();
+    assert!(text.contains("\neditor=system\n"));
+    assert!(!Settings::parse(&text).raw);
 }
 struct Fixture(PathBuf);
 impl Fixture {

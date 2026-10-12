@@ -1,5 +1,19 @@
 # Progress / continuation notes
 
+## 2026-10-13 — v0.1.5 release candidate: right-click edit, skins and opacity, 34 px header
+
+- 作者/最后修改人：lianzy。用户需求：①正文右键增加编辑，设置界面可选默认编辑应用；②标题栏再矮一点，图标同步缩小、圆润无锯齿；③设置界面增加皮肤（书本、古籍、常用颜色）并支持调整透明度。
+- 右键菜单仅在正文区域出现（右键 / Shift+F10 / 菜单键）：用默认编辑应用打开（Ctrl+E）、选择编辑应用、复制、全选当前分页、查找、重新载入。文档以单个带引号参数传给编辑器，工作目录为文档所在文件夹；FeatherMD 仍只读。F5 重新载入保留源字节与换行行号。
+- 新设置窗口（更多 → 设置…，Ctrl+,）取代独立字体对话框：外观（12 款皮肤卡片、窗口不透明度 30–100%）/ 阅读（原字体字号，控件 id 不变）/ 编辑（系统默认、记事本、检测到的编辑器、浏览 EXE）。草稿保存才生效；皮肤与透明度实时预览，取消还原。设置窗口原生标题栏随草稿皮肤着色。
+- 皮肤：跟随系统、浅色、深色、护眼、书本、古籍、豆沙绿、天青、樱粉、雾灰、夜蓝、纯黑。书本/古籍在桌面底色上绘制纸页，古籍带朱砂双线栏。对比度脚本计算：正文 ≥ 9.8:1，次要文字 ≥ 4.3:1，链接 ≥ 4.7:1；护眼次要文字由 4.24 调到 5.06。
+- 标题栏 40 → 34 px，按钮 30 → 26 px，图标 0.86 倍。描边宽度取半像素、中心对齐像素网格，窗口按钮等矩形图标坐标取整；96/120/144 DPI 截图放大检查：直线清晰、曲线抗锯齿。
+- 修复：INI 以 UTF-8 BOM 保存时首个键被忽略（PowerShell 5 的 Set-Content 会写 BOM，ui-smoke 的“浅色”截图因此曾是深色）。含中文的冒烟脚本加 UTF-8 BOM，Windows PowerShell 5.1 才能正确解析。
+- 证据（120 DPI，MSVC release 783,360 B，FileVersion 0.1.5，--locked 构建）：fmt --check、clippy -D warnings、cargo test --locked（44 项，含 12 款皮肤对比度下限测试）全部通过；以下原生回归在交付 EXE 上运行：ui（GDI 35→35）、navigation headings 454/535、wrapped 449/504、scrollbar、window（51 项命中）、typography 浅/深（GDI 35→35）、about 浅/深（GDI 22→22）、settings 浅/深（GDI 35→35）、editor 冒烟全部 PASS。
+- wrapped 页数与 v0.1.4 记录的 473/523 不同；用 dist 中的 v0.1.4 EXE 在本机重跑同样得到 449/504，差异来自本机环境而非本次改动，原因未查明。
+- 实机可见窗口检查（短暂显示后关闭）：80% 不透明度下标题栏像素与桌面混合（F4F6F3 → C8CAC9），圆角裁切保持；设置窗口标题栏随书本皮肤着色。主窗口 DWMWA_BORDER_COLOR 改为边线色在本机像素逐字节无差别，已恢复为 DWMWA_COLOR_NONE。
+- Delivery: dist/FeatherMD.exe 783,360 字节（765 KiB），SHA-256 cc576f353784206352389aaa934ad3452d4b5425af7b466ec05562a332e73578；dist/FeatherMD-0.1.5-windows-x64.zip 874,161 字节，SHA-256 37029a56e5837ccdd7f2f75bf6f22764422f641f122039c86b14db61acc68140（新增 5 张截图）。构建、交付与 ZIP 内 EXE 哈希一致；早期 ZIP 均保留，此前的本地候选包改名为 0.1.5-candidate。全部 12 项原生回归针对交付 EXE 通过；演示文档首屏 80.99 ms 为单次本地小文件样本。
+- 限制：隐藏窗口 + 原生消息测试，非物理指针；Ctrl+E 需要真实键盘状态，未自动化；编辑器用 examples/editor_probe 替身，未启动真实编辑器或 Windows edit 动词；CI 上用 -AllowNoPopup 容许服务桌面不显示弹出菜单。未做多显示器 DPI 与 Windows 10 实机验证。用户确认后推送 GitHub，CI 通过后发布；发布记录见下一条。
+
 ## 2026-10-12 — v0.1.4 compact header and outline click highlight release candidate
 
 - 作者/最后修改人：lianzy。标题栏由 48 px 收窄为 40 px（逻辑像素）；搜索行、主题弹层、提示与目录面板随 HEADER_HEIGHT 联动。

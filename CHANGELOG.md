@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.5 — 2026-10-13
+
+### Added
+- Text context menu (right click, Shift+F10 or the Menu key, reading area only): edit with the default editor (Ctrl+E), choose editor, copy, select current page, find and reload.
+- Settings window (More → Settings…, Ctrl+,) with Appearance, Reading and Editor pages, replacing the separate font dialog. Drafts apply only on Save; skin and opacity preview live on the reader and are reverted by Cancel/Escape.
+- Twelve skins: follow system, light, dark, eye care, Book (paper sheet on a linen desk), Ancient (rice paper, ink, cinnabar and double ruled margins), bean green, sky, pink, gray, midnight blue and pure black. Every skin keeps body text at ≥ 9.8:1 and secondary text at ≥ 4.3:1 contrast.
+- Window opacity 30–100% in 5% steps (native trackbar, keyboard accessible); fully opaque windows are not layered.
+- Default editor: Windows edit verb with Notepad fallback, Notepad, detected VS Code / VSCodium / Cursor / Typora / MarkText / Notepad++ / Sublime Text / Zed / EmEditor, or any local .exe. The document is passed as one quoted argument with its folder as working directory; a missing editor offers to choose another.
+- The header picker gains a fourth "More skins…" row; gallery skins show a palette icon.
+- Native regressions: settings-smoke (skins, preview/cancel, opacity alpha, grid keys, persistence, GDI) and editor-smoke (stand-in editor, Unicode path quoting, real context menu label and keyboard launch, reload position, missing-editor prompt).
+
+### Changed
+- Title bar 40 → 34 px with icons scaled to match. Stroke widths snap to half pixels and centres to the pixel grid, so straight edges stay crisp while curves remain anti-aliased.
+- F5 keeps the source byte and wrapped row after reloading.
+- The eye-care skin's secondary text is slightly darker (5.1:1 instead of 4.2:1).
+
+### Fixed
+- Settings files saved as UTF-8 with a BOM (Notepad, Windows PowerShell 5) no longer drop their first key.
+- Smoke scripts containing Chinese text carry a UTF-8 BOM, so Windows PowerShell 5.1 parses them correctly.
+
 ## 0.1.4 — 2026-10-12
 
 ### Changed

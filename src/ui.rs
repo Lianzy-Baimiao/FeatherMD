@@ -2,15 +2,15 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 mod about;
 mod chrome;
+mod preferences;
 mod smooth;
 mod snapshot;
-mod typography;
 use crate::layout::{FontKey, Fonts, Layout, Row};
 use feathermd::{
     document::{Document, Page, SearchResult, human_size},
     markdown,
     scrollbar::ScrollTrack,
-    settings::{Settings, Theme},
+    settings::{Editor, Settings, Theme},
     viewport::Viewport,
     worker::{Reply, Request, SearchRequest, Workers},
 };
@@ -27,7 +27,13 @@ use std::{
 use windows_sys::Win32::{
     Foundation::*,
     Graphics::{Dwm::*, Gdi::*},
-    System::{DataExchange::*, LibraryLoader::*, Memory::*, Registry::*},
+    System::{
+        Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize},
+        DataExchange::*,
+        LibraryLoader::*,
+        Memory::*,
+        Registry::*,
+    },
     UI::{
         Controls::{Dialogs::*, WM_MOUSELEAVE},
         HiDpi::*,
@@ -42,6 +48,8 @@ const GOTO: usize = 103;
 const RELOAD: usize = 104;
 const COPY: usize = 105;
 const EXIT: usize = 106;
+const EDIT_DOCUMENT: usize = 107;
+const SELECT_ALL: usize = 108;
 const THEME: usize = 201;
 const ZOOM_IN: usize = 202;
 const ZOOM_OUT: usize = 203;
@@ -53,6 +61,7 @@ const THEME_LIGHT: usize = 208;
 const THEME_DARK: usize = 209;
 const THEME_SYSTEM: usize = 210;
 const THEME_SEPIA: usize = 211;
+const THEME_MORE: usize = 212;
 const REGISTER: usize = 301;
 const UNREGISTER: usize = 302;
 const DEFAULT_APP: usize = 303;
@@ -70,8 +79,15 @@ const OUTLINE: usize = 411;
 const THEME_PICKER: usize = 412;
 const THEME_PANEL: usize = 413;
 const TYPOGRAPHY: usize = 414;
-const HEADER_HEIGHT: i32 = 40;
+const PREFERENCES: usize = 415;
+const EDITOR_SETTINGS: usize = 416;
+const HEADER_HEIGHT: i32 = 34;
 const OUTLINE_ROWS_TOP: i32 = HEADER_HEIGHT + 56;
+/// Posted to open Settings once the App borrow is released; WPARAM is the page.
+const OPEN_PREFERENCES: u32 = WM_APP + 44;
+/// Sent by Settings for live skin/opacity drafts. WPARAM: theme index or
+/// usize::MAX to clear the draft; LPARAM: opacity percent.
+const PREVIEW_APPEARANCE: u32 = WM_APP + 45;
 const fn make_resource(id: u16) -> *const u16 {
     id as usize as *const u16
 }
@@ -107,41 +123,178 @@ struct Palette {
     accent: u32,
     selection: u32,
     code: u32,
+    /// Reading column. Equal to `bg` for flat skins; book-like skins lay a sheet on a desk.
+    page: u32,
+    /// Ruled column lines for the Ancient skin.
+    ornament: Option<u32>,
 }
 impl Palette {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "One positional constructor keeps twelve palettes scannable"
+    )]
+    const fn flat(
+        bg: u32,
+        fg: u32,
+        muted: u32,
+        panel: u32,
+        edge: u32,
+        accent: u32,
+        selection: u32,
+        code: u32,
+    ) -> Self {
+        Self {
+            bg,
+            fg,
+            muted,
+            panel,
+            edge,
+            accent,
+            selection,
+            code,
+            page: bg,
+            ornament: None,
+        }
+    }
     fn new(theme: Theme) -> Self {
         match theme {
-            Theme::Light | Theme::System => Self {
-                bg: rgb(252, 252, 250),
-                fg: rgb(35, 43, 48),
-                muted: rgb(108, 117, 124),
-                panel: rgb(244, 246, 243),
-                edge: rgb(224, 229, 225),
-                accent: rgb(20, 113, 99),
-                selection: rgb(215, 236, 228),
-                code: rgb(239, 242, 238),
+            Theme::Light | Theme::System => Self::flat(
+                rgb(252, 252, 250),
+                rgb(35, 43, 48),
+                rgb(108, 117, 124),
+                rgb(244, 246, 243),
+                rgb(224, 229, 225),
+                rgb(20, 113, 99),
+                rgb(215, 236, 228),
+                rgb(239, 242, 238),
+            ),
+            Theme::Dark => Self::flat(
+                rgb(25, 29, 34),
+                rgb(222, 229, 233),
+                rgb(147, 160, 168),
+                rgb(31, 37, 42),
+                rgb(49, 58, 65),
+                rgb(112, 211, 181),
+                rgb(42, 79, 72),
+                rgb(35, 42, 48),
+            ),
+            Theme::Sepia => Self::flat(
+                rgb(247, 239, 221),
+                rgb(68, 57, 42),
+                rgb(116, 99, 75),
+                rgb(241, 230, 208),
+                rgb(220, 205, 177),
+                rgb(131, 91, 44),
+                rgb(228, 212, 172),
+                rgb(237, 225, 199),
+            ),
+            // Warm paper on a linen desk, leather-brown accent.
+            Theme::Book => Self {
+                page: rgb(250, 247, 240),
+                ..Self::flat(
+                    rgb(226, 221, 211),
+                    rgb(43, 40, 36),
+                    rgb(104, 96, 86),
+                    rgb(236, 232, 224),
+                    rgb(204, 197, 185),
+                    rgb(122, 74, 48),
+                    rgb(232, 217, 196),
+                    rgb(241, 236, 226),
+                )
             },
-            Theme::Dark => Self {
-                bg: rgb(25, 29, 34),
-                fg: rgb(222, 229, 233),
-                muted: rgb(147, 160, 168),
-                panel: rgb(31, 37, 42),
-                edge: rgb(49, 58, 65),
-                accent: rgb(112, 211, 181),
-                selection: rgb(42, 79, 72),
-                code: rgb(35, 42, 48),
+            // Aged rice paper, ink and cinnabar, with faint ruled columns.
+            Theme::Ancient => Self {
+                page: rgb(236, 224, 197),
+                ornament: Some(rgb(205, 150, 124)),
+                ..Self::flat(
+                    rgb(212, 195, 160),
+                    rgb(48, 38, 28),
+                    rgb(92, 72, 50),
+                    rgb(222, 206, 174),
+                    rgb(186, 163, 124),
+                    rgb(158, 52, 36),
+                    rgb(224, 197, 160),
+                    rgb(228, 214, 184),
+                )
             },
-            Theme::Sepia => Self {
-                bg: rgb(247, 239, 221),
-                fg: rgb(68, 57, 42),
-                muted: rgb(128, 111, 86),
-                panel: rgb(241, 230, 208),
-                edge: rgb(220, 205, 177),
-                accent: rgb(131, 91, 44),
-                selection: rgb(228, 212, 172),
-                code: rgb(237, 225, 199),
-            },
+            Theme::Green => Self::flat(
+                rgb(204, 232, 207),
+                rgb(31, 52, 38),
+                rgb(70, 98, 79),
+                rgb(192, 223, 196),
+                rgb(167, 203, 172),
+                rgb(26, 110, 72),
+                rgb(170, 214, 182),
+                rgb(190, 222, 195),
+            ),
+            Theme::Sky => Self::flat(
+                rgb(236, 244, 251),
+                rgb(28, 44, 61),
+                rgb(84, 103, 124),
+                rgb(225, 236, 246),
+                rgb(200, 216, 232),
+                rgb(28, 99, 173),
+                rgb(204, 224, 245),
+                rgb(222, 233, 244),
+            ),
+            Theme::Pink => Self::flat(
+                rgb(252, 240, 242),
+                rgb(61, 36, 44),
+                rgb(126, 90, 101),
+                rgb(246, 229, 233),
+                rgb(232, 203, 211),
+                rgb(176, 58, 96),
+                rgb(244, 212, 222),
+                rgb(244, 226, 231),
+            ),
+            Theme::Gray => Self::flat(
+                rgb(232, 234, 236),
+                rgb(37, 40, 44),
+                rgb(90, 96, 104),
+                rgb(222, 225, 228),
+                rgb(200, 204, 209),
+                rgb(64, 96, 140),
+                rgb(203, 212, 226),
+                rgb(220, 223, 227),
+            ),
+            Theme::Midnight => Self::flat(
+                rgb(20, 27, 45),
+                rgb(214, 222, 240),
+                rgb(140, 153, 180),
+                rgb(26, 34, 56),
+                rgb(44, 55, 84),
+                rgb(130, 170, 255),
+                rgb(41, 59, 102),
+                rgb(30, 39, 64),
+            ),
+            // True black for OLED; slightly dimmed text avoids glare.
+            Theme::Black => Self::flat(
+                rgb(0, 0, 0),
+                rgb(220, 220, 220),
+                rgb(150, 150, 150),
+                rgb(14, 14, 14),
+                rgb(42, 42, 42),
+                rgb(232, 168, 76),
+                rgb(56, 46, 30),
+                rgb(20, 20, 20),
+            ),
         }
+    }
+}
+fn skin_name(theme: Theme) -> &'static str {
+    match theme {
+        Theme::System => "跟随系统",
+        Theme::Light => "浅色",
+        Theme::Dark => "深色",
+        Theme::Sepia => "护眼",
+        Theme::Book => "书本",
+        Theme::Ancient => "古籍",
+        Theme::Green => "豆沙绿",
+        Theme::Sky => "天青",
+        Theme::Pink => "樱粉",
+        Theme::Gray => "雾灰",
+        Theme::Midnight => "夜蓝",
+        Theme::Black => "纯黑",
     }
 }
 #[derive(Clone, PartialEq, Eq)]
@@ -221,6 +374,10 @@ struct App {
     query: String,
     found: Option<u64>,
     search_ticket: u64,
+    /// Unsaved skin/opacity draft from the open Settings dialog.
+    preview: Option<(Theme, u8)>,
+    /// F5 restores this source byte and wrapped row once the reopened document is ready.
+    reload_anchor: Option<(u64, usize)>,
 }
 impl App {
     fn new() -> Self {
@@ -273,10 +430,54 @@ impl App {
             query: String::new(),
             found: None,
             search_ticket: 0,
+            preview: None,
+            reload_anchor: None,
         }
     }
     fn s(&self, n: i32) -> i32 {
         self.fonts.scale(n)
+    }
+    /// The resolved skin currently on screen, including an unsaved Settings draft.
+    fn active_theme(&self) -> Theme {
+        self.preview
+            .map_or(self.settings.theme, |(theme, _)| theme)
+            .resolve(self.system_dark)
+    }
+    fn palette(&self) -> Palette {
+        Palette::new(self.active_theme())
+    }
+    fn opacity(&self) -> u8 {
+        self.preview
+            .map_or(self.settings.opacity, |(_, opacity)| opacity)
+    }
+    /// Whole-window opacity. Fully opaque windows drop WS_EX_LAYERED entirely.
+    unsafe fn apply_opacity(&self) {
+        let percent = Settings::clamp_opacity(i64::from(self.opacity()));
+        let style = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE) as u32;
+        if percent >= 100 {
+            if style & WS_EX_LAYERED != 0 {
+                SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, (style & !WS_EX_LAYERED) as isize);
+                RedrawWindow(
+                    self.hwnd,
+                    null(),
+                    null_mut(),
+                    RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN,
+                );
+            }
+            return;
+        }
+        if style & WS_EX_LAYERED == 0 {
+            SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, (style | WS_EX_LAYERED) as isize);
+        }
+        let alpha = ((u32::from(percent) * 255 + 50) / 100) as u8;
+        SetLayeredWindowAttributes(self.hwnd, 0, alpha, LWA_ALPHA);
+    }
+    fn reading_area(&self, x: i32, y: i32) -> bool {
+        self.document.is_some()
+            && x >= self.sidebar_width()
+            && x < self.width - self.s(22)
+            && y >= self.content_top()
+            && y < self.content_bottom()
     }
     fn content_top(&self) -> i32 {
         let gap = if self.edit_mode.is_some() { 56 } else { 8 };
@@ -398,6 +599,7 @@ impl App {
         InvalidateRect(self.hwnd, null(), 0);
     }
     unsafe fn open(&mut self, path: PathBuf) {
+        self.reload_anchor = None;
         self.outline_ticket = self.workers.cancel_outline();
         self.outline = None;
         self.outline_loading = false;
@@ -478,14 +680,29 @@ impl App {
                     self.loading = false;
                     match result {
                         Ok((doc, page)) => {
+                            let size = doc.size;
                             self.document = Some(doc);
                             self.page = Some(page);
                             self.anchor = 0;
                             self.status = "就绪".into();
                             self.relayout(0);
                             self.start_outline();
+                            // F5 after an external edit keeps the reader near the same place.
+                            if let Some((anchor, wrapped_row)) = self.reload_anchor.take()
+                                && (anchor > 0 || wrapped_row > 0)
+                            {
+                                let anchor = anchor.min(size.saturating_sub(1));
+                                self.jump(anchor);
+                                if self.loading {
+                                    self.pending_scroll = Some((wrapped_row, 0));
+                                } else {
+                                    self.position(anchor, wrapped_row);
+                                    self.status = "已重新载入".into();
+                                }
+                            }
                         }
                         Err(e) => {
+                            self.reload_anchor = None;
                             self.status = format!("打开失败：{e}");
                             self.error(&format!("无法打开文件。\n\n{e}"));
                         }
@@ -847,13 +1064,37 @@ impl App {
         self.invalidate();
         InvalidateRect(self.edit, null(), 1);
     }
+    /// Apply a saved Settings draft. Only fields owned by the dialog are copied,
+    /// so commands handled while it was open are not overwritten.
+    unsafe fn apply_preferences(&mut self, draft: Settings) {
+        let reflow = draft.font_family != self.settings.font_family
+            || draft.font_size != self.settings.font_size;
+        if draft.font_family != self.settings.font_family {
+            self.reading_fonts = Fonts::with_family(self.fonts.dpi, &draft.font_family);
+        }
+        self.settings.font_family = draft.font_family;
+        self.settings.font_size = draft.font_size;
+        self.settings.theme = draft.theme;
+        self.settings.opacity = draft.opacity;
+        self.settings.editor = draft.editor;
+        self.preview = None;
+        self.system_dark = system_uses_dark_theme();
+        self.apply_opacity();
+        if reflow {
+            self.persist();
+        } else {
+            // Skin, opacity and editor never change layout or the wrapped-row position.
+            self.save_preferences();
+            self.invalidate();
+        }
+        InvalidateRect(self.edit, null(), 1);
+    }
     unsafe fn update_checks(&self) {
         for (id, checked) in [
             (WRAP, self.settings.wrap),
             (RAW, self.settings.raw),
             (WIDE, self.settings.wide),
             (OUTLINE, self.settings.outline),
-            (THEME_SEPIA, self.settings.theme == Theme::Sepia),
         ] {
             CheckMenuItem(
                 self.menu,
@@ -1071,6 +1312,121 @@ impl App {
         }
         self.error("已加入打开方式，但无法打开 Windows 默认应用设置。\n请右键 .md 文件 → 打开方式 → 选择其他应用 → FeatherMD → 始终使用。");
     }
+    fn edit_label(&self) -> String {
+        match &self.settings.editor {
+            Editor::System => "编辑（系统默认）\tCtrl+E".into(),
+            Editor::Notepad => "用记事本编辑\tCtrl+E".into(),
+            editor => format!("用 {} 编辑\tCtrl+E", crate::editor::name(editor)),
+        }
+    }
+    /// Hand the open document to the chosen editor. The reader itself stays read-only.
+    unsafe fn edit_document(&mut self) {
+        let Some(path) = self.document.as_ref().map(|d| d.path.clone()) else {
+            self.status = "请先打开文档".into();
+            return;
+        };
+        let editor = self.settings.editor.clone();
+        match crate::editor::launch(&editor, self.hwnd, &path) {
+            Ok(launched) => {
+                let name = match (&editor, launched) {
+                    (_, crate::editor::Launched::NotepadFallback) => {
+                        "记事本（系统未登记编辑方式）".to_string()
+                    }
+                    (Editor::System, _) => "系统默认编辑器".to_string(),
+                    (editor, _) => crate::editor::name(editor),
+                };
+                self.status = format!("已用 {name} 打开 · 保存后按 F5 重新载入");
+            }
+            Err(crate::editor::LaunchError::MissingProgram(program)) => {
+                self.status = "找不到默认编辑应用".into();
+                if MessageBoxW(
+                    self.hwnd,
+                    w(&format!(
+                        "找不到默认编辑应用：\n{program}\n\n现在重新选择编辑应用吗？"
+                    ))
+                    .as_ptr(),
+                    w("编辑").as_ptr(),
+                    MB_YESNO | MB_ICONWARNING,
+                ) == IDYES
+                {
+                    PostMessageW(self.hwnd, OPEN_PREFERENCES, 2, 0);
+                }
+            }
+            Err(crate::editor::LaunchError::Failed(error)) => {
+                self.status = "无法启动编辑应用".into();
+                self.error(&format!("无法打开编辑应用。\n\n{error}"));
+            }
+        }
+        self.invalidate();
+    }
+    /// The context menu is built fresh so its labels describe the current state.
+    unsafe fn context_menu(&self) -> HMENU {
+        let menu = CreatePopupMenu();
+        let document = self.document.is_some();
+        let state = |enabled: bool| MF_STRING | if enabled { 0 } else { MF_GRAYED };
+        AppendMenuW(
+            menu,
+            state(document),
+            EDIT_DOCUMENT,
+            w(&self.edit_label()).as_ptr(),
+        );
+        add(menu, EDITOR_SETTINGS, "选择编辑应用…");
+        AppendMenuW(menu, MF_SEPARATOR, 0, null());
+        AppendMenuW(
+            menu,
+            state(self.layout.is_some()),
+            COPY,
+            w(if self.selection.is_some() {
+                "复制选中行\tCtrl+C"
+            } else {
+                "复制可见内容\tCtrl+C"
+            })
+            .as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            state(self.layout.is_some()),
+            SELECT_ALL,
+            w("全选当前分页\tCtrl+A").as_ptr(),
+        );
+        AppendMenuW(menu, MF_SEPARATOR, 0, null());
+        AppendMenuW(menu, state(document), FIND, w("查找…\tCtrl+F").as_ptr());
+        AppendMenuW(menu, state(document), RELOAD, w("重新载入\tF5").as_ptr());
+        if document {
+            SetMenuDefaultItem(menu, EDIT_DOCUMENT as u32, 0);
+        }
+        menu
+    }
+    /// Screen position for WM_CONTEXTMENU, or None when the point is outside the text.
+    unsafe fn context_point(&self, lp: LPARAM) -> Option<POINT> {
+        if lp as i32 == -1 {
+            // Shift+F10 / Menu key: anchor to the selection or the first visible line.
+            self.document.as_ref()?;
+            let row = self
+                .selection
+                .map(|(a, b)| a.min(b))
+                .filter(|row| *row >= self.top)
+                .unwrap_or(self.top);
+            let y = self
+                .hits
+                .iter()
+                .find(|h| h.action == Hit::Row(row))
+                .map_or(self.content_top() + self.s(24), |h| h.rect.top + self.s(8));
+            let mut point = POINT {
+                x: self.left() + self.s(24),
+                y: y.min(self.content_bottom() - self.s(8)),
+            };
+            ClientToScreen(self.hwnd, &mut point);
+            return Some(point);
+        }
+        let mut point = POINT {
+            x: lp as u16 as i16 as i32,
+            y: (lp >> 16) as u16 as i16 as i32,
+        };
+        let screen = point;
+        ScreenToClient(self.hwnd, &mut point);
+        self.reading_area(point.x, point.y).then_some(screen)
+    }
     #[allow(
         clippy::collapsible_match,
         reason = "Keep user-confirmation side effects inside the selected command"
@@ -1087,14 +1443,22 @@ impl App {
                 self.theme_menu = if self.theme_menu.is_some() {
                     None
                 } else {
-                    Some(match self.settings.theme {
-                        Theme::Light => 0,
-                        Theme::Dark => 1,
-                        _ => 2,
-                    })
+                    Some(chrome::picker_index(self.settings.theme))
                 };
             }
             THEME_PANEL => {}
+            THEME_MORE | PREFERENCES => {
+                PostMessageW(self.hwnd, OPEN_PREFERENCES, 0, 0);
+            }
+            EDITOR_SETTINGS => {
+                PostMessageW(self.hwnd, OPEN_PREFERENCES, 2, 0);
+            }
+            EDIT_DOCUMENT => self.edit_document(),
+            SELECT_ALL => {
+                if let Some(l) = &self.layout {
+                    self.selection = Some((0, l.rows.len().saturating_sub(1)));
+                }
+            }
 
             OUTLINE => self.toggle_outline(),
             MINIMIZE => {
@@ -1142,15 +1506,17 @@ impl App {
             RELOAD => {
                 if let Some(doc) = &self.document {
                     let p = doc.path.clone();
+                    let anchor = (self.current(), self.wrapped_row(self.top));
                     self.open(p);
+                    self.reload_anchor = Some(anchor);
                 }
             }
             THEME => {
+                // Legacy cycle through the basic skins; gallery skins return to light.
                 self.settings.theme = match self.settings.theme {
-                    Theme::System => Theme::Light,
                     Theme::Light => Theme::Dark,
                     Theme::Dark => Theme::Sepia,
-                    Theme::Sepia => Theme::Light,
+                    _ => Theme::Light,
                 };
                 self.persist_theme();
             }
@@ -1228,7 +1594,7 @@ impl App {
                 }
             }
             TYPOGRAPHY => {
-                PostMessageW(self.hwnd, WM_APP + 44, 0, 0);
+                PostMessageW(self.hwnd, OPEN_PREFERENCES, 1, 0);
             }
             ABOUT => {
                 // Enter the modal loop only after the current App borrow has been released.
@@ -1245,21 +1611,22 @@ impl App {
         }
         if let Some(index) = self.theme_menu {
             if !ctrl {
+                let rows = chrome::PICKER.len();
                 match key {
                     0x1b => self.theme_menu = None,
-                    0x26 => self.theme_menu = Some((index + 2) % 3),
+                    0x26 => self.theme_menu = Some((index + rows - 1) % rows),
                     0x28 | 0x09 => {
                         self.theme_menu = Some(
                             (index
                                 + if key == 0x09 && GetKeyState(VK_SHIFT as i32) < 0 {
-                                    2
+                                    rows - 1
                                 } else {
                                     1
                                 })
-                                % 3,
+                                % rows,
                         )
                     }
-                    0x0d | 0x20 => self.command([THEME_LIGHT, THEME_DARK, THEME_SYSTEM][index]),
+                    0x0d | 0x20 => self.command(chrome::PICKER[index.min(rows - 1)].0),
                     _ => {}
                 }
                 self.invalidate();
@@ -1276,12 +1643,9 @@ impl App {
                 0x43 => self.command(COPY),
                 0x52 => self.command(RAW),
                 0x42 => self.command(OUTLINE),
-                0x41 => {
-                    if let Some(l) = &self.layout {
-                        self.selection = Some((0, l.rows.len().saturating_sub(1)));
-                        self.invalidate();
-                    }
-                }
+                0x45 => self.command(EDIT_DOCUMENT),
+                0xbc => self.command(PREFERENCES),
+                0x41 => self.command(SELECT_ALL),
                 0xbb | 0x6b => self.command(ZOOM_IN),
                 0xbd | 0x6d => self.command(ZOOM_OUT),
                 0x30 => self.command(RESET),
@@ -1364,7 +1728,7 @@ impl App {
         let dc = CreateCompatibleDC(target);
         let bitmap = CreateCompatibleBitmap(target, self.width.max(1), self.height.max(1));
         let old_bitmap = SelectObject(dc, bitmap);
-        let p = Palette::new(self.settings.theme.resolve(self.system_dark));
+        let p = self.palette();
         let all = RECT {
             left: 0,
             top: 0,
@@ -1398,6 +1762,7 @@ impl App {
             let body_width = self.body_width();
             let mut y = self.content_top() + self.s(12);
             let bottom = self.content_bottom();
+            self.paint_page(dc, p);
             if let Some(layout) = &self.layout {
                 let saved = SaveDC(dc);
                 IntersectClipRect(dc, left, y, left + body_width, bottom);
@@ -1572,20 +1937,65 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     if ptr.is_null() {
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
-    if msg == WM_APP + 44 {
+    if msg == OPEN_PREFERENCES {
         if IsWindowEnabled(hwnd) != 0 {
             let settings = (*ptr).try_borrow().ok().map(|app| app.settings.clone());
-            if let Some(settings) = settings
-                && let Some((family, size)) = typography::choose(hwnd, &settings)
-                && let Ok(mut app) = (*ptr).try_borrow_mut()
-                && (app.settings.font_family != family || app.settings.font_size != size)
-            {
-                app.settings.font_family = family;
-                app.settings.font_size = size;
-                app.reading_fonts = Fonts::with_family(app.fonts.dpi, &app.settings.font_family);
-                app.persist();
-                app.invalidate();
+            if let Some(settings) = settings {
+                // No App borrow may cross the modal loop; drafts arrive as PREVIEW_APPEARANCE.
+                let saved = preferences::show(hwnd, &settings, wp.min(2));
+                if let Ok(mut app) = (*ptr).try_borrow_mut() {
+                    match saved {
+                        Some(draft) => app.apply_preferences(draft),
+                        None => {
+                            app.preview = None;
+                            app.apply_opacity();
+                            app.invalidate();
+                            InvalidateRect(app.edit, null(), 1);
+                        }
+                    }
+                }
             }
+        }
+        return 0;
+    }
+    if msg == PREVIEW_APPEARANCE {
+        if let Ok(mut app) = (*ptr).try_borrow_mut() {
+            app.preview = Theme::ALL
+                .get(wp)
+                .map(|theme| (*theme, Settings::clamp_opacity(lp as i64)));
+            app.apply_opacity();
+            app.invalidate();
+            InvalidateRect(app.edit, null(), 1);
+        }
+        return 0;
+    }
+    if msg == WM_CONTEXTMENU && hwnd == wp as HWND {
+        // Build while borrowed, then release App before TrackPopupMenu's modal loop.
+        let menu = (*ptr).try_borrow_mut().ok().and_then(|mut app| {
+            let point = app.context_point(lp)?;
+            app.theme_menu = None;
+            app.tooltip_visible = false;
+            app.hover_since = None;
+            app.pressed = None;
+            Some((app.context_menu(), point))
+        });
+        let Some((menu, point)) = menu else {
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        };
+        let selected = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            point.x,
+            point.y,
+            0,
+            hwnd,
+            null(),
+        );
+        DestroyMenu(menu);
+        if selected > 0
+            && let Ok(mut app) = (*ptr).try_borrow_mut()
+        {
+            app.command(selected as usize);
         }
         return 0;
     }
@@ -1647,19 +2057,32 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             35 => app.sidebar_width() as isize,
             36 => app.outline_top as isize,
             38 => app.settings.raw as isize,
-            39 => match app.settings.theme {
-                Theme::System => 0,
-                Theme::Light => 1,
-                Theme::Dark => 2,
-                Theme::Sepia => 3,
-            },
-            40 => (app.settings.theme.resolve(app.system_dark) == Theme::Dark) as isize,
+            // Saved skin index in Theme::ALL order (0 system, 1 light, 2 dark, 3 sepia, ...).
+            39 => app.settings.theme.index() as isize,
+            40 => app.active_theme().is_dark() as isize,
             41 => app.system_dark as isize,
             42 => app.theme_menu.map_or(-1, |i| i as isize),
             43 => app.tooltip_visible as isize,
             44 => app.hover.map_or(-1, |id| id as isize),
             45 => app.theme_menu_rect().top as isize,
             46 => app.outline_active().map_or(-1, |i| i as isize),
+            // On-screen skin including an unsaved Settings draft; -1 when none.
+            47 => app.preview.map_or(-1, |(theme, _)| theme.index() as isize),
+            // Applied window alpha (255 when not layered).
+            48 => {
+                let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+                let mut alpha = 255u8;
+                if style & WS_EX_LAYERED != 0 {
+                    let mut flags = 0;
+                    GetLayeredWindowAttributes(hwnd, null_mut(), &mut alpha, &mut flags);
+                }
+                alpha as isize
+            }
+            49 => app.s(HEADER_HEIGHT) as isize,
+            // Whether a right-click at client point LPARAM would open the text menu.
+            50 => {
+                app.reading_area(lp as u16 as i16 as i32, (lp >> 16) as u16 as i16 as i32) as isize
+            }
             37 => app
                 .outline
                 .as_ref()
@@ -1971,9 +2394,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 app.hover_since = hover.map(|_| Instant::now());
                 app.tooltip_visible = false;
                 if app.theme_menu.is_some()
-                    && let Some(index) = [THEME_LIGHT, THEME_DARK, THEME_SYSTEM]
-                        .iter()
-                        .position(|id| Some(*id) == hover)
+                    && let Some(index) =
+                        chrome::PICKER.iter().position(|(id, _)| Some(*id) == hover)
                 {
                     app.theme_menu = Some(index);
                 }
@@ -2097,7 +2519,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             1
         }
         WM_CTLCOLOREDIT => {
-            let p = Palette::new(app.settings.theme.resolve(app.system_dark));
+            let p = app.palette();
             SetTextColor(wp as HDC, p.fg);
             SetBkColor(wp as HDC, p.bg);
             SetDCBrushColor(wp as HDC, p.bg);
@@ -2147,10 +2569,12 @@ unsafe fn menus() -> (HMENU, HMENU) {
     }
     AppendMenuW(menu, MF_POPUP, file as usize, w("文件(&F)").as_ptr());
     let settings = CreatePopupMenu();
+    add(settings, PREFERENCES, "设置…\tCtrl+,");
+    add(settings, EDIT_DOCUMENT, "用默认编辑应用打开\tCtrl+E");
+    AppendMenuW(settings, MF_SEPARATOR, 0, null());
     for (id, text) in [
         (GOTO, "跳转到百分比…\tCtrl+G"),
         (OUTLINE, "显示目录\tCtrl+B"),
-        (THEME_SEPIA, "护眼配色"),
         (TYPOGRAPHY, "字体与默认字号…"),
         (ZOOM_IN, "放大字号\tCtrl++"),
         (ZOOM_OUT, "缩小字号\tCtrl+-"),
@@ -2186,6 +2610,11 @@ unsafe fn menus() -> (HMENU, HMENU) {
 pub fn run(path: Option<PathBuf>) -> Result<(), String> {
     unsafe {
         let _graphics = smooth::Session::start()?;
+        // ShellExecuteEx may use shell extensions that require an STA thread.
+        let com = CoInitializeEx(
+            null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        );
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let instance = GetModuleHandleW(null());
         let class = w("FeatherMD.Native.Reader");
@@ -2279,6 +2708,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             if let Some(path) = path {
                 a.open(path);
             }
+            a.apply_opacity();
         }
         let no_border = 0xffff_fffe_u32;
         DwmSetWindowAttribute(
@@ -2319,7 +2749,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
                     continue;
                 }
                 if GetKeyState(VK_CONTROL as i32) < 0
-                    && matches!(msg.wParam, 0x4f | 0x46 | 0x47 | 0x54)
+                    && matches!(msg.wParam, 0x4f | 0x46 | 0x47 | 0x54 | 0x45 | 0xbc)
                 {
                     a.keyboard(msg.wParam, true);
                     continue;
@@ -2329,6 +2759,47 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             DispatchMessageW(&msg);
         }
         DestroyMenu(menu);
+        if com >= 0 {
+            CoUninitialize();
+        }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// WCAG relative-luminance contrast of two COLORREF values.
+    fn contrast(a: u32, b: u32) -> f64 {
+        let luminance = |c: u32| {
+            let channel = |v: u32| {
+                let v = f64::from(v & 255) / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(c) + 0.7152 * channel(c >> 8) + 0.0722 * channel(c >> 16)
+        };
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+    #[test]
+    fn every_skin_keeps_readable_contrast() {
+        for theme in Theme::ALL {
+            let p = Palette::new(theme.resolve(false));
+            let name = skin_name(theme);
+            assert!(contrast(p.fg, p.page) >= 9.8, "{name} body text");
+            assert!(contrast(p.fg, p.panel) >= 7.0, "{name} chrome text");
+            assert!(contrast(p.fg, p.code) >= 7.0, "{name} code rows");
+            assert!(contrast(p.fg, p.selection) >= 4.5, "{name} selected text");
+            assert!(contrast(p.muted, p.page) >= 4.5, "{name} secondary text");
+            assert!(contrast(p.muted, p.panel) >= 4.3, "{name} footer text");
+            assert!(contrast(p.accent, p.page) >= 4.5, "{name} links");
+            // The primary button draws page-coloured text on the accent.
+            assert!(contrast(p.page, p.accent) >= 4.5, "{name} primary button");
+            assert!(!skin_name(theme).is_empty());
+        }
     }
 }

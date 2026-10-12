@@ -1,4 +1,4 @@
-param([ValidateSet('light','dark','sepia','system')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\typography")
+﻿param([ValidateSet('light','dark','sepia','system')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\typography")
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -75,7 +75,8 @@ function Capture([IntPtr]$h, [string]$name) {
  if ([FontSmoke]::SendMessageW($h, 0x802a, [IntPtr]4, [IntPtr]::Zero).ToInt64() -ne 1) { throw 'Font internal capture failed' }
  $bitmap = [Drawing.Bitmap]::new($snapshot)
  try {
-  $color = $bitmap.GetPixel(4,4)
+  # Sample the content column; the left navigation column uses the panel colour.
+  $color = $bitmap.GetPixel($bitmap.Width - 6, 6)
   $expected = switch ($Theme) { 'light' { '252,252,250' }; 'dark' { '25,29,34' }; 'sepia' { '247,239,221' }; default { $null } }
   if ($h -eq $dialog -and $expected -and "$($color.R),$($color.G),$($color.B)" -ne $expected) { throw "Wrong rendered theme / blank capture: $color" }
   $bitmap.Save((Join-Path $Output $name), [Drawing.Imaging.ImageFormat]::Png)
@@ -87,7 +88,7 @@ function WaitClosed([IntPtr]$h) {
 }
 function OpenFonts {
  Post $window 0x111 414
- $script:dialog = WaitWindow '#32770' '字体与默认字号'
+ $script:dialog = WaitWindow '#32770' '设置'
  for($j=0;$j -lt 100;$j++) { if([FontSmoke]::GetDlgItem($dialog,1101) -ne [IntPtr]::Zero){break};Start-Sleep -Milliseconds 20 }
  [void][FontSmoke]::ShowWindow($dialog,0)
  # A synchronous message flushes initialization before driving controls.
@@ -174,7 +175,7 @@ font_size=18
  Post $window 0x111 409;Start-Sleep -Milliseconds 120;Capture $window 'reading-segoe.png'
  $a=[Drawing.Bitmap]::new((Join-Path $Output 'reading-custom.png'));$b=[Drawing.Bitmap]::new((Join-Path $Output 'reading-segoe.png'))
  try {
-  $headerChanged=0;$bodyChanged=0;$dpi=[FontSmoke]::SendMessageW($window,0x802a,[IntPtr]3,[IntPtr]::Zero).ToInt64();$header=[int](40*$dpi/96)
+  $headerChanged=0;$bodyChanged=0;$dpi=[FontSmoke]::SendMessageW($window,0x802a,[IntPtr]3,[IntPtr]::Zero).ToInt64();$header=[int](34*$dpi/96)
   for($y=0;$y -lt $a.Height;$y++){for($x=0;$x -lt $a.Width;$x++){if($a.GetPixel($x,$y).ToArgb() -ne $b.GetPixel($x,$y).ToArgb()){if($y -lt $header){$headerChanged++}else{$bodyChanged++}}}}
   if($headerChanged -ne 0 -or $bodyChanged -lt 100){throw "Font application mismatch: header=$headerChanged body=$bodyChanged"}
  } finally {$a.Dispose();$b.Dispose()}

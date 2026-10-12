@@ -425,7 +425,7 @@ impl About {
                 (
                     "爱发电",
                     "请作者喝杯咖啡",
-                    if self.theme.resolve(self.system_dark) == Theme::Dark {
+                    if self.theme.resolve(self.system_dark).is_dark() {
                         rgb(190, 169, 235)
                     } else {
                         rgb(124, 93, 175)

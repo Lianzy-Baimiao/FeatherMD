@@ -1,4 +1,4 @@
-param([string]$Directory="$PSScriptRoot\..\test-artifacts\fixtures")
+﻿param([string]$Directory="$PSScriptRoot\..\test-artifacts\fixtures")
 $ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Path $Directory -Force | Out-Null
 $paragraph="# FeatherMD Rust performance fixture`n`n## Markdown at scale`n`nA UTF-8 paragraph with **bold**, *emphasis*, 中文字符 and a [link](https://example.com).`n`n- List one`n- List two`n`n"

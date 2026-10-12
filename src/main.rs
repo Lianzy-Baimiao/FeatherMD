@@ -2,6 +2,8 @@
 #[cfg(windows)]
 mod association;
 #[cfg(windows)]
+mod editor;
+#[cfg(windows)]
 mod layout;
 #[cfg(windows)]
 mod ui;

@@ -154,10 +154,10 @@ function Hit([string]$name, [int]$x, [int]$y, [int]$expected) {
 function CheckHitTests {
  $width = [int](Query 0); $height = [int](Query 1)
  $centerX = [int][Math]::Floor($width / 2); $centerY = [int][Math]::Floor($height / 2)
- Hit 'title label' (Scale 40) (Scale 20) 2
- Hit 'brand is draggable, not an outline button' (Scale 22) (Scale 20) 2
+ Hit 'title label' (Scale 40) (Scale 17) 2
+ Hit 'brand is draggable, not an outline button' (Scale 22) (Scale 17) 2
  for ($i = 0; $i -lt 3; $i++) {
-  Hit "window button $i" ($width - (Scale 132) - 1 + (Scale ($i * 44 + 22))) (Scale 20) 1
+  Hit "window button $i" ($width - (Scale 132) - 1 + (Scale ($i * 44 + 22))) (Scale 17) 1
  }
  Hit 'left' 1 $centerY 10
  Hit 'right' ($width - 2) $centerY 11
@@ -168,9 +168,9 @@ function CheckHitTests {
  Hit 'bottom left' 1 ($height - 2) 16
  Hit 'bottom right' ($width - 2) ($height - 2) 17
 }
-function HeaderLeft { return ((Query 0) - (Scale 132) - (Scale 260) - 1) }
+function HeaderLeft { return ((Query 0) - (Scale 132) - (Scale 236) - 1) }
 function ThemePicker {
- Click ((HeaderLeft) + (Scale 194)) (Scale 20)
+ Click ((HeaderLeft) + (Scale 175)) (Scale 17)
  if ((Query 42) -lt 0) { throw 'Theme icon did not open the picker' }
 }
 function PickTheme([int]$index) {
@@ -184,13 +184,14 @@ function HeaderKey([int]$key) {
 }
 function CheckHeaderSwitches {
  $left = HeaderLeft
- foreach ($offset in @(20,56,114,152,194,236)) { Hit 'header icon' ($left + (Scale $offset)) (Scale 20) 1 }
- Click ($left + (Scale 56)) (Scale 20)
+ if ((Query 49) -ne (Scale 34)) { throw "Header is not 34 logical pixels: $(Query 49)" }
+ foreach ($offset in @(18,50,102,138,175,212)) { Hit 'header icon' ($left + (Scale $offset)) (Scale 17) 1 }
+ Click ($left + (Scale 50)) (Scale 17)
  if ((Query 38) -ne 1) { throw 'Top source switch failed' }
  Capture 'header-source'
- Click ($left + (Scale 20)) (Scale 20)
+ Click ($left + (Scale 18)) (Scale 17)
  if ((Query 38) -ne 0) { throw 'Top preview switch failed' }
- [void][WindowSmoke]::SendMessageW($window, 0x200, [IntPtr]::Zero, [WindowSmoke]::Position(($left + (Scale 56)), (Scale 20)))
+ [void][WindowSmoke]::SendMessageW($window, 0x200, [IntPtr]::Zero, [WindowSmoke]::Position(($left + (Scale 50)), (Scale 17)))
  if ((Query 44) -ne 410) { throw 'Source icon did not receive hover' }
  if ((Query 43) -ne 0) { throw 'Tooltip appeared without its delay' }
  Start-Sleep -Milliseconds 600
@@ -201,7 +202,7 @@ function CheckHeaderSwitches {
  ThemePicker
  Capture 'theme-picker-light'
  # Panel title is inert, not a click-through into the document.
- Click ($left + (Scale 100)) (Scale 70)
+ Click ($left + (Scale 100)) (Scale 60)
  if ((Query 42) -lt 0) { throw 'Panel whitespace unexpectedly closed the picker' }
  HeaderKey 27
  if ((Query 42) -ne -1 -or (Query 39) -ne 1) { throw 'Escape did not cancel the theme picker' }
@@ -210,7 +211,7 @@ function CheckHeaderSwitches {
  Click (Scale 300) (Scale 330)
  if ((Query 42) -ne -1 -or (Query 9) -ne $before -or (Query 39) -ne 1) { throw 'Outside click did not cancel without activating content' }
  ThemePicker
- Click ($left + (Scale 194)) (Scale 20)
+ Click ($left + (Scale 175)) (Scale 17)
  if ((Query 42) -ne -1) { throw 'Clicking theme icon again did not close the picker' }
  ThemePicker
  HeaderKey 40
@@ -233,7 +234,7 @@ function CheckHeaderSwitches {
  if ((Query 40) -ne (Query 41)) { throw 'System theme refresh failed' }
  Capture 'header-follow-system'
  PickTheme 0
- Click ($left + (Scale 152)) (Scale 20)
+ Click ($left + (Scale 138)) (Scale 17)
  if ((Query 7) -eq 0) { throw 'Search icon did not open search' }
  HeaderKey 27
 }
@@ -262,7 +263,7 @@ try {
  $headingIndex = 5
  $headingOffset = Query 37 $headingIndex
  if ($headingOffset -le $headingIndex * 1KB) { throw 'Outline fixture headings are not spaced far enough apart' }
- Click (Scale 40) (Scale (96 + 30 * $headingIndex + 15))
+ Click (Scale 40) (Scale (90 + 30 * $headingIndex + 15))
  if ((Query 9) -ne $headingOffset) { throw "Outline click did not seek to heading $headingIndex at byte $headingOffset; got $(Query 9)" }
  Capture 'outline-click'
  $bodyBeforeWheel = Query 9; $wrappedBeforeWheel = Query 14; $outlineBeforeWheel = Query 36
@@ -274,7 +275,7 @@ try {
  $outlineAfterWheel = Query 36
  if ($outlineAfterWheel -le $outlineBeforeWheel -or (Query 9) -ne $bodyBeforeWheel -or (Query 14) -ne $wrappedBeforeWheel) { throw 'Outline wheel did not scroll independently of the document' }
  Capture 'outline-scrolled'
- Click ((Query 35) - (Scale 28)) (Scale 68)
+ Click ((Query 35) - (Scale 28)) (Scale 62)
  Idle
  if ((Query 32) -ne 0 -or (Query 35) -ne 0 -or (Query 9) -ne $bodyBeforeWheel) { throw 'Hiding the outline lost the reading position or retained sidebar space' }
  Capture 'outline-hidden'
@@ -283,7 +284,7 @@ try {
  StartReader $document
  if ((Query 32) -ne 0 -or (Query 35) -ne 0) { throw 'Hidden outline preference did not survive reopening the reader' }
  Capture 'outline-persisted-hidden'
- Click (Scale 22) (Scale 70)
+ Click (Scale 22) (Scale 64)
  WaitOutline
  if ((Query 32) -ne 1 -or (Query 35) -ne (Scale 232)) { throw 'Reopening the outline did not restore its content and width' }
  if ([IO.File]::ReadAllText($ini) -notmatch '(?m)^outline=true\r?$') { throw 'Reopened outline setting was not persisted' }
@@ -319,22 +320,22 @@ try {
  if (([WindowSmoke]::Style($edit) -band 0x10000000) -eq 0) { throw 'Search did not expand its edit control' }
  Capture 'narrow-search'
  ThemePicker
- if ((Query 45) -ne (Scale 96)) { throw 'Theme picker overlaps the native search edit' }
+ if ((Query 45) -ne (Scale 90)) { throw 'Theme picker overlaps the native search edit' }
  Capture 'narrow-search-theme-picker'
  HeaderKey 27
- Click ((Query 35) - (Scale 28)) (Scale 68)
+ Click ((Query 35) - (Scale 28)) (Scale 62)
  if ((Query 32) -ne 0) { throw 'Cannot collapse outline while searching' }
  $editRect = [WindowSmoke+Rect]::new(); $windowRect = [WindowSmoke+Rect]::new()
  if (-not [WindowSmoke]::GetWindowRect($edit, [ref]$editRect) -or -not [WindowSmoke]::GetWindowRect($window, [ref]$windowRect)) { throw 'Cannot inspect search control geometry' }
  if ($editRect.Left - $windowRect.Left -lt (Scale 48)) { throw 'Search control overlaps the collapsed outline affordance' }
  Capture 'narrow-search-outline-hidden'
- Click (Scale 22) (Scale 70)
+ Click (Scale 22) (Scale 64)
  if ((Query 32) -ne 1 -or ([WindowSmoke]::Style($edit) -band 0x10000000) -eq 0) { throw 'Cannot reopen outline while keeping search visible' }
  AssertChrome
 
  # Persist the user's preference, not the resolved system color.
  $switchLeft = HeaderLeft
- Click ($switchLeft + (Scale 56)) (Scale 20)
+ Click ($switchLeft + (Scale 50)) (Scale 17)
  PickTheme 2
  StopReader
  StartReader $document
@@ -352,7 +353,7 @@ try {
  if ((Query 34) -ne $shortCount) { throw 'Short-section outline did not load' }
  if ((Query 46) -ne 0) { throw "Short-section outline did not start on the first heading: $(Query 46)" }
  foreach ($shortIndex in @(3, 6, 1)) {
-  Click (Scale 40) (Scale (96 + 30 * $shortIndex + 15))
+  Click (Scale 40) (Scale (90 + 30 * $shortIndex + 15))
   if ((Query 46) -ne $shortIndex) { throw "Outline highlight stayed on $(Query 46) after clicking short heading $shortIndex" }
  }
  Capture 'outline-short-click'

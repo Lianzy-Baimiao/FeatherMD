@@ -6,6 +6,9 @@ pub(super) const EXTERNAL: usize = 10003;
 pub(super) const FEATHER: usize = 10000;
 pub(super) const CHECK: usize = 10001;
 pub(super) const RESTORE: usize = 10002;
+pub(super) const PALETTE: usize = 10004;
+pub(super) const BOOK: usize = 10005;
+pub(super) const PENCIL: usize = 10006;
 
 pub(super) struct Session(usize);
 impl Session {
@@ -40,9 +43,18 @@ struct Canvas {
     x: f32,
     y: f32,
     scale: f32,
+    /// Round offsets to whole device pixels so straight edges land on the grid.
+    crisp: bool,
 }
 impl Canvas {
-    unsafe fn new(dc: HDC, color: u32, width: f32, x: f32, y: f32, scale: f32) -> Option<Self> {
+    unsafe fn new(
+        dc: HDC,
+        color: u32,
+        width: f32,
+        (x, y): (f32, f32),
+        scale: f32,
+        crisp: bool,
+    ) -> Option<Self> {
         let mut c = Self {
             graphics: null_mut(),
             pen: null_mut(),
@@ -50,6 +62,7 @@ impl Canvas {
             x,
             y,
             scale,
+            crisp,
         };
         let argb = 0xff000000 | ((color & 255) << 16) | (color & 0xff00) | ((color >> 16) & 255);
         if gp::GdipCreateFromHDC(dc, &mut c.graphics) != gp::Ok
@@ -65,12 +78,21 @@ impl Canvas {
         gp::GdipSetPenLineJoin(c.pen, gp::LineJoinRound);
         Some(c)
     }
+    /// Design units to device pixels. Symmetric rounding keeps mirrored glyphs mirrored.
+    fn at(&self, x: f32, y: f32) -> (f32, f32) {
+        let (dx, dy) = (x * self.scale, y * self.scale);
+        if self.crisp {
+            (self.x + dx.round(), self.y + dy.round())
+        } else {
+            (self.x + dx, self.y + dy)
+        }
+    }
     unsafe fn line(&self, points: &[(f32, f32)]) {
         let points: Vec<_> = points
             .iter()
-            .map(|&(x, y)| gp::PointF {
-                X: self.x + x * self.scale,
-                Y: self.y + y * self.scale,
+            .map(|&(x, y)| {
+                let (x, y) = self.at(x, y);
+                gp::PointF { X: x, Y: y }
             })
             .collect();
         if points.len() >= 2 {
@@ -83,7 +105,7 @@ impl Canvas {
         }
     }
     unsafe fn bezier(&self, p: [(f32, f32); 4]) {
-        let p = p.map(|(x, y)| (self.x + x * self.scale, self.y + y * self.scale));
+        let p = p.map(|(x, y)| self.at(x, y));
         gp::GdipDrawBezier(
             self.graphics,
             self.pen,
@@ -98,27 +120,35 @@ impl Canvas {
         );
     }
     unsafe fn ellipse(&self, x: f32, y: f32, width: f32, height: f32, fill: bool) {
-        let (x, y, w, h) = (
-            self.x + x * self.scale,
-            self.y + y * self.scale,
-            width * self.scale,
-            height * self.scale,
-        );
+        let (left, top) = self.at(x, y);
+        let (right, bottom) = self.at(x + width, y + height);
+        let (x, y, w, h) = (left, top, right - left, bottom - top);
         if fill {
             gp::GdipFillEllipse(self.graphics, self.brush.cast(), x, y, w, h);
         } else {
             gp::GdipDrawEllipse(self.graphics, self.pen, x, y, w, h);
         }
     }
+    /// Open arc on a circle, in degrees clockwise from +x (GDI+ y points down).
+    unsafe fn arc(&self, center: (f32, f32), radius: f32, start: f32, sweep: f32) {
+        let (left, top) = self.at(center.0 - radius, center.1 - radius);
+        let (right, bottom) = self.at(center.0 + radius, center.1 + radius);
+        gp::GdipDrawArc(
+            self.graphics,
+            self.pen,
+            left,
+            top,
+            right - left,
+            bottom - top,
+            start,
+            sweep,
+        );
+    }
     unsafe fn rounded(&self, bounds: [f32; 4], radius: f32, fill: bool) {
         let [x, y, w, h] = bounds;
-        let (x, y, w, h, r) = (
-            self.x + x * self.scale,
-            self.y + y * self.scale,
-            w * self.scale,
-            h * self.scale,
-            radius * self.scale,
-        );
+        let (left, top) = self.at(x, y);
+        let (right, bottom) = self.at(x + w, y + h);
+        let (x, y, w, h, r) = (left, top, right - left, bottom - top, radius * self.scale);
         let r = r.min(w / 2.0).min(h / 2.0).max(0.5);
         let mut path = null_mut();
         if gp::GdipCreatePath(gp::FillModeAlternate, &mut path) != gp::Ok {
@@ -161,7 +191,7 @@ pub(super) unsafe fn round(dc: HDC, r: RECT, color: u32, radius: i32) {
     if r.right <= r.left || r.bottom <= r.top {
         return;
     }
-    if let Some(c) = Canvas::new(dc, color, 1.0, r.left as f32, r.top as f32, 1.0) {
+    if let Some(c) = Canvas::new(dc, color, 1.0, (r.left as f32, r.top as f32), 1.0, false) {
         c.rounded(
             [
                 0.0,
@@ -175,25 +205,47 @@ pub(super) unsafe fn round(dc: HDC, r: RECT, color: u32, radius: i32) {
     }
 }
 
+/// Stroke width in device pixels, snapped to half pixels with a 1 px floor.
+/// Small icons stay legible instead of fading into a fractional blur.
+fn stroke(weight: f32, scale: f32) -> f32 {
+    ((weight * scale * 2.0).round() / 2.0).max(1.0)
+}
+
+/// Where a stroke centre sits so a horizontal/vertical line covers as many whole
+/// pixel rows as possible. GDI+ high-quality offsets put pixel centres at x.5:
+/// 1 or 1.5 px strokes centre on a half pixel, 2 or 2.5 px strokes on a whole one.
+fn grid(value: f32, width: f32) -> f32 {
+    if (width.floor() as i32) % 2 == 1 {
+        value.floor() + 0.5
+    } else {
+        value.round()
+    }
+}
+
 pub(super) unsafe fn icon(dc: HDC, r: RECT, id: usize, color: u32, scale: f32) {
     let scale = if id == FEATHER {
         (r.right - r.left).min(r.bottom - r.top) as f32 / 24.0
     } else {
         scale
     };
-    let weight = if matches!(id, MINIMIZE | MAXIMIZE | RESTORE | EXIT) {
-        1.2
-    } else {
-        1.55
-    };
-    let Some(c) = Canvas::new(
-        dc,
-        color,
-        weight * scale,
-        (r.left + r.right) as f32 / 2.0,
-        (r.top + r.bottom) as f32 / 2.0,
+    let weight = stroke(
+        if matches!(id, MINIMIZE | MAXIMIZE | RESTORE | EXIT) {
+            1.2
+        } else {
+            1.55
+        },
         scale,
-    ) else {
+    );
+    // Rectangular glyphs snap every coordinate; curved ones only snap their centre.
+    let crisp = matches!(
+        id,
+        MINIMIZE | MAXIMIZE | RESTORE | OUTLINE | THEME_SYSTEM | ZOOM_IN | ZOOM_OUT | OPEN
+    );
+    let center = (
+        grid((r.left + r.right) as f32 / 2.0, weight),
+        grid((r.top + r.bottom) as f32 / 2.0, weight),
+    );
+    let Some(c) = Canvas::new(dc, color, weight, center, scale, crisp) else {
         return;
     };
     match id {
@@ -285,6 +337,45 @@ pub(super) unsafe fn icon(dc: HDC, r: RECT, id: usize, color: u32, scale: f32) {
             c.line(&[(5.0, -5.0), (5.0, 4.0)]);
         }
         CHECK => c.line(&[(-5.0, 0.0), (-1.5, 3.5), (5.5, -4.0)]),
+        PALETTE => {
+            // Round palette with a thumb notch on the right and three paint wells.
+            c.arc((0.0, 0.0), 8.0, 40.0, 290.0);
+            c.bezier([(6.13, 5.14), (2.5, 3.0), (3.0, -1.5), (6.93, -4.0)]);
+            for (x, y) in [(-4.0, -1.0), (-0.8, -4.6), (-2.6, 3.4)] {
+                c.ellipse(x - 1.3, y - 1.3, 2.6, 2.6, true);
+            }
+        }
+        BOOK => {
+            // Two open pages meeting at the spine.
+            for side in [-1.0f32, 1.0] {
+                c.bezier([
+                    (0.0, -5.5),
+                    (side * 2.5, -7.5),
+                    (side * 6.5, -7.5),
+                    (side * 9.0, -6.5),
+                ]);
+                c.line(&[(side * 9.0, -6.5), (side * 9.0, 6.5)]);
+                c.bezier([
+                    (side * 9.0, 6.5),
+                    (side * 6.5, 5.5),
+                    (side * 2.5, 5.5),
+                    (0.0, 7.5),
+                ]);
+            }
+            c.line(&[(0.0, -5.5), (0.0, 7.5)]);
+        }
+        PENCIL => {
+            // A pencil at 45°: parallel body edges, tip, and the ferrule line.
+            c.line(&[
+                (-7.5, 7.5),
+                (-6.5, 3.5),
+                (4.5, -7.5),
+                (7.5, -4.5),
+                (-3.5, 6.5),
+                (-7.5, 7.5),
+            ]);
+            c.line(&[(2.0, -5.0), (5.0, -2.0)]);
+        }
         FEATHER => {
             c.bezier([(-6.0, 7.0), (-10.0, -4.0), (0.0, -10.0), (9.0, -9.0)]);
             c.bezier([(9.0, -9.0), (10.0, 1.0), (3.0, 10.0), (-6.0, 7.0)]);
