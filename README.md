@@ -1,12 +1,21 @@
 # FeatherMD · 羽读
 
+[![许可 MIT](https://img.shields.io/badge/许可-MIT-blue?style=flat-square)](LICENSE)
+[![赞赏 爱发电](https://img.shields.io/badge/赞赏-爱发电-946ce6?style=flat-square)](https://ifdian.net/a/lianzy)
+
 **轻一点，读更多。** 一个用 Rust 编写的 Windows 原生 Markdown 查看器。
 
 [下载单文件 EXE](https://github.com/Lianzy-Baimiao/FeatherMD/releases/latest) · [性能与验证](docs/PERFORMANCE.md) · [实现说明](docs/ARCHITECTURE.md)
 
 ![FeatherMD 浅色阅读界面](docs/reading-light.png)
 
-目录开关位于目录区域：展开时在“目录”标题右侧，隐藏后在内容区左边缘。打开、查找和更多操作都收在同一行标题栏。
+顶部改为紧凑的单行图标栏：**眼睛 / 代码**胶囊切换预览与源码，**文件夹 / 放大镜 / 省略号**分别打开文档、查找与更多。悬停显示名称和快捷键，文件名留出更多空间。
+
+**外观只占一个按钮**：太阳、月亮或显示器表示当前偏好，点击展开浅色 / 深色 / 跟随系统，不藏进更多菜单。也可按 **Ctrl+T**，用方向键或 Tab 选择、Enter 确认、Esc 取消。
+
+目录开关仍位于目录区域：展开时在“目录”标题右侧，隐藏后在内容区左边缘。未打开文档时不再显示空目录栏。
+
+新配置默认跟随系统；系统应用颜色改变时会刷新，手动选择的浅色或深色不会被覆盖。主题切换保持阅读位置，阅读模式与主题偏好在重启后保留。
 
 <details>
 <summary>更多预览：深色阅读、隐藏目录与欢迎页</summary>
@@ -15,7 +24,9 @@
 
 ![FeatherMD 隐藏目录后的阅读界面](docs/reading-outline-hidden.png)
 
-![FeatherMD 欢迎页](docs/welcome-light.png)
+![FeatherMD 浅色欢迎页](docs/welcome-light.png)
+
+![FeatherMD 深色欢迎页](docs/welcome-dark.png)
 
 </details>
 
@@ -23,7 +34,7 @@
 
 打开一份 Markdown，不应该先启动一个浏览器。
 
-FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测或自动联网。v0.1.2 的 Windows x64 EXE 约 **669 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
+FeatherMD 使用 Win32 + GDI/GDI+，没有 Electron、WebView、JavaScript、遥测或自动联网。v0.1.3 的 Windows x64 EXE 约 **721 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
 
 **大文件不是先全部载入再显示：** 每次只读取附近 128 KiB，后台读取与搜索，前台只绘制可见行。文件总长度不决定首屏需要分配的内存。
 
@@ -32,19 +43,56 @@ FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测�
 1. 从 Releases 下载 **FeatherMD.exe**，放到喜欢的文件夹，双击运行。
 2. 拖入 Markdown，或按 **Ctrl+O**。
 3. 左侧目录点击标题即可跳转；点“目录”标题右侧按钮收起，点内容区左边缘按钮展开，也可按 **Ctrl+B** 切换，状态会保存。
-4. 打开、查找和“更多”收在同一行标题栏；通过“更多”调整主题、字号、自动换行、阅读宽度或源码模式。
+4. 顶部眼睛/代码图标切换预览/源码，太阳/月亮/显示器按钮选择外观；省略号“更多”设置字体、默认字号、自动换行与阅读宽度。
+5. **更多 → 关于 FeatherMD**（F1）查看版本、快捷键和阅读说明，或前往 GitHub 项目主页、爱发电支持作者。外部链接会先确认，再交给默认浏览器打开。
 
 支持 Windows 10（1607+）/ Windows 11 **x64**。当前实测环境为 Windows 11 x64；其他版本尚未逐个实机验证。无安装器，无管理员权限要求。尚未购买代码签名证书，Windows SmartScreen 可能提醒未知发布者；请核对来源和 SHA-256，不要关闭系统防护。
 
-### 设置为默认 Markdown 查看器
+### 字体与默认字号
+
+**更多（…）→ 字体与默认字号…**：从系统已安装字体中选择，支持中英文字体；设置 **12–36 px** 的默认字号，实时查看示例。点击“保存”应用并记住，“取消”或 Esc 不改动当前设置，“恢复默认”只重置草稿，保存后才生效。
+
+正文字体也用于标题，界面文字保持原样；源码、代码块和行内代码继续使用等宽字体。字体不含某个字符时由 Windows 回退显示。字号与 Ctrl+滚轮/加减号缩放共用一个持久化值，后续打开与重启时沿用最近保存的大小。
+
+顶部与欢迎页图标使用 Windows GDI+ 抗锯齿矢量曲线、圆端描边，按 DPI 绘制；没有额外图标字体、图片下载或第三方运行时。
+
+<details>
+<summary>字体设置：浅色与深色</summary>
+
+![FeatherMD 浅色字体设置](docs/typography-light.png)
+
+![FeatherMD 深色字体设置](docs/typography-dark.png)
+
+</details>
+
+### 关于与项目入口
+
+**更多 → 关于 FeatherMD**：与阅读器配色一致的原生窗口，包含版本、GitHub 项目主页和爱发电入口。快捷键说明可展开；支持 Tab、Enter、Esc。浅色、深色、护眼或跟随系统均沿用当前阅读偏好。
+
+<details>
+<summary>查看关于窗口：浅色与深色</summary>
+
+![FeatherMD 浅色关于窗口](docs/about-light.png)
+
+![FeatherMD 深色关于窗口](docs/about-dark.png)
+
+</details>
+
+### 右键打开方式与默认应用
+
+![文件关联设置](docs/file-associations-menu.png)
 
 - 先将 EXE 放在**固定位置**。
-- 点击 **更多 → 注册为 Markdown 查看器**，确认后会打开 Windows“默认应用”。
-- 搜索 **.md**，选择 **FeatherMD**；也可以右键文件 → 打开方式 → 选择其他应用 → FeatherMD → 始终使用。
+- 点击 **更多 → 文件关联 → 加入 Markdown 右键打开方式**，即可注册到当前用户的打开方式列表，不弹出确认框或系统设置。
+- 需要双击 .md 默认用 FeatherMD 时，点击 **更多 → 文件关联 → 设为 .md 默认应用（系统确认）**。会自动完成注册并打开 Windows 默认应用设置；选择 **.md → FeatherMD**。较旧 Windows 可能显示默认应用首页，需要搜索 .md。
+- 如果列表找不到 FeatherMD：确认正在运行的是**固定位置里的新版 EXE**，再次执行上述注册或设为默认操作，关闭再打开 Windows 默认应用页。在应用列表搜索 FeatherMD，或在文件类型搜索 `.md`；仍不显示时，可在“选择其他应用”中浏览到该 EXE。注册到列表不等于已成为默认应用。
+- 也可以右键 .md 文件 → 打开方式 → 选择其他应用 → FeatherMD → 始终使用。
 - 支持注册 .md / .markdown / .mdown / .mkd。
 - “移除打开方式注册”只移除 FeatherMD 自己的注册项。
 
-**不会绕过 Windows 保护、覆盖 UserChoice 或偷偷改变你现有的默认程序。** 移动 EXE 后需要重新注册。
+Windows 10/11 要求用户在系统界面确认默认应用，普通桌面程序没有受支持的静默设置方式。因此“加入打开方式”可以静默完成，“设为默认”仍需系统确认。移动 EXE 后需要重新注册；移除注册不会自动选择另一个默认查看器。
+
+具体兼容范围及微软文档见 [文件关联说明](docs/FILE_ASSOCIATIONS.md)。
 
 ### v0.1.2 界面与导航
 
@@ -76,6 +124,7 @@ FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测�
 | 滚动 | 滚轮 / ↑↓ / PageUp / PageDown / 空格 |
 | 放大 / 缩小 | Ctrl+滚轮 / Ctrl++ / Ctrl+- |
 | 源码 / 预览切换 | Ctrl+R |
+| 外观选择（浅色 / 深色 / 跟随系统） | Ctrl+T / 顶部外观按钮 |
 | 重新载入 | F5 |
 | 选择当前缓存分页 | Ctrl+A |
 | 复制选中行；未选择时复制可见内容 | Ctrl+C |
@@ -148,3 +197,9 @@ cargo +stable-x86_64-pc-windows-msvc run --release --example bench -- test-artif
 ## License
 
 [MIT](LICENSE)。依赖许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，也内置在 EXE 中，可通过“更多 → 导出内置许可证”保存。
+
+## 项目与赞赏
+
+FeatherMD 免费、开源，无广告。欢迎在 [GitHub 项目主页](https://github.com/Lianzy-Baimiao/FeatherMD) 反馈问题或参与改进。
+
+如果它让你的阅读轻快了一点，欢迎通过 [爱发电](https://ifdian.net/a/lianzy) 请作者喝一杯。赞赏完全自愿，不影响任何功能；应用内“更多 → 关于 FeatherMD”也有入口。

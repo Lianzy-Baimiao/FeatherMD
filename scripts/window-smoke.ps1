@@ -110,6 +110,9 @@ function WaitOutline {
  throw "Outline did not load $headingCount headings: count=$(Query 34), loading=$(Query 33)"
 }
 function Click([int]$x, [int]$y) {
+ # Hidden windows do not get normal visible-window repaint scheduling.
+ # Paint the current overlay before hit-testing its next synthetic click.
+ if ((Query 4) -ne 1) { throw 'Pre-click paint failed' }
  [void][WindowSmoke]::SendMessageW($window, 0x201, [IntPtr]1, [WindowSmoke]::Position($x, $y))
  [void][WindowSmoke]::SendMessageW($window, 0x202, [IntPtr]::Zero, [WindowSmoke]::Position($x, $y))
  Idle
@@ -151,7 +154,7 @@ function Hit([string]$name, [int]$x, [int]$y, [int]$expected) {
 function CheckHitTests {
  $width = [int](Query 0); $height = [int](Query 1)
  $centerX = [int][Math]::Floor($width / 2); $centerY = [int][Math]::Floor($height / 2)
- Hit 'title blank' (Scale 200) (Scale 24) 2
+ Hit 'title label' (Scale 40) (Scale 24) 2
  Hit 'brand is draggable, not an outline button' (Scale 22) (Scale 24) 2
  for ($i = 0; $i -lt 3; $i++) {
   Hit "window button $i" ($width - (Scale 132) - 1 + (Scale ($i * 44 + 22))) (Scale 24) 1
@@ -165,6 +168,76 @@ function CheckHitTests {
  Hit 'bottom left' 1 ($height - 2) 16
  Hit 'bottom right' ($width - 2) ($height - 2) 17
 }
+function HeaderLeft { return ((Query 0) - (Scale 132) - (Scale 260) - 1) }
+function ThemePicker {
+ Click ((HeaderLeft) + (Scale 194)) (Scale 24)
+ if ((Query 42) -lt 0) { throw 'Theme icon did not open the picker' }
+}
+function PickTheme([int]$index) {
+ ThemePicker
+ Click ((HeaderLeft) + (Scale 100)) ((Query 45) + (Scale (38 + 42 * $index + 19)))
+ if ((Query 42) -ne -1) { throw 'Theme choice did not close the picker' }
+}
+function HeaderKey([int]$key) {
+ [void][WindowSmoke]::SendMessageW($window, 0x100, [IntPtr]$key, [IntPtr]::Zero)
+ Idle
+}
+function CheckHeaderSwitches {
+ $left = HeaderLeft
+ foreach ($offset in @(20,56,114,152,194,236)) { Hit 'header icon' ($left + (Scale $offset)) (Scale 24) 1 }
+ Click ($left + (Scale 56)) (Scale 24)
+ if ((Query 38) -ne 1) { throw 'Top source switch failed' }
+ Capture 'header-source'
+ Click ($left + (Scale 20)) (Scale 24)
+ if ((Query 38) -ne 0) { throw 'Top preview switch failed' }
+ [void][WindowSmoke]::SendMessageW($window, 0x200, [IntPtr]::Zero, [WindowSmoke]::Position(($left + (Scale 56)), (Scale 24)))
+ if ((Query 44) -ne 410) { throw 'Source icon did not receive hover' }
+ if ((Query 43) -ne 0) { throw 'Tooltip appeared without its delay' }
+ Start-Sleep -Milliseconds 600
+ if ((Query 43) -ne 1) { throw "Header icon tooltip did not appear; hover=$(Query 44)" }
+ Capture 'header-source-tooltip'
+ [void][WindowSmoke]::SendMessageW($window, 0x2a3, [IntPtr]::Zero, [IntPtr]::Zero)
+ if ((Query 43) -ne 0) { throw 'Tooltip did not hide on mouse leave' }
+ ThemePicker
+ Capture 'theme-picker-light'
+ # Panel title is inert, not a click-through into the document.
+ Click ($left + (Scale 100)) (Scale 70)
+ if ((Query 42) -lt 0) { throw 'Panel whitespace unexpectedly closed the picker' }
+ HeaderKey 27
+ if ((Query 42) -ne -1 -or (Query 39) -ne 1) { throw 'Escape did not cancel the theme picker' }
+ ThemePicker
+ $before = Query 9
+ Click (Scale 300) (Scale 330)
+ if ((Query 42) -ne -1 -or (Query 9) -ne $before -or (Query 39) -ne 1) { throw 'Outside click did not cancel without activating content' }
+ ThemePicker
+ Click ($left + (Scale 194)) (Scale 24)
+ if ((Query 42) -ne -1) { throw 'Clicking theme icon again did not close the picker' }
+ ThemePicker
+ HeaderKey 40
+ if ((Query 42) -ne 1) { throw 'Theme picker Down did not focus dark' }
+ HeaderKey 13
+ if ((Query 39) -ne 2 -or (Query 40) -ne 1 -or (Query 42) -ne -1) { throw 'Theme picker keyboard selection failed' }
+ ThemePicker
+ Capture 'theme-picker-dark'
+ [void][WindowSmoke]::SendMessageW($window, 8, [IntPtr]::Zero, [IntPtr]::Zero)
+ if ((Query 42) -ne -1) { throw 'Losing focus did not dismiss theme picker' }
+ [void][WindowSmoke]::SendMessageW($window, 0x1a, [IntPtr]::Zero, [IntPtr]::Zero)
+ if ((Query 39) -ne 2 -or (Query 40) -ne 1) { throw 'System broadcast overrode manual dark mode' }
+ PickTheme 0
+ if ((Query 39) -ne 1 -or (Query 40) -ne 0) { throw 'Top light choice failed' }
+ PickTheme 1
+ if ((Query 39) -ne 2 -or (Query 40) -ne 1) { throw 'Top dark choice failed' }
+ PickTheme 2
+ if ((Query 39) -ne 0 -or (Query 40) -ne (Query 41)) { throw 'System theme did not resolve to the OS app theme' }
+ [void][WindowSmoke]::SendMessageW($window, 0x31a, [IntPtr]::Zero, [IntPtr]::Zero)
+ if ((Query 40) -ne (Query 41)) { throw 'System theme refresh failed' }
+ Capture 'header-follow-system'
+ PickTheme 0
+ Click ($left + (Scale 152)) (Scale 24)
+ if ((Query 7) -eq 0) { throw 'Search icon did not open search' }
+ HeaderKey 27
+}
+
 try {
  [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`n", [Text.UTF8Encoding]::new($false))
  $createdIni = $true
@@ -178,6 +251,7 @@ try {
  Capture 'initial-light'
  AssertChrome
  CheckHitTests
+ CheckHeaderSwitches
  $info = [WindowSmoke+MinMaxInfo]::new()
  [void][WindowSmoke]::SendMinMax($window, 0x24, [IntPtr]::Zero, [ref]$info)
  $minWidth = Scale 640; $minHeight = Scale 480
@@ -237,12 +311,17 @@ try {
  if ($afterResize -ne $beforeResize) { throw "Resize lost the source position: $beforeResize -> $afterResize" }
  Capture 'narrow-light'
  CheckHitTests
+ CheckHeaderSwitches
  [void][WindowSmoke]::SendMessageW($window, 0x111, [IntPtr]201, [IntPtr]::Zero)
  Idle
  Capture 'narrow-dark'
  [void][WindowSmoke]::SendMessageW($window, 0x111, [IntPtr]102, [IntPtr]::Zero)
  if (([WindowSmoke]::Style($edit) -band 0x10000000) -eq 0) { throw 'Search did not expand its edit control' }
  Capture 'narrow-search'
+ ThemePicker
+ if ((Query 45) -ne (Scale 104)) { throw 'Theme picker overlaps the native search edit' }
+ Capture 'narrow-search-theme-picker'
+ HeaderKey 27
  Click ((Query 35) - (Scale 28)) (Scale 76)
  if ((Query 32) -ne 0) { throw 'Cannot collapse outline while searching' }
  $editRect = [WindowSmoke+Rect]::new(); $windowRect = [WindowSmoke+Rect]::new()
@@ -253,11 +332,33 @@ try {
  if ((Query 32) -ne 1 -or ([WindowSmoke]::Style($edit) -band 0x10000000) -eq 0) { throw 'Cannot reopen outline while keeping search visible' }
  AssertChrome
 
+ # Persist the user's preference, not the resolved system color.
+ $switchLeft = HeaderLeft
+ Click ($switchLeft + (Scale 56)) (Scale 24)
+ PickTheme 2
+ StopReader
+ StartReader $document
+ if ((Query 38) -ne 1 -or (Query 39) -ne 0 -or (Query 40) -ne (Query 41)) { throw 'Top mode/theme settings did not survive restart' }
+ Capture 'header-settings-restored'
  StopReader
  [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`n", [Text.UTF8Encoding]::new($false))
  StartReader
  if ((Query 10) -ne 0 -or (Query 2) -ne 0) { throw 'Welcome window unexpectedly loaded a document' }
+ if ((Query 35) -ne 0) { throw 'Welcome still reserves an empty sidebar' }
  Capture 'welcome-light'
+ PickTheme 1
+ Capture 'welcome-dark'
+ ThemePicker
+ Capture 'welcome-theme-picker'
+ HeaderKey 27
+ PickTheme 0
+ [void][WindowSmoke]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, $minWidth, $minHeight, 0x16)
+ Idle
+ Capture 'welcome-narrow'
+ ThemePicker
+ [void][WindowSmoke]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, ($minWidth + 20), $minHeight, 0x16)
+ Idle
+ if ((Query 42) -ne -1) { throw 'Resizing did not dismiss the theme picker' }
  AssertChrome
  CheckHitTests
  $metrics = [ordered]@{
@@ -268,7 +369,9 @@ try {
   hit_tests = $hitTests; fixture_bytes = $size; before_resize_byte = $beforeResize; after_resize_byte = $afterResize
   outline_headings = $headingCount; outline_clicked_byte = $headingOffset; outline_wheel_top = $outlineAfterWheel
   outline_toggle_preserves_position = $true; outline_preference_survives_restart = $true
-  screenshots = @('initial-light.png', 'outline-click.png', 'outline-scrolled.png', 'outline-hidden.png', 'outline-persisted-hidden.png', 'outline-reopened.png', 'narrow-light.png', 'narrow-dark.png', 'narrow-search.png', 'narrow-search-outline-hidden.png', 'welcome-light.png')
+  compact_header_icons_and_tooltips = $true; theme_picker_mouse_keyboard_and_dismissal = $true; welcome_has_no_empty_sidebar = $true
+  top_mode_and_theme_switches = $true; system_theme_refresh_and_persistence = $true
+  screenshots = @('initial-light.png', 'outline-click.png', 'outline-scrolled.png', 'outline-hidden.png', 'outline-persisted-hidden.png', 'outline-reopened.png', 'narrow-light.png', 'narrow-dark.png', 'narrow-search.png', 'narrow-search-outline-hidden.png', 'welcome-light.png', 'welcome-dark.png', 'welcome-narrow.png', 'theme-picker-light.png', 'theme-picker-dark.png', 'header-source-tooltip.png', 'narrow-search-theme-picker.png')
   limitations = 'Real pointer input, maximize/minimize/restore, monitor changes, snap, and outline scan limits are not exercised by this hidden-window test.'
   exe_bytes = (Get-Item -LiteralPath $Exe).Length
  }

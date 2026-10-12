@@ -4,6 +4,7 @@ use super::*;
 #[derive(Clone, Copy)]
 enum ChromeTone {
     Quiet,
+    Selected,
     Primary,
 }
 
@@ -16,31 +17,8 @@ fn chrome_rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
     }
 }
 
-unsafe fn chrome_round(dc: HDC, rect: RECT, color: u32, radius: i32) {
-    let brush = CreateSolidBrush(color);
-    let old_brush = SelectObject(dc, brush);
-    let old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-    RoundRect(
-        dc,
-        rect.left,
-        rect.top,
-        rect.right,
-        rect.bottom,
-        radius * 2,
-        radius * 2,
-    );
-    SelectObject(dc, old_pen);
-    SelectObject(dc, old_brush);
-    DeleteObject(brush);
-}
-
-unsafe fn chrome_path(dc: HDC, points: &[(i32, i32)]) {
-    if let Some(&(x, y)) = points.first() {
-        MoveToEx(dc, x, y, null_mut());
-        for &(x, y) in &points[1..] {
-            LineTo(dc, x, y);
-        }
-    }
+pub(super) unsafe fn chrome_round(dc: HDC, rect: RECT, color: u32, radius: i32) {
+    smooth::round(dc, rect, color, radius);
 }
 
 impl App {
@@ -60,6 +38,7 @@ impl App {
         let hover = self.hover == Some(id);
         let pressed = self.pressed == Some(Hit::Command(id));
         let background = match tone {
+            ChromeTone::Selected => Some(p.selection),
             ChromeTone::Primary => Some(if pressed {
                 p.muted
             } else if hover {
@@ -72,9 +51,19 @@ impl App {
             ChromeTone::Quiet => None,
         };
         if let Some(color) = background {
-            chrome_round(dc, rect, color, self.s(5));
+            chrome_round(
+                dc,
+                rect,
+                color,
+                self.s(if matches!(tone, ChromeTone::Primary) {
+                    8
+                } else {
+                    6
+                }),
+            );
         }
         let color = match tone {
+            ChromeTone::Selected => p.accent,
             ChromeTone::Primary => p.bg,
             ChromeTone::Quiet => p.fg,
         };
@@ -82,8 +71,8 @@ impl App {
             dc,
             text,
             rect,
-            13,
-            matches!(tone, ChromeTone::Primary),
+            12,
+            matches!(tone, ChromeTone::Primary | ChromeTone::Selected),
             color,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
         );
@@ -94,136 +83,355 @@ impl App {
     }
 
     unsafe fn chrome_window_icon(&self, dc: HDC, rect: RECT, id: usize, color: u32) {
-        let x = (rect.left + rect.right) / 2;
-        let y = (rect.top + rect.bottom) / 2;
-        let n = self.s(5);
-        let pen = CreatePen(PS_SOLID, self.s(1).max(1), color);
-        let old_pen = SelectObject(dc, pen);
-        let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-        match id {
-            MINIMIZE => chrome_path(dc, &[(x - n, y), (x + n + 1, y)]),
-            MAXIMIZE if IsZoomed(self.hwnd) != 0 => {
-                chrome_path(
-                    dc,
-                    &[
-                        (x - n + self.s(3), y - n + self.s(2)),
-                        (x - n + self.s(3), y - n),
-                        (x + n, y - n),
-                        (x + n, y + n - self.s(3)),
-                        (x + n - self.s(2), y + n - self.s(3)),
-                    ],
-                );
-                Rectangle(dc, x - n, y - n + self.s(3), x + n - self.s(2), y + n + 1);
-            }
-            MAXIMIZE => {
-                Rectangle(dc, x - n, y - n, x + n + 1, y + n + 1);
-            }
-            EXIT | 0 => {
-                chrome_path(dc, &[(x - n, y - n), (x + n, y + n)]);
-                chrome_path(dc, &[(x + n, y - n), (x - n, y + n)]);
-            }
-            ZOOM_OUT | ZOOM_IN => {
-                chrome_path(dc, &[(x - n, y), (x + n + 1, y)]);
-                if id == ZOOM_IN {
-                    chrome_path(dc, &[(x, y - n), (x, y + n + 1)]);
-                }
-            }
-            OUTLINE => {
-                Rectangle(
-                    dc,
-                    x - self.s(7),
-                    y - self.s(6),
-                    x + self.s(8),
-                    y + self.s(7),
-                );
-                chrome_path(
-                    dc,
-                    &[
-                        (x - self.s(2), y - self.s(6)),
-                        (x - self.s(2), y + self.s(6)),
-                    ],
-                );
-            }
-            _ => {}
+        let id = if id == MAXIMIZE && IsZoomed(self.hwnd) != 0 {
+            smooth::RESTORE
+        } else {
+            id
+        };
+        smooth::icon(dc, rect, id, color, self.fonts.dpi as f32 / 96.0);
+    }
+
+    pub(super) fn header_left(&self) -> i32 {
+        self.width - self.s(132) - self.s(260) - 1
+    }
+
+    unsafe fn feather_mark(&self, dc: HDC, rect: RECT, color: u32) {
+        smooth::icon(
+            dc,
+            rect,
+            smooth::FEATHER,
+            color,
+            self.fonts.dpi as f32 / 96.0,
+        );
+    }
+
+    unsafe fn chrome_glyph(&self, dc: HDC, rect: RECT, id: usize, color: u32) {
+        smooth::icon(dc, rect, id, color, self.fonts.dpi as f32 / 96.0);
+    }
+
+    pub(super) fn theme_menu_rect(&self) -> RECT {
+        let right = self.header_left() + self.s(216);
+        // Stay below the native search EDIT HWND; parent painting cannot cover a child window.
+        let top = self.s(if self.edit_mode.is_some() { 104 } else { 54 });
+        chrome_rect(right - self.s(224), top, right, top + self.s(198))
+    }
+
+    pub(super) fn header_tip(&self) -> Option<&'static str> {
+        if self.theme_menu.is_some() || self.mouse.is_none_or(|(_, y)| y >= self.s(48)) {
+            return None;
         }
-        SelectObject(dc, old_brush);
-        SelectObject(dc, old_pen);
-        DeleteObject(pen);
+        Some(match self.hover? {
+            PREVIEW => "预览 · 阅读排版",
+            SOURCE => "源码 · Ctrl+R",
+            OPEN => "打开文档 · Ctrl+O",
+            FIND => "查找 · Ctrl+F",
+            SETTINGS => "更多选项",
+            THEME_PICKER => match self.settings.theme {
+                Theme::System => "外观：跟随系统 · Ctrl+T",
+                Theme::Light => "外观：浅色 · Ctrl+T",
+                Theme::Dark => "外观：深色 · Ctrl+T",
+                Theme::Sepia => "外观：护眼 · Ctrl+T",
+            },
+            MINIMIZE => "最小化",
+            MAXIMIZE => "最大化 / 还原",
+            EXIT => "关闭",
+            _ => return None,
+        })
+    }
+
+    pub(super) unsafe fn paint_header_overlay(&mut self, dc: HDC, p: Palette) {
+        if let Some(focus) = self.theme_menu {
+            let r = self.theme_menu_rect();
+            chrome_round(
+                dc,
+                chrome_rect(
+                    r.left - self.s(2),
+                    r.top + self.s(2),
+                    r.right + self.s(2),
+                    r.bottom + self.s(4),
+                ),
+                p.code,
+                self.s(12),
+            );
+            chrome_round(dc, r, p.edge, self.s(10));
+            chrome_round(
+                dc,
+                chrome_rect(r.left + 1, r.top + 1, r.right - 1, r.bottom - 1),
+                p.bg,
+                self.s(10),
+            );
+            // Consume the panel's whitespace so clicks cannot activate content below it.
+            self.hits.push(HitBox {
+                rect: r,
+                action: Hit::Command(THEME_PANEL),
+            });
+            self.label(
+                dc,
+                "外观",
+                chrome_rect(
+                    r.left + self.s(16),
+                    r.top + self.s(7),
+                    r.right - self.s(12),
+                    r.top + self.s(33),
+                ),
+                12,
+                true,
+                p.fg,
+                DT_SINGLELINE | DT_VCENTER,
+            );
+            for (i, (id, text)) in [
+                (THEME_LIGHT, "浅色"),
+                (THEME_DARK, "深色"),
+                (THEME_SYSTEM, "跟随系统"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let y = r.top + self.s(38 + i as i32 * 42);
+                let row = chrome_rect(r.left + self.s(7), y, r.right - self.s(7), y + self.s(38));
+                let selected = matches!(
+                    (id, self.settings.theme),
+                    (THEME_LIGHT, Theme::Light)
+                        | (THEME_DARK, Theme::Dark)
+                        | (THEME_SYSTEM, Theme::System)
+                );
+                if selected || i == focus || self.hover == Some(id) {
+                    chrome_round(
+                        dc,
+                        row,
+                        if selected { p.selection } else { p.code },
+                        self.s(6),
+                    );
+                }
+                let color = if selected { p.accent } else { p.fg };
+                self.chrome_glyph(
+                    dc,
+                    chrome_rect(
+                        row.left + self.s(9),
+                        row.top,
+                        row.left + self.s(37),
+                        row.bottom,
+                    ),
+                    id,
+                    color,
+                );
+                self.label(
+                    dc,
+                    text,
+                    chrome_rect(
+                        row.left + self.s(47),
+                        row.top,
+                        row.right - self.s(28),
+                        row.bottom,
+                    ),
+                    12,
+                    selected,
+                    color,
+                    DT_SINGLELINE | DT_VCENTER,
+                );
+                if selected {
+                    smooth::icon(
+                        dc,
+                        chrome_rect(
+                            row.right - self.s(27),
+                            y,
+                            row.right - self.s(7),
+                            y + self.s(38),
+                        ),
+                        smooth::CHECK,
+                        p.accent,
+                        self.fonts.dpi as f32 / 96.0,
+                    );
+                }
+                self.hits.push(HitBox {
+                    rect: row,
+                    action: Hit::Command(id),
+                });
+            }
+            self.label(
+                dc,
+                "跟随系统将自动切换明暗",
+                chrome_rect(
+                    r.left + self.s(16),
+                    r.bottom - self.s(29),
+                    r.right - self.s(12),
+                    r.bottom - self.s(7),
+                ),
+                10,
+                false,
+                p.muted,
+                DT_SINGLELINE | DT_VCENTER,
+            );
+        } else if self.tooltip_visible
+            && self.pressed.is_none()
+            && let Some(text) = self.header_tip()
+            && let Some(hit) = self
+                .hits
+                .iter()
+                .find(|h| h.action == Hit::Command(self.hover.unwrap_or(0)))
+        {
+            let width = self.s((text
+                .chars()
+                .map(|c| if c.is_ascii() { 6 } else { 11 })
+                .sum::<i32>()
+                + 26)
+                .max(80));
+            let left = ((hit.rect.left + hit.rect.right - width) / 2)
+                .clamp(self.s(8), self.width - width - self.s(8));
+            let r = chrome_rect(left, self.s(55), left + width, self.s(89));
+            chrome_round(dc, r, p.fg, self.s(6));
+            self.label(
+                dc,
+                text,
+                r,
+                11,
+                false,
+                p.bg,
+                DT_SINGLELINE | DT_CENTER | DT_VCENTER,
+            );
+        }
     }
 
     pub(super) unsafe fn paint_header(&mut self, dc: HDC, p: Palette) {
         Self::fill(dc, &chrome_rect(1, 1, self.width - 1, self.s(48)), p.panel);
-        let brand = self.width >= self.s(760) || self.document_name.is_empty();
+        let left = self.header_left();
+        let controls_left = self.width - self.s(132) - 1;
+        let brand = self.document.is_none() || self.width >= self.s(900);
+        self.feather_mark(
+            dc,
+            chrome_rect(self.s(16), self.s(12), self.s(40), self.s(36)),
+            p.accent,
+        );
         if brand {
             self.label(
                 dc,
                 "FeatherMD",
-                chrome_rect(self.s(18), 1, self.s(129), self.s(48)),
+                chrome_rect(self.s(48), 1, self.s(142), self.s(48)),
                 13,
                 true,
                 p.fg,
                 DT_SINGLELINE | DT_VCENTER,
             );
         }
-        let controls_left = self.width - self.s(132) - 1;
-        let actions_left = controls_left - self.s(152);
         if !self.document_name.is_empty() {
-            let tab = chrome_rect(
-                self.s(if brand { 144 } else { 21 }),
-                self.s(9),
-                actions_left - self.s(12),
-                self.s(39),
-            );
-            if tab.right - tab.left > self.s(60) {
-                let badge = chrome_rect(tab.left, self.s(16), tab.left + self.s(25), self.s(32));
-                chrome_round(dc, badge, p.code, self.s(3));
-                self.label(
+            let x = self.s(if brand { 161 } else { 52 });
+            if brand {
+                Self::fill(
                     dc,
-                    "MD",
-                    badge,
-                    9,
-                    true,
-                    p.accent,
-                    DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                );
-                let name = self.document_name.clone();
-                self.label(
-                    dc,
-                    &name,
-                    chrome_rect(tab.left + self.s(35), tab.top, tab.right, tab.bottom),
-                    12,
-                    false,
-                    p.fg,
-                    DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
+                    &chrome_rect(self.s(147), self.s(17), self.s(147) + 1, self.s(31)),
+                    p.edge,
                 );
             }
+            let name = self.document_name.clone();
+            self.label(
+                dc,
+                &name,
+                chrome_rect(x, 1, left - self.s(16), self.s(48)),
+                12,
+                false,
+                p.muted,
+                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
+            );
         }
-        for (left, right, text, id) in [
-            (0, 48, "查找", FIND),
-            (50, 98, "打开", OPEN),
-            (102, 146, "更多", SETTINGS),
+        chrome_round(
+            dc,
+            chrome_rect(left, self.s(7), left + self.s(76), self.s(41)),
+            p.code,
+            self.s(9),
+        );
+        for (offset, id, selected) in [
+            (2, PREVIEW, !self.settings.raw),
+            (38, SOURCE, self.settings.raw),
         ] {
+            let rect = chrome_rect(
+                left + self.s(offset),
+                self.s(9),
+                left + self.s(offset + 36),
+                self.s(39),
+            );
             self.chrome_button(
                 dc,
-                text,
-                chrome_rect(
-                    actions_left + self.s(left),
-                    self.s(9),
-                    actions_left + self.s(right),
-                    self.s(39),
-                ),
+                "",
+                rect,
                 id,
-                ChromeTone::Quiet,
+                if selected {
+                    ChromeTone::Selected
+                } else {
+                    ChromeTone::Quiet
+                },
                 p,
             );
+            self.chrome_glyph(dc, rect, id, if selected { p.accent } else { p.muted });
+        }
+        Self::fill(
+            dc,
+            &chrome_rect(
+                left + self.s(86),
+                self.s(17),
+                left + self.s(86) + 1,
+                self.s(31),
+            ),
+            p.edge,
+        );
+        for (offset, width, id) in [
+            (96, 36, OPEN),
+            (134, 36, FIND),
+            (172, 44, THEME_PICKER),
+            (218, 36, SETTINGS),
+        ] {
+            let rect = chrome_rect(
+                left + self.s(offset),
+                self.s(7),
+                left + self.s(offset + width),
+                self.s(41),
+            );
+            self.chrome_button(
+                dc,
+                "",
+                rect,
+                id,
+                if id == THEME_PICKER && self.theme_menu.is_some() {
+                    ChromeTone::Selected
+                } else {
+                    ChromeTone::Quiet
+                },
+                p,
+            );
+            let glyph = if id == THEME_PICKER {
+                match self.settings.theme {
+                    Theme::Light => THEME_LIGHT,
+                    Theme::Dark => THEME_DARK,
+                    Theme::System => THEME_SYSTEM,
+                    Theme::Sepia => THEME_SEPIA,
+                }
+            } else {
+                id
+            };
+            let mut icon = rect;
+            if id == THEME_PICKER {
+                icon.right -= self.s(10);
+            }
+            self.chrome_glyph(dc, icon, glyph, p.muted);
+            if id == THEME_PICKER {
+                self.chrome_glyph(
+                    dc,
+                    chrome_rect(
+                        rect.right - self.s(15),
+                        rect.top,
+                        rect.right - self.s(3),
+                        rect.bottom,
+                    ),
+                    THEME_PICKER,
+                    p.muted,
+                );
+            }
         }
         for (index, id) in [MINIMIZE, MAXIMIZE, EXIT].into_iter().enumerate() {
             let x = controls_left + self.s(index as i32 * 44);
             let rect = chrome_rect(x, 1, x + self.s(44), self.s(48));
             self.chrome_button(dc, "", rect, id, ChromeTone::Quiet, p);
-            self.chrome_window_icon(dc, rect, id, p.fg);
+            self.chrome_window_icon(dc, rect, id, p.muted);
         }
-
         Self::fill(
             dc,
             &chrome_rect(1, self.s(48), self.width - 1, self.s(48) + 1),
@@ -280,6 +488,9 @@ impl App {
     }
 
     pub(super) unsafe fn paint_outline(&mut self, dc: HDC, p: Palette) {
+        if self.document.is_none() {
+            return;
+        }
         let width = self.sidebar_width();
         if width == 0 {
             let expand = chrome_rect(self.s(6), self.s(62), self.s(38), self.s(94));
@@ -447,47 +658,88 @@ impl App {
     }
 
     pub(super) unsafe fn paint_welcome(&mut self, dc: HDC, p: Palette) {
-        let sidebar = self.sidebar_width();
-        let left = sidebar + ((self.width - sidebar - self.s(360)) / 2).max(self.s(24));
+        let center = self.width / 2;
         let room = self.content_bottom() - self.content_top();
-        let compact = room < self.s(260);
-        let (line, description, action, hint, block) = if compact {
-            (36, 82, 120, 174, 200)
-        } else {
-            (42, 101, 147, 207, 236)
-        };
-        let top = self.content_top() + ((room - self.s(block)) / 2).max(self.s(6));
-        for (i, text) in ["打开一份文档，", "开始阅读。"].into_iter().enumerate() {
-            self.label(
-                dc,
-                text,
-                chrome_rect(
-                    left,
-                    top + self.s(i as i32 * line),
-                    self.width - self.s(36),
-                    top + self.s(line + i as i32 * line),
-                ),
-                if compact { 26 } else { 28 },
-                true,
-                p.fg,
-                DT_SINGLELINE | DT_VCENTER,
-            );
-        }
+        let top = self.content_top() + ((room - self.s(322)) / 2).max(self.s(8));
+        let mark = chrome_rect(
+            center - self.s(32),
+            top,
+            center + self.s(32),
+            top + self.s(64),
+        );
+        chrome_round(dc, mark, p.selection, self.s(20));
+        self.feather_mark(
+            dc,
+            chrome_rect(
+                mark.left + self.s(15),
+                mark.top + self.s(14),
+                mark.right - self.s(14),
+                mark.bottom - self.s(15),
+            ),
+            p.accent,
+        );
         self.label(
             dc,
-            "拖入 Markdown 文件，或从这里打开。",
+            "F E A T H E R M D",
             chrome_rect(
-                left,
-                top + self.s(description),
-                self.width - self.s(30),
-                top + self.s(description + 25),
+                center - self.s(220),
+                top + self.s(79),
+                center + self.s(220),
+                top + self.s(102),
+            ),
+            10,
+            true,
+            p.muted,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+        self.label(
+            dc,
+            "把注意力，留给文字。",
+            chrome_rect(
+                center - self.s(260),
+                top + self.s(113),
+                center + self.s(260),
+                top + self.s(156),
+            ),
+            28,
+            true,
+            p.fg,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+        self.label(
+            dc,
+            "一个轻量、离线的 Markdown 阅读空间",
+            chrome_rect(
+                center - self.s(240),
+                top + self.s(168),
+                center + self.s(240),
+                top + self.s(196),
             ),
             13,
             false,
             p.muted,
-            DT_SINGLELINE | DT_VCENTER,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
         );
-        self.chrome_button(
+        let action = chrome_rect(
+            center - self.s(104),
+            top + self.s(222),
+            center + self.s(104),
+            top + self.s(268),
+        );
+        self.chrome_button(dc, "", action, OPEN, ChromeTone::Primary, p);
+        let foreground = p.bg;
+        self.chrome_glyph(
+            dc,
+            chrome_rect(
+                action.left + self.s(15),
+                action.top,
+                action.left + self.s(43),
+                action.bottom,
+            ),
+            OPEN,
+            foreground,
+        );
+        self.label(
             dc,
             if self.loading {
                 "正在打开…"
@@ -495,42 +747,43 @@ impl App {
                 "打开文档"
             },
             chrome_rect(
-                left,
-                top + self.s(action),
-                left + self.s(140),
-                top + self.s(action + 40),
+                action.left + self.s(52),
+                action.top,
+                action.right - self.s(67),
+                action.bottom,
             ),
-            OPEN,
-            ChromeTone::Primary,
-            p,
-        );
-        self.label(
-            dc,
-            "Ctrl + O",
-            chrome_rect(
-                left + self.s(157),
-                top + self.s(action),
-                left + self.s(244),
-                top + self.s(action + 40),
-            ),
-            12,
-            false,
-            p.muted,
+            13,
+            true,
+            foreground,
             DT_SINGLELINE | DT_VCENTER,
         );
         self.label(
             dc,
-            "只读文档   ·   离线阅读",
+            "Ctrl O",
             chrome_rect(
-                left,
-                top + self.s(hint),
-                self.width - self.s(30),
-                top + self.s(hint + 25),
+                action.right - self.s(61),
+                action.top,
+                action.right - self.s(12),
+                action.bottom,
+            ),
+            10,
+            false,
+            foreground,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+        self.label(
+            dc,
+            "或拖入 .md / .markdown / .txt 文件",
+            chrome_rect(
+                center - self.s(230),
+                top + self.s(286),
+                center + self.s(230),
+                top + self.s(312),
             ),
             11,
             false,
             p.muted,
-            DT_SINGLELINE | DT_VCENTER,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
         );
     }
 
@@ -543,7 +796,10 @@ impl App {
         );
         Self::fill(dc, &chrome_rect(1, top, self.width - 1, top + 1), p.edge);
         let mut metadata = "只读  ·  离线".to_string();
-        let mut status = if self.status == "就绪" || self.status.starts_with("离线阅读") {
+        let mut status = if self.status == "就绪"
+            || self.status == "只读 · 离线阅读"
+            || self.status.starts_with("离线阅读")
+        {
             String::new()
         } else {
             self.status.clone()

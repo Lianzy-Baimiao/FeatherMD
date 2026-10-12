@@ -1,6 +1,10 @@
 //! Native Win32 shell. All file I/O and searches run off the window thread.
 #![allow(unsafe_op_in_unsafe_fn)]
+mod about;
 mod chrome;
+mod smooth;
+mod snapshot;
+mod typography;
 use crate::layout::{FontKey, Fonts, Layout, Row};
 use feathermd::{
     document::{Document, Page, SearchResult, human_size},
@@ -18,11 +22,12 @@ use std::{
     path::PathBuf,
     ptr::{null, null_mut},
     sync::{Arc, atomic::Ordering},
+    time::{Duration, Instant},
 };
 use windows_sys::Win32::{
     Foundation::*,
     Graphics::{Dwm::*, Gdi::*},
-    System::{DataExchange::*, LibraryLoader::*, Memory::*},
+    System::{DataExchange::*, LibraryLoader::*, Memory::*, Registry::*},
     UI::{
         Controls::{Dialogs::*, WM_MOUSELEAVE},
         HiDpi::*,
@@ -44,8 +49,13 @@ const WRAP: usize = 204;
 const RAW: usize = 205;
 const WIDE: usize = 206;
 const RESET: usize = 207;
+const THEME_LIGHT: usize = 208;
+const THEME_DARK: usize = 209;
+const THEME_SYSTEM: usize = 210;
+const THEME_SEPIA: usize = 211;
 const REGISTER: usize = 301;
 const UNREGISTER: usize = 302;
+const DEFAULT_APP: usize = 303;
 const ABOUT: usize = 401;
 const NEXT: usize = 402;
 const SETTINGS: usize = 403;
@@ -57,6 +67,9 @@ const MAXIMIZE: usize = 408;
 const PREVIEW: usize = 409;
 const SOURCE: usize = 410;
 const OUTLINE: usize = 411;
+const THEME_PICKER: usize = 412;
+const THEME_PANEL: usize = 413;
+const TYPOGRAPHY: usize = 414;
 const fn make_resource(id: u16) -> *const u16 {
     id as usize as *const u16
 }
@@ -65,6 +78,22 @@ fn w(s: &str) -> Vec<u16> {
 }
 fn rgb(r: u32, g: u32, b: u32) -> u32 {
     r | (g << 8) | (b << 16)
+}
+fn system_uses_dark_theme() -> bool {
+    let mut light = 1u32;
+    let mut bytes = size_of::<u32>() as u32;
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize").as_ptr(),
+            w("AppsUseLightTheme").as_ptr(),
+            RRF_RT_REG_DWORD,
+            null_mut(),
+            (&mut light as *mut u32).cast(),
+            &mut bytes,
+        )
+    };
+    result == 0 && light == 0
 }
 #[derive(Clone, Copy)]
 struct Palette {
@@ -80,7 +109,7 @@ struct Palette {
 impl Palette {
     fn new(theme: Theme) -> Self {
         match theme {
-            Theme::Light => Self {
+            Theme::Light | Theme::System => Self {
                 bg: rgb(252, 252, 250),
                 fg: rgb(35, 43, 48),
                 muted: rgb(108, 117, 124),
@@ -149,7 +178,9 @@ struct App {
     menu: HMENU,
     settings_menu: HMENU,
     fonts: Fonts,
+    reading_fonts: Fonts,
     settings: Settings,
+    system_dark: bool,
     settings_path: PathBuf,
     workers: Workers,
     io_ticket: u64,
@@ -168,6 +199,9 @@ struct App {
     mouse: Option<(i32, i32)>,
     hover: Option<usize>,
     pressed: Option<Hit>,
+    theme_menu: Option<usize>,
+    hover_since: Option<Instant>,
+    tooltip_visible: bool,
     drag: Option<ScrollDrag>,
     wheel_remainder: i32,
     horizontal_wheel_remainder: i32,
@@ -194,7 +228,9 @@ impl App {
             menu: null_mut(),
             settings_menu: null_mut(),
             fonts: Fonts::new(96),
+            reading_fonts: Fonts::with_family(96, &settings.font_family),
             settings,
+            system_dark: system_uses_dark_theme(),
             settings_path,
             workers: Workers::new(),
             io_ticket: 0,
@@ -213,6 +249,9 @@ impl App {
             mouse: None,
             hover: None,
             pressed: None,
+            theme_menu: None,
+            hover_since: None,
+            tooltip_visible: false,
             drag: None,
             wheel_remainder: 0,
             horizontal_wheel_remainder: 0,
@@ -252,7 +291,7 @@ impl App {
             + ((self.width - self.sidebar_width() - self.body_width()) / 2).max(self.s(20))
     }
     fn sidebar_width(&self) -> i32 {
-        if self.settings.outline {
+        if self.settings.outline && self.document.is_some() {
             self.s(if self.width < self.s(800) { 192 } else { 232 })
         } else {
             0
@@ -378,7 +417,7 @@ impl App {
                 dc,
                 &blocks,
                 &self.settings,
-                &mut self.fonts,
+                &mut self.reading_fonts,
                 width,
             ));
             ReleaseDC(self.hwnd, dc);
@@ -741,13 +780,22 @@ impl App {
         }
         false
     }
-    unsafe fn persist(&mut self) {
+    unsafe fn save_preferences(&mut self) {
         if let Err(e) = self.settings.save(&self.settings_path) {
             self.status = format!("设置未能保存：{e}");
         }
         self.update_checks();
+    }
+    unsafe fn persist(&mut self) {
+        self.save_preferences();
         let a = self.current();
         self.relayout(a);
+    }
+    unsafe fn persist_theme(&mut self) {
+        // Colors do not change layout. Keep wrapped-row, selection and horizontal position.
+        self.save_preferences();
+        self.invalidate();
+        InvalidateRect(self.edit, null(), 1);
     }
     unsafe fn update_checks(&self) {
         for (id, checked) in [
@@ -755,6 +803,7 @@ impl App {
             (RAW, self.settings.raw),
             (WIDE, self.settings.wide),
             (OUTLINE, self.settings.outline),
+            (THEME_SEPIA, self.settings.theme == Theme::Sepia),
         ] {
             CheckMenuItem(
                 self.menu,
@@ -935,44 +984,240 @@ impl App {
             .visible_end(self.top)
             .saturating_sub(self.top)
     }
+    unsafe fn register_open_with(&mut self) -> bool {
+        match std::env::current_exe().and_then(|path| crate::association::register(&path)) {
+            Ok(()) => {
+                self.status = "已加入 Markdown 文件的右键打开方式".into();
+                true
+            }
+            Err(error) => {
+                self.error(&format!("无法加入打开方式：{error}"));
+                false
+            }
+        }
+    }
+    unsafe fn choose_default_app(&mut self) {
+        if !self.register_open_with() {
+            return;
+        }
+        // Opening Settings is not evidence that the default actually changed.
+        // Windows owns the final per-user association choice.
+        for uri in [
+            "ms-settings:defaultapps?registeredAppUser=FeatherMD",
+            "ms-settings:defaultapps",
+        ] {
+            let result = ShellExecuteW(
+                self.hwnd,
+                w("open").as_ptr(),
+                w(uri).as_ptr(),
+                null(),
+                null(),
+                SW_SHOWNORMAL,
+            ) as isize;
+            if result > 32 {
+                self.status = "请在 Windows 默认应用中将 .md 设为 FeatherMD".into();
+                return;
+            }
+        }
+        self.error("已加入打开方式，但无法打开 Windows 默认应用设置。\n请右键 .md 文件 → 打开方式 → 选择其他应用 → FeatherMD → 始终使用。");
+    }
     #[allow(
         clippy::collapsible_match,
         reason = "Keep user-confirmation side effects inside the selected command"
     )]
     unsafe fn command(&mut self, id: usize) {
+        self.tooltip_visible = false;
+        self.hover_since = None;
+        if id != THEME_PICKER && id != THEME_PANEL {
+            self.theme_menu = None;
+        }
         match id {
+            THEME_PICKER => {
+                SetFocus(self.hwnd);
+                self.theme_menu = if self.theme_menu.is_some() {
+                    None
+                } else {
+                    Some(match self.settings.theme {
+                        Theme::Light => 0,
+                        Theme::Dark => 1,
+                        _ => 2,
+                    })
+                };
+            }
+            THEME_PANEL => {}
+
             OUTLINE => self.toggle_outline(),
-            MINIMIZE => { PostMessageW(self.hwnd, WM_SYSCOMMAND, SC_MINIMIZE as usize, 0); },
-            MAXIMIZE => { PostMessageW(self.hwnd, WM_SYSCOMMAND, if IsZoomed(self.hwnd) != 0 { SC_RESTORE } else { SC_MAXIMIZE } as usize, 0); },
-            PREVIEW | SOURCE => { self.settings.raw = id == SOURCE; self.persist(); },
+            MINIMIZE => {
+                PostMessageW(self.hwnd, WM_SYSCOMMAND, SC_MINIMIZE as usize, 0);
+            }
+            MAXIMIZE => {
+                PostMessageW(
+                    self.hwnd,
+                    WM_SYSCOMMAND,
+                    if IsZoomed(self.hwnd) != 0 {
+                        SC_RESTORE
+                    } else {
+                        SC_MAXIMIZE
+                    } as usize,
+                    0,
+                );
+            }
+            PREVIEW | SOURCE => {
+                if self.settings.raw != (id == SOURCE) {
+                    self.settings.raw = id == SOURCE;
+                    self.persist();
+                }
+            }
             FILE_MENU | HELP_MENU => {
                 let menu = GetSubMenu(self.menu, if id == FILE_MENU { 0 } else { 2 });
-                let mut point = POINT { x: self.s(20), y: self.s(94) };
+                let mut point = POINT {
+                    x: self.s(20),
+                    y: self.s(94),
+                };
                 ClientToScreen(self.hwnd, &mut point);
-                let selected = TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, self.hwnd, null());
-                if selected > 0 { self.command(selected as usize); }
-            },
-            LICENSES=>self.export_licenses(),
-            OPEN=>self.dialog(), FIND|GOTO=>self.show_edit(id), NEXT=>self.search(), COPY=>self.copy(), EXIT=>{DestroyWindow(self.hwnd);},
-            RELOAD=>{if let Some(doc)=&self.document {let p=doc.path.clone();self.open(p);}},
-            THEME=>{self.settings.theme=match self.settings.theme {Theme::Light=>Theme::Dark,Theme::Dark=>Theme::Sepia,Theme::Sepia=>Theme::Light};self.persist();},
-            ZOOM_IN=>{self.settings.font_size=(self.settings.font_size+2).min(36);self.persist();},
-            ZOOM_OUT=>{self.settings.font_size=(self.settings.font_size-2).max(12);self.persist();},
-            WRAP=>{self.settings.wrap= !self.settings.wrap;self.persist();}, RAW=>{self.settings.raw= !self.settings.raw;self.persist();}, WIDE=>{self.settings.wide= !self.settings.wide;self.persist();},
-            RESET=>{self.settings=Settings::default();self.persist();self.start_outline();},
-            SETTINGS=>{let mut point=POINT{x:self.width-self.s(145),y:self.s(46)};ClientToScreen(self.hwnd,&mut point);let id=TrackPopupMenu(self.settings_menu,TPM_RIGHTALIGN|TPM_RETURNCMD,point.x,point.y,0,self.hwnd,null());if id>0{self.command(id as usize);}},
-            REGISTER=>{
-                if MessageBoxW(self.hwnd,w("将 FeatherMD 添加到 Windows 的打开方式列表。\n不会强行更改当前默认应用；下一步由你在系统设置中选择 .md → FeatherMD。\n\n建议先把 EXE 放在固定位置。是否继续？").as_ptr(),w("注册 Markdown 查看器").as_ptr(),MB_OKCANCEL|MB_ICONINFORMATION)==IDOK {
-                    match std::env::current_exe().and_then(|p|crate::association::register(&p)) { Ok(())=>{self.status="已注册，请在系统默认应用中选择 FeatherMD".into();ShellExecuteW(self.hwnd,w("open").as_ptr(),w("ms-settings:defaultapps").as_ptr(),null(),null(),SW_SHOWNORMAL);},Err(e)=>self.error(&e.to_string()) }
+                let selected =
+                    TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, self.hwnd, null());
+                if selected > 0 {
+                    self.command(selected as usize);
                 }
-            },
-            UNREGISTER=>{if MessageBoxW(self.hwnd,w("移除 FeatherMD 的打开方式注册？不会删除文件或其他应用的关联。").as_ptr(),w("移除注册").as_ptr(),MB_OKCANCEL|MB_ICONQUESTION)==IDOK {match crate::association::unregister(){Ok(())=>self.status="已移除打开方式注册".into(),Err(e)=>self.error(&e.to_string())}}},
-            ABOUT=>{MessageBoxW(self.hwnd,w(concat!("FeatherMD 羽读  ",env!("CARGO_PKG_VERSION"),"\n\n原生 Rust / Win32 · 单文件 · 无联网请求\n\nCtrl+O 打开　Ctrl+F 搜索　F3 下一个\nCtrl+G 百分比跳转　F5 重新载入\nCtrl+鼠标滚轮 缩放　Ctrl+R 源码模式\n拖选整行，Ctrl+C 复制；Ctrl+A 选择当前分页\n\n采用有界 UTF-8 分页预览，不做全文件预解析。\n随机跳转后的跨页代码围栏 / 列表上下文可能不完整，\n可切换源码模式。图片显示替代文本，不执行 HTML。\n\nLianzy-Baimiao / FeatherMD · MIT License")).as_ptr(),w("关于 / 快捷键").as_ptr(),MB_OK|MB_ICONINFORMATION);},
-            _=>{}
+            }
+            LICENSES => self.export_licenses(),
+            OPEN => self.dialog(),
+            FIND | GOTO => self.show_edit(id),
+            NEXT => self.search(),
+            COPY => self.copy(),
+            EXIT => {
+                DestroyWindow(self.hwnd);
+            }
+            RELOAD => {
+                if let Some(doc) = &self.document {
+                    let p = doc.path.clone();
+                    self.open(p);
+                }
+            }
+            THEME => {
+                self.settings.theme = match self.settings.theme {
+                    Theme::System => Theme::Light,
+                    Theme::Light => Theme::Dark,
+                    Theme::Dark => Theme::Sepia,
+                    Theme::Sepia => Theme::Light,
+                };
+                self.persist_theme();
+            }
+            THEME_LIGHT | THEME_DARK | THEME_SYSTEM | THEME_SEPIA => {
+                self.settings.theme = match id {
+                    THEME_LIGHT => Theme::Light,
+                    THEME_DARK => Theme::Dark,
+                    THEME_SEPIA => Theme::Sepia,
+                    _ => Theme::System,
+                };
+                self.system_dark = system_uses_dark_theme();
+                self.persist_theme();
+            }
+            ZOOM_IN => {
+                self.settings.font_size = (self.settings.font_size + 2).min(36);
+                self.persist();
+            }
+            ZOOM_OUT => {
+                self.settings.font_size = (self.settings.font_size - 2).max(12);
+                self.persist();
+            }
+            WRAP => {
+                self.settings.wrap = !self.settings.wrap;
+                self.persist();
+            }
+            RAW => {
+                self.settings.raw = !self.settings.raw;
+                self.persist();
+            }
+            WIDE => {
+                self.settings.wide = !self.settings.wide;
+                self.persist();
+            }
+            RESET => {
+                self.settings = Settings::default();
+                self.reading_fonts = Fonts::with_family(self.fonts.dpi, &self.settings.font_family);
+                self.persist();
+                self.start_outline();
+            }
+            SETTINGS => {
+                let mut point = POINT {
+                    x: self.width - self.s(145),
+                    y: self.s(46),
+                };
+                ClientToScreen(self.hwnd, &mut point);
+                let id = TrackPopupMenu(
+                    self.settings_menu,
+                    TPM_RIGHTALIGN | TPM_RETURNCMD,
+                    point.x,
+                    point.y,
+                    0,
+                    self.hwnd,
+                    null(),
+                );
+                if id > 0 {
+                    self.command(id as usize);
+                }
+            }
+            REGISTER => {
+                self.register_open_with();
+            }
+            DEFAULT_APP => self.choose_default_app(),
+            UNREGISTER => {
+                if MessageBoxW(
+                    self.hwnd,
+                    w("移除 FeatherMD 的打开方式注册？不会删除文件或其他应用的关联。").as_ptr(),
+                    w("移除注册").as_ptr(),
+                    MB_OKCANCEL | MB_ICONQUESTION,
+                ) == IDOK
+                {
+                    match crate::association::unregister() {
+                        Ok(()) => self.status = "已移除打开方式注册".into(),
+                        Err(e) => self.error(&e.to_string()),
+                    }
+                }
+            }
+            TYPOGRAPHY => {
+                PostMessageW(self.hwnd, WM_APP + 44, 0, 0);
+            }
+            ABOUT => {
+                // Enter the modal loop only after the current App borrow has been released.
+                PostMessageW(self.hwnd, WM_APP + 43, 0, 0);
+            }
+            _ => {}
         }
         self.invalidate();
     }
     unsafe fn keyboard(&mut self, key: usize, ctrl: bool) -> bool {
+        if ctrl && key == 0x54 {
+            self.command(THEME_PICKER);
+            return true;
+        }
+        if let Some(index) = self.theme_menu {
+            if !ctrl {
+                match key {
+                    0x1b => self.theme_menu = None,
+                    0x26 => self.theme_menu = Some((index + 2) % 3),
+                    0x28 | 0x09 => {
+                        self.theme_menu = Some(
+                            (index
+                                + if key == 0x09 && GetKeyState(VK_SHIFT as i32) < 0 {
+                                    2
+                                } else {
+                                    1
+                                })
+                                % 3,
+                        )
+                    }
+                    0x0d | 0x20 => self.command([THEME_LIGHT, THEME_DARK, THEME_SYSTEM][index]),
+                    _ => {}
+                }
+                self.invalidate();
+                return true;
+            }
+            self.theme_menu = None;
+        }
+
         if ctrl {
             match key {
                 0x4f => self.command(OPEN),
@@ -1069,7 +1314,7 @@ impl App {
         let dc = CreateCompatibleDC(target);
         let bitmap = CreateCompatibleBitmap(target, self.width.max(1), self.height.max(1));
         let old_bitmap = SelectObject(dc, bitmap);
-        let p = Palette::new(self.settings.theme);
+        let p = Palette::new(self.settings.theme.resolve(self.system_dark));
         let all = RECT {
             left: 0,
             top: 0,
@@ -1160,7 +1405,7 @@ impl App {
                     for run in &row.runs {
                         let x = left + run.x - self.horizontal;
                         let text_y = y + (row.height - self.fonts.scale(run.font.size)) / 2 - 1;
-                        let old = SelectObject(dc, self.fonts.get(run.font));
+                        let old = SelectObject(dc, self.reading_fonts.get(run.font));
                         if run.code && !selected && !found {
                             Self::fill(
                                 dc,
@@ -1216,6 +1461,7 @@ impl App {
         }
         self.paint_footer(dc, p);
         self.paint_scrollbars(dc, p);
+        self.paint_header_overlay(dc, p);
         BitBlt(target, 0, 0, self.width, self.height, dc, 0, 0, SRCCOPY);
         SelectObject(dc, old_bitmap);
         DeleteObject(bitmap);
@@ -1224,72 +1470,28 @@ impl App {
             EndPaint(self.hwnd, &ps);
         }
     }
-    // Opt-in integration-test capture: all HDCs stay in this process (cross-process
-    // hidden-window PrintWindow is unreliable on some Windows/DWM versions).
     unsafe fn test_snapshot(&mut self) -> bool {
-        let Some(path) = std::env::var_os("FEATHERMD_TEST_SNAPSHOT") else {
-            return false;
-        };
-        let screen = GetDC(self.hwnd);
-        let dc = CreateCompatibleDC(screen);
-        let bitmap = CreateCompatibleBitmap(screen, self.width, self.height);
-        let old = SelectObject(dc, bitmap);
-        self.paint(Some(dc));
-        if self.edit_mode.is_some() {
-            let mut rect = RECT::default();
-            GetWindowRect(self.edit, &mut rect);
-            let mut origin = POINT {
-                x: rect.left,
-                y: rect.top,
-            };
-            ScreenToClient(self.hwnd, &mut origin);
-            let saved = SaveDC(dc);
-            SetViewportOrgEx(dc, origin.x, origin.y, null_mut());
-            SendMessageW(
-                self.edit,
-                WM_PRINT,
-                dc as usize,
-                (PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND) as isize,
-            );
-            RestoreDC(dc, saved);
-        }
-        SelectObject(dc, old);
-        let mut info: BITMAPINFO = zeroed();
-        info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
-        info.bmiHeader.biWidth = self.width;
-        info.bmiHeader.biHeight = -self.height;
-        info.bmiHeader.biPlanes = 1;
-        info.bmiHeader.biBitCount = 32;
-        info.bmiHeader.biCompression = BI_RGB;
-        let mut pixels = vec![0u8; self.width as usize * self.height as usize * 4];
-        let read = GetDIBits(
-            screen,
-            bitmap,
-            0,
-            self.height as u32,
-            pixels.as_mut_ptr().cast(),
-            &mut info,
-            DIB_RGB_COLORS,
-        );
-        DeleteObject(bitmap);
-        DeleteDC(dc);
-        ReleaseDC(self.hwnd, screen);
-        if read == 0 {
-            return false;
-        }
-        let mut out = Vec::with_capacity(pixels.len() + 54);
-        out.extend_from_slice(b"BM");
-        out.extend_from_slice(&((pixels.len() + 54) as u32).to_le_bytes());
-        out.extend_from_slice(&[0u8; 4]);
-        out.extend_from_slice(&54u32.to_le_bytes());
-        out.extend_from_slice(&40u32.to_le_bytes());
-        out.extend_from_slice(&self.width.to_le_bytes());
-        out.extend_from_slice(&(-self.height).to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes());
-        out.extend_from_slice(&32u16.to_le_bytes());
-        out.extend_from_slice(&[0u8; 24]);
-        out.extend_from_slice(&pixels);
-        std::fs::write(path, out).is_ok()
+        snapshot::capture(self.hwnd, |dc| {
+            self.paint(Some(dc));
+            if self.edit_mode.is_some() {
+                let mut rect = RECT::default();
+                GetWindowRect(self.edit, &mut rect);
+                let mut origin = POINT {
+                    x: rect.left,
+                    y: rect.top,
+                };
+                ScreenToClient(self.hwnd, &mut origin);
+                let saved = SaveDC(dc);
+                SetViewportOrgEx(dc, origin.x, origin.y, null_mut());
+                SendMessageW(
+                    self.edit,
+                    WM_PRINT,
+                    dc as usize,
+                    (PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND) as isize,
+                );
+                RestoreDC(dc, saved);
+            }
+        })
     }
     fn hit(&self, x: i32, y: i32) -> Option<Hit> {
         self.hits
@@ -1319,6 +1521,32 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<App>;
     if ptr.is_null() {
         return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    if msg == WM_APP + 44 {
+        if IsWindowEnabled(hwnd) != 0 {
+            let settings = (*ptr).try_borrow().ok().map(|app| app.settings.clone());
+            if let Some(settings) = settings
+                && let Some((family, size)) = typography::choose(hwnd, &settings)
+                && let Ok(mut app) = (*ptr).try_borrow_mut()
+                && (app.settings.font_family != family || app.settings.font_size != size)
+            {
+                app.settings.font_family = family;
+                app.settings.font_size = size;
+                app.reading_fonts = Fonts::with_family(app.fonts.dpi, &app.settings.font_family);
+                app.persist();
+                app.invalidate();
+            }
+        }
+        return 0;
+    }
+    if msg == WM_APP + 43 {
+        if IsWindowEnabled(hwnd) != 0 {
+            let theme = (*ptr).try_borrow().ok().map(|app| app.settings.theme);
+            if let Some(theme) = theme {
+                about::show(hwnd, theme);
+            }
+        }
+        return 0;
     }
     // Modal Win32 calls may re-enter this procedure. Never alias a mutable App reference.
     let Ok(mut app) = (*ptr).try_borrow_mut() else {
@@ -1368,6 +1596,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 .map_or(0, |o| o.headings.len() as isize),
             35 => app.sidebar_width() as isize,
             36 => app.outline_top as isize,
+            38 => app.settings.raw as isize,
+            39 => match app.settings.theme {
+                Theme::System => 0,
+                Theme::Light => 1,
+                Theme::Dark => 2,
+                Theme::Sepia => 3,
+            },
+            40 => (app.settings.theme.resolve(app.system_dark) == Theme::Dark) as isize,
+            41 => app.system_dark as isize,
+            42 => app.theme_menu.map_or(-1, |i| i as isize),
+            43 => app.tooltip_visible as isize,
+            44 => app.hover.map_or(-1, |id| id as isize),
+            45 => app.theme_menu_rect().top as isize,
             37 => app
                 .outline
                 .as_ref()
@@ -1398,6 +1639,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 .count() as isize,
             _ => 0,
         },
+        WM_KILLFOCUS | WM_NCLBUTTONDOWN | WM_ENTERSIZEMOVE => {
+            app.theme_menu = None;
+            app.tooltip_visible = false;
+            app.hover_since = None;
+            app.invalidate();
+            drop(app);
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
         WM_ERASEBKGND => 1,
         WM_PRINTCLIENT | WM_PRINT => {
             app.paint(Some(wp as HDC));
@@ -1409,6 +1658,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_TIMER => {
             app.receive();
+            if !app.tooltip_visible
+                && app.header_tip().is_some()
+                && app
+                    .hover_since
+                    .is_some_and(|t| t.elapsed() >= Duration::from_millis(450))
+            {
+                app.tooltip_visible = true;
+                app.invalidate();
+            }
+            0
+        }
+        WM_SETTINGCHANGE | WM_THEMECHANGED => {
+            app.system_dark = system_uses_dark_theme();
+            app.invalidate();
+            InvalidateRect(app.edit, null(), 1);
             0
         }
         WM_SIZE => {
@@ -1418,6 +1682,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 app.drag = None;
                 app.hover = None;
                 app.pressed = None;
+                app.theme_menu = None;
+                app.tooltip_visible = false;
+                app.hover_since = None;
                 let anchor = app.current();
                 let wrapped = app.wrapped_row(app.top);
                 app.relayout(anchor);
@@ -1489,6 +1756,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_DPICHANGED => {
             let anchor = app.current();
             app.fonts = Fonts::new((wp & 0xffff) as u32);
+            app.reading_fonts = Fonts::with_family(app.fonts.dpi, &app.settings.font_family);
             let r = &*(lp as *const RECT);
             SetWindowPos(
                 hwnd,
@@ -1529,6 +1797,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 DefWindowProcW(hwnd, msg, wp, lp)
             }
         }
+        WM_MOUSEWHEEL if app.theme_menu.is_some() => 0,
         WM_MOUSEWHEEL => {
             let delta = ((wp >> 16) as u16 as i16) as i32;
             app.wheel_remainder += delta;
@@ -1600,6 +1869,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let x = lp as u16 as i16 as i32;
             let y = (lp >> 16) as u16 as i16 as i32;
             app.pressed = None;
+            app.tooltip_visible = false;
+            app.hover_since = None;
+            if app.theme_menu.is_some() {
+                let r = app.theme_menu_rect();
+                if y >= app.s(48) && !(x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
+                    app.theme_menu = None;
+                    app.invalidate();
+                    return 0;
+                }
+                if x >= r.left && x < r.right && y >= r.top && y < r.bottom {
+                    app.pressed = app.hit(x, y);
+                    SetCapture(hwnd);
+                    app.invalidate();
+                    return 0;
+                }
+            }
             if app.begin_scrollbar(x, y) {
                 return 0;
             }
@@ -1629,6 +1914,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             };
             let previous_mouse = app.mouse;
             app.mouse = Some((x, y));
+            if app.hover != hover {
+                app.hover_since = hover.map(|_| Instant::now());
+                app.tooltip_visible = false;
+                if app.theme_menu.is_some()
+                    && let Some(index) = [THEME_LIGHT, THEME_DARK, THEME_SYSTEM]
+                        .iter()
+                        .position(|id| Some(*id) == hover)
+                {
+                    app.theme_menu = Some(index);
+                }
+            }
             if app.hover != hover || previous_mouse != app.mouse {
                 app.hover = hover;
                 app.invalidate();
@@ -1639,7 +1935,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 hwndTrack: hwnd,
                 dwHoverTime: 0,
             };
-            TrackMouseEvent(&mut tracking);
+            // Hidden diagnostic windows receive synthetic moves, not desktop hover.
+            if IsWindowVisible(hwnd) != 0 {
+                TrackMouseEvent(&mut tracking);
+            }
             if app.drag.is_some() {
                 app.drag_scrollbar(x, y);
             } else if app.selecting {
@@ -1731,6 +2030,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_MOUSELEAVE => {
+            app.tooltip_visible = false;
+            app.hover_since = None;
             app.hover = None;
             app.mouse = None;
             app.invalidate();
@@ -1750,7 +2051,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             1
         }
         WM_CTLCOLOREDIT => {
-            let p = Palette::new(app.settings.theme);
+            let p = Palette::new(app.settings.theme.resolve(app.system_dark));
             SetTextColor(wp as HDC, p.fg);
             SetBkColor(wp as HDC, p.bg);
             SetDCBrushColor(wp as HDC, p.bg);
@@ -1803,31 +2104,42 @@ unsafe fn menus() -> (HMENU, HMENU) {
     for (id, text) in [
         (GOTO, "跳转到百分比…\tCtrl+G"),
         (OUTLINE, "显示目录\tCtrl+B"),
-        (THEME, "切换主题：浅色 / 深色 / 护眼"),
+        (THEME_SEPIA, "护眼配色"),
+        (TYPOGRAPHY, "字体与默认字号…"),
         (ZOOM_IN, "放大字号\tCtrl++"),
         (ZOOM_OUT, "缩小字号\tCtrl+-"),
         (WRAP, "自动换行"),
         (WIDE, "宽屏阅读"),
-        (RAW, "源码模式\tCtrl+R"),
         (RESET, "恢复默认阅读设置"),
         (RELOAD, "重新载入\tF5"),
         (COPY, "复制选中行 / 可见内容\tCtrl+C"),
-        (ABOUT, "帮助 / 快捷键\tF1"),
+        (ABOUT, "关于 FeatherMD…\tF1"),
         (LICENSES, "导出内置许可证…"),
-        (REGISTER, "注册为 Markdown 查看器…"),
-        (UNREGISTER, "移除打开方式注册…"),
     ] {
         add(settings, id, text);
     }
+    AppendMenuW(settings, MF_SEPARATOR, 0, null());
+    let associations = CreatePopupMenu();
+    add(associations, REGISTER, "加入 Markdown 右键打开方式");
+    add(associations, DEFAULT_APP, "设为 .md 默认应用（系统确认）…");
+    AppendMenuW(associations, MF_SEPARATOR, 0, null());
+    add(associations, UNREGISTER, "移除打开方式注册…");
+    AppendMenuW(
+        settings,
+        MF_POPUP,
+        associations as usize,
+        w("文件关联").as_ptr(),
+    );
     AppendMenuW(menu, MF_POPUP, settings as usize, w("设置(&S)").as_ptr());
     let help = CreatePopupMenu();
-    add(help, ABOUT, "关于 / 快捷键\tF1");
+    add(help, ABOUT, "关于 FeatherMD…\tF1");
     add(help, LICENSES, "导出内置许可证…");
     AppendMenuW(menu, MF_POPUP, help as usize, w("帮助(&H)").as_ptr());
     (menu, settings)
 }
 pub fn run(path: Option<PathBuf>) -> Result<(), String> {
     unsafe {
+        let _graphics = smooth::Session::start()?;
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let instance = GetModuleHandleW(null());
         let class = w("FeatherMD.Native.Reader");
@@ -1889,6 +2201,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             a.menu = menu;
             a.settings_menu = settings_menu;
             a.fonts = Fonts::new(GetDpiForWindow(hwnd));
+            a.reading_fonts = Fonts::with_family(a.fonts.dpi, &a.settings.font_family);
             a.edit = CreateWindowExW(
                 0,
                 w("EDIT").as_ptr(),
@@ -1959,7 +2272,9 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
                     a.submit();
                     continue;
                 }
-                if GetKeyState(VK_CONTROL as i32) < 0 && matches!(msg.wParam, 0x4f | 0x46 | 0x47) {
+                if GetKeyState(VK_CONTROL as i32) < 0
+                    && matches!(msg.wParam, 0x4f | 0x46 | 0x47 | 0x54)
+                {
                     a.keyboard(msg.wParam, true);
                     continue;
                 }

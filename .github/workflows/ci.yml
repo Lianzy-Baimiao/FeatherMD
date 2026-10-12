@@ -29,6 +29,10 @@ jobs:
           ./scripts/navigation-smoke.ps1 -Shape wrapped -Output ./test-artifacts/navigation-wrapped
           ./scripts/scrollbar-smoke.ps1
           ./scripts/window-smoke.ps1
+          ./scripts/typography-smoke.ps1
+          ./scripts/typography-smoke.ps1 -Theme dark -Output ./test-artifacts/typography-dark
+          ./scripts/about-smoke.ps1
+          ./scripts/about-smoke.ps1 -Theme dark -Output ./test-artifacts/about-dark
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
@@ -41,3 +45,7 @@ jobs:
             test-artifacts/scrollbar/scrollbar.json
             test-artifacts/window/*.png
             test-artifacts/window/window.json
+            test-artifacts/about*/*.png
+            test-artifacts/about*/about.json
+            test-artifacts/typography*/*.png
+            test-artifacts/typography*/typography.json

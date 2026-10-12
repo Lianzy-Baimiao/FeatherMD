@@ -10,6 +10,26 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[test]
+fn system_theme_tracks_os_while_explicit_choices_stay_fixed() {
+    assert_eq!(Settings::default().theme, Theme::System);
+    for theme in [Theme::System, Theme::Light, Theme::Dark, Theme::Sepia] {
+        let settings = Settings {
+            theme,
+            ..Settings::default()
+        };
+        assert_eq!(Settings::parse(&settings.serialize()), settings);
+        for dark in [false, true] {
+            let expected = if theme == Theme::System {
+                if dark { Theme::Dark } else { Theme::Light }
+            } else {
+                theme
+            };
+            assert_eq!(theme.resolve(dark), expected);
+        }
+    }
+    assert_eq!(Settings::parse("theme=light").theme, Theme::Light);
+}
 struct Fixture(PathBuf);
 impl Fixture {
     fn new(data: &[u8]) -> Self {
@@ -266,4 +286,34 @@ fn sparse_100_gib_reads_only_a_window() {
     assert!(p.end - p.start <= PAGE_BYTES as u64 + 4);
     assert!(p.lines.iter().any(|l| l.text == "# end of document"));
     assert_eq!(d.size, size);
+}
+
+#[test]
+fn custom_font_settings_validate_and_survive_roundtrip() {
+    let s = Settings::parse("font_family=宋体\nfont_size=22");
+    assert_eq!(s.font_family, "宋体");
+    assert_eq!(s.font_size, 22);
+    assert_eq!(Settings::parse(&s.serialize()), s);
+    assert_eq!(
+        Settings::parse("font_size=20").font_family,
+        Settings::default().font_family
+    );
+    for bad in [
+        "",
+        "@SimSun",
+        "bad\0font",
+        "Segoe\tUI",
+        "Injected\nraw=true",
+    ] {
+        assert!(Settings::validate_font_family(bad).is_none());
+    }
+    assert!(Settings::validate_font_family(&"a".repeat(32)).is_none());
+    assert!(Settings::validate_font_family(&"a".repeat(31)).is_some());
+    assert!(Settings::validate_font_family(&"😀".repeat(16)).is_none());
+    let mut injected = s.clone();
+    injected.font_family = "Bad\nraw=true".into();
+    assert!(!Settings::parse(&injected.serialize()).raw);
+    let file = Fixture::new(b"old");
+    s.save(&file.0).unwrap();
+    assert_eq!(Settings::load(&file.0), s);
 }

@@ -13,6 +13,7 @@ public static class ScrollbarSmoke {
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint id);
  [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
  [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
+ [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
  public static IntPtr Point(int x, int y) { return new IntPtr(((long)(ushort)y << 16) | (ushort)x); }
  public static IntPtr Wheel(int delta) { return new IntPtr((long)(ushort)(short)delta << 16); }
  public static void RoundTrip(IntPtr hwnd, int x, int y, int farY) {
@@ -48,6 +49,7 @@ $oldSnapshot = $env:FEATHERMD_TEST_SNAPSHOT
 $process = $null
 $window = [IntPtr]::Zero
 $createdIni = $false
+$oldDpiContext = [IntPtr]::Zero
 function Query([int]$id) { [ScrollbarSmoke]::SendMessageW($window, 0x802a, [IntPtr]$id, [IntPtr]::Zero).ToInt64() }
 function Cursor { ((Query 9) * 1MB) + (Query 14) }
 function Idle {
@@ -125,6 +127,8 @@ function Drag([double]$fraction, [bool]$horizontal = $false, [bool]$doubleClick 
  return $position
 }
 try {
+ # Match physical coordinates returned by the reader on scaled displays.
+ $oldDpiContext = [ScrollbarSmoke]::SetThreadDpiAwarenessContext([IntPtr](-4))
  [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`nraw=false`nwide=false`n", [Text.UTF8Encoding]::new($false))
  $createdIni = $true
  $env:FEATHERMD_TEST_SNAPSHOT = Join-Path $Output 'viewport.bmp'
@@ -241,6 +245,15 @@ try {
  $paragraphMiddleRow = Query 14
  if ($paragraphByte -ne 0 -or $paragraphMiddleRow -le 0) { throw 'Cached paragraph thumb did not move through wrapped rows' }
  Capture 'cached-paragraph-middle'
+ # Theme-only changes and clicking an already selected mode must not jump a wrapped paragraph.
+ foreach ($command in @(209,208,210,211,201,409)) {
+  [void][ScrollbarSmoke]::SendMessageW($window, 0x111, [IntPtr]$command, [IntPtr]::Zero)
+  Settle
+  if ((Query 9) -ne $paragraphByte -or (Query 14) -ne $paragraphMiddleRow) {
+   throw "Header command $command moved the reading position: wrapped row $paragraphMiddleRow -> $(Query 14)"
+  }
+ }
+
  $paragraphEndByte = Drag 1.0
  $paragraphEndRow = Query 14
  if ($paragraphEndByte -ne 0 -or $paragraphEndRow -le $paragraphMiddleRow) { throw 'Cached paragraph thumb did not reach the last full viewport' }
@@ -255,6 +268,7 @@ try {
   track_page_cursor = $pageCursor; wheel_cursor = $wheelCursor
   horizontal_max = $horizontalMax; horizontal_middle = $horizontalMiddle; horizontal_end = $horizontalEnd
   capture_cancel_axes = 2; rapid_drag_round_trips = $roundTrip; short_document_scrollbars_hidden = $true
+  theme_and_selected_mode_preserve_wrapped_row = $true
   cached_paragraph_bytes = $paragraphSize; cached_paragraph_middle_row = $paragraphMiddleRow; cached_paragraph_end_row = $paragraphEndRow
   exe_bytes = (Get-Item -LiteralPath $Exe).Length
  }
@@ -266,5 +280,6 @@ try {
  } finally {
   if ($createdIni) { Remove-Item -LiteralPath $ini -ErrorAction SilentlyContinue }
   $env:FEATHERMD_TEST_SNAPSHOT = $oldSnapshot
+  if ($oldDpiContext -ne [IntPtr]::Zero) { [void][ScrollbarSmoke]::SetThreadDpiAwarenessContext($oldDpiContext) }
  }
 }

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.3 — 2026-10-12
+
+### Added
+- More → Font and default size: native installed-font selector, 12–36 px input, live preview, draft reset, Save/Cancel and persistent preferences. Body/headings use the chosen face; UI and monospace source/code stay independent.
+- GDI+ anti-aliased vector chrome with rounded strokes and curved feather/eye/moon icons, without downloadable assets or third-party runtime dependencies.
+- Font-dialog native light/dark tests for keyboard selection, validation, cancellation, restart, rendering isolation and GDI resource cleanup.
+- Redesigned the main header, not just About: feather identity, compact preview/source icon capsule, one theme button with a themed picker, and folder/search/ellipsis actions with delayed shortcut tooltips. Ctrl+T opens appearance; arrows/Tab, Enter and Escape work in the picker.
+- Centered welcome page with a feather mark and one open/drop affordance; no empty outline pane before opening a document.
+- Native regressions for popup pointer/keyboard interactions, outside/focus/resize dismissal, search-field avoidance, tooltip delay and narrow light/dark welcome layouts.
+- More → About FeatherMD (F1), with a custom native, theme-aware card layout, version badge, GitHub/project and voluntary support links, and collapsible keyboard help. Links always require confirmation with Cancel as the default.
+- MIT and 爱发电 README badges matching WowAltBoard’s flat-square style, plus light/dark About previews.
+- About native regression for link destinations/cancellation, Tab/Enter/Escape, expandable help and GDI resource cleanup.
+- Direct header access to preview/source and light/dark/follow-system, now compacted into an icon capsule and one appearance button. System preference is the default for new settings, refreshes on Windows theme notifications and persists independently of its resolved color.
+- A dedicated File associations submenu with separate actions for adding FeatherMD to Markdown's Open with list, choosing it as the .md default through Windows, and removing registration.
+- Registration completes without opening Settings or asking an extra confirmation. Default selection automatically registers the app and opens its per-user Default apps page where supported, with a Settings-home fallback and accurate failure reporting.
+- Friendly application metadata and isolated Windows registry integration coverage for repeated registration, quoted Unicode paths, value types and cleanup that preserves other applications and default choices.
+
+### Fixed
+- Theme-only changes no longer rebuild layout or reset wrapped-paragraph reading position. Clicking the already-selected reading mode is a no-op.
+- Scrollbar smoke tests use physical coordinates on scaled displays and verify reading-position stability across all theme commands.
+
+### Platform boundary
+- Windows 10/11 require user confirmation through the system's Default apps interface. No unsupported silent default setter or UserChoice hash manipulation is included.
+
 ## 0.1.2 — 2026-10-12
 
 ### Added

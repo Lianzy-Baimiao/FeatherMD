@@ -81,12 +81,33 @@ try {
  $offset=[NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]9,[IntPtr]::Zero).ToInt64()
  if($size -gt 1MB -and [Math]::Abs($offset/$size-0.5) -gt 0.01){throw "Mid-file navigation failed: $offset / $size"}
  Capture 'middle'
- $gdiBefore=[NativeSmoke]::GetGuiResources($process.Handle,0)
+ # Sampling another process during an invalidated paint can count temporary DC/pen objects.
+ # The minimum over a short quiescence window still catches retained leaks without
+ # mistaking an in-flight paint (e.g. 30 -> 43 -> 30 handles) for permanent growth.
+ function StableGdi {
+  $minimum = [int]::MaxValue
+  for ($sample=0; $sample -lt 12; $sample++) {
+   [void][NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]0,[IntPtr]::Zero)
+   $minimum = [Math]::Min($minimum,[NativeSmoke]::GetGuiResources($process.Handle,0))
+   Start-Sleep -Milliseconds 5
+  }
+  return $minimum
+ }
+ # Warm the picker fonts, then include repeated real overlay paints in the leak check.
+ [void][NativeSmoke]::SendMessageW($window,0x111,[IntPtr]412,[IntPtr]::Zero)
+ Capture 'theme-picker'
+ [void][NativeSmoke]::SendMessageW($window,0x100,[IntPtr]27,[IntPtr]::Zero)
+ $gdiBefore=StableGdi
  for($i=0;$i -lt 50;$i++){
   [void][NativeSmoke]::SendMessageW($window,0x111,[IntPtr]205,[IntPtr]::Zero)
   [void][NativeSmoke]::SendMessageW($window,0x111,[IntPtr]201,[IntPtr]::Zero)
+  if ($i -lt 10) {
+   [void][NativeSmoke]::SendMessageW($window,0x111,[IntPtr]412,[IntPtr]::Zero)
+   if ([NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]4,[IntPtr]::Zero) -ne [IntPtr]1) { throw 'Theme picker stress paint failed' }
+   [void][NativeSmoke]::SendMessageW($window,0x100,[IntPtr]27,[IntPtr]::Zero)
+  }
  }
- $gdiAfter=[NativeSmoke]::GetGuiResources($process.Handle,0)
+ $gdiAfter=StableGdi
  if($gdiAfter -gt $gdiBefore+10){throw "GDI handle growth: $gdiBefore -> $gdiAfter"}
  $process.Refresh()
  $metrics=[ordered]@{window_created_ms=[Math]::Round($windowMs,2);first_layout_ms=[Math]::Round($readyMs,2);first_capture_ms=[Math]::Round($paintMs,2);working_set_mib=[Math]::Round($process.WorkingSet64/1MB,2);private_mib=[Math]::Round($process.PrivateMemorySize64/1MB,2);gdi_before=$gdiBefore;gdi_after=$gdiAfter;exe_bytes=(Get-Item -LiteralPath $Exe).Length;document=$Document;result='PASS'}

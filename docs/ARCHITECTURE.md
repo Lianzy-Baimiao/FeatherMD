@@ -10,8 +10,11 @@
 - layout.rs: UTF-16 GDI measurement, surrogate-safe wrapping, reusable font cache. Only one bounded page is laid out.
 - viewport.rs: pure pixel-height navigation over bounded layout rows; visible ranges, one-row page overlap, and EOF viewport positioning. No I/O or Win32 dependency.
 - ui.rs and ui/chrome.rs: single-row custom window frame, collapsible outline, native popup menus/file picker/search input, double-buffered reader and captured custom scrollbar input. RefCell prevents aliasing; release its borrow before DefWindowProc enters nested move/resize/tracking loops.
+- The 48-logical-pixel header uses GDI line icons, a preview/source capsule and a single theme picker. The picker is painted last with its own hit targets; Escape/outside click/focus loss/resize dismiss it, and its keyboard state is separate from document navigation. It opens below the native EDIT row when searching, avoiding child-HWND occlusion. Tooltip delay uses the existing UI timer; theme-only persistence still does not relayout. Empty-state sidebar suppression does not change the saved outline preference.
+- ui/about.rs: modal native dialog with themed GDI decorations and real STATIC/BUTTON children for keyboard/accessibility semantics. Enter is explicitly handled for BS_OWNERDRAW cards. A deferred message releases App state before opening About; the About state is also released before external-link confirmations. Fixed GitHub/support destinations only, no automatic network activity.
+- ui/snapshot.rs: shared opt-in in-process GDI snapshot helper, used by the reader and About tests. It remains inert unless FEATHERMD_TEST_SNAPSHOT is explicitly set by the launcher.
 - scrollbar.rs: overflow-safe geometry over pixel offsets or u64 source bytes. Entirely cached documents map to row heights so a single wrapped paragraph remains scrollable; larger documents use bounded byte navigation.
-- association.rs: explicit, per-user registry registration and removal. Never writes UserChoice or extension default values.
+- association.rs: explicit, per-user registry registration and removal, with owned key handles and contextual errors. Tests use a disposable registry root through the same implementation, preserving other applications and simulated defaults. Never writes real UserChoice or extension default values. UI registration and default selection are separate commands; the latter launches the supported Default apps URI and leaves the final choice to Windows. See FILE_ASSOCIATIONS.md for API support boundaries.
 
 ## Performance contract
 
@@ -36,3 +39,14 @@ Queries 18–31 expose horizontal position and custom scrollbar geometry. Querie
 PageUp/PageDown use actual measured row heights, not a font-size estimate. EOF clamps the top to a full trailing viewport; an End request accounts for multiple wrapped rows sharing the final source range. When paging requires a refill, the source byte, wrapped-row ordinal and remaining row movement are restored, rather than subtracting an arbitrary byte count. This does not recover missing Markdown fence context at random offsets.
 
 scripts/navigation-smoke.ps1 drives native keyboard input over 5,000 heading lines and a separate wrapped CJK/emoji fixture. Diagnostic queries 14–17 expose current/last-painted wrapped-row positions and row counts; assertions compare actual painted boundaries to the next viewport, not the navigation helper against itself. Tests also exercise all 13 +/- font settings. Simulated DPI scales in pure tests do not substitute for physical multi-monitor DPI validation. No clipboard or default-app registration is changed by these tests.
+
+## About dialog regression boundary
+
+scripts/about-smoke.ps1 checks both link destinations through their real native buttons, cancels the confirmations, verifies the safe default, exercises Tab/Enter/Escape and F1, expands/collapses help and repeats opening/closing to detect GDI leaks. Light/dark/sepia captures check actual background pixels, preventing a successful-but-blank PrintWindow result from passing. About shares the read-only WM_APP+42 snapshot query (4) and renders child controls in-process after releasing its state borrow. These tests do not launch the browser, inject desktop pointer input or replace full assistive-technology/multi-monitor testing.
+
+## Typography and vector chrome
+
+- `src/ui/smooth.rs` owns a process-lifetime GDI+ startup session and short-lived RAII graphics/pen/brush/path resources. AntiAlias8x8, high-quality pixel offsets and round caps/joins replace aliased GDI polygon icon paths. GDI+ scopes end before GDI text drawing. Only the Windows-provided gdiplus.dll is added.
+- `src/ui/typography.rs` uses a native modal dialog, installed-font enumeration and an owner-drawn native combo/button surface. Font and size are local draft state until Save; range validation is 12–36 logical pixels, matching existing zoom preferences. No external fonts are loaded. Native Tab/arrows/Enter/Escape retain their control semantics.
+- The App releases its RefCell borrow before entering the modal loop. UI and reading font caches are separate; both measurement and rendering use the reading cache. Source/code override family with Consolas. DPI changes rebuild caches; child WM_SETFONT replaces old handles before their cache is freed.
+- INI font_family values reject control characters, vertical @ faces and names over 31 UTF-16 units; legacy files keep Microsoft YaHei UI. Windows handles missing glyph/font fallback. Font changes reflow at the source-byte anchor; theme-only changes still do not relayout.

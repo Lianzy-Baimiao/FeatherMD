@@ -16,25 +16,28 @@ pub struct FontKey {
 }
 pub struct Fonts {
     cache: BTreeMap<FontKey, HFONT>,
+    family: String,
     pub dpi: u32,
 }
 impl Fonts {
     pub fn new(dpi: u32) -> Self {
+        Self::with_family(dpi, "Microsoft YaHei UI")
+    }
+    pub fn with_family(dpi: u32, family: &str) -> Self {
         Self {
+            family: Settings::validate_font_family(family)
+                .unwrap_or("Microsoft YaHei UI")
+                .into(),
             cache: BTreeMap::new(),
             dpi,
         }
     }
     pub unsafe fn get(&mut self, key: FontKey) -> HFONT {
         *self.cache.entry(key).or_insert_with(|| {
-            let face: Vec<u16> = if key.mono {
-                "Consolas"
-            } else {
-                "Microsoft YaHei UI"
-            }
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
+            let face: Vec<u16> = if key.mono { "Consolas" } else { &self.family }
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
             CreateFontW(
                 -((key.size as u32 * self.dpi / 96) as i32),
                 0,
