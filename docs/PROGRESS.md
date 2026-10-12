@@ -12,6 +12,14 @@
 - Boundaries: hidden windows and native messages, not physical pointer input; no multi-monitor DPI, Windows 10, Snap or full accessibility validation. Missing glyphs rely on Windows font fallback. No production association changes were performed.
 
 
+## v0.1.3 publication record — 2026-10-12
+
+- Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.3
+- Tag/source: 4daaaab282e60df04732bff3a9f9d470e2bd22a1 (annotated tag v0.1.3). GitHub Actions run 38255735339 passed on Windows and Ubuntu, including the native Windows smoke steps: https://github.com/Lianzy-Baimiao/FeatherMD/actions/runs/38255735339
+- Assets: FeatherMD.exe 738304 bytes, FeatherMD-0.1.3-windows-x64.zip 659871 bytes, SHA256SUMS.txt 180 bytes (SHA-256 6ef32e3da1bc36a02817fd508c60630209def768d07919fa4cfc51f9bbb84359). All three were downloaded again; hashes match the local distribution and GitHub asset digests. EXE/ZIP hashes are recorded in the v0.1.3 entry above.
+- Versioned README preview URLs under v0.1.3/docs return HTTP 200. Earlier tags and release assets are unchanged.
+- Follow-up: investigate the single unreproduced cached-paragraph scrollbar smoke failure; update deprecated Node 20 Actions (checkout/upload-artifact v4) and note the ubuntu-latest migration to Ubuntu 26 starting 2026-10-19.
+
 ## 2026-10-12 — main header and welcome redesign (local 0.1.3 revision)
 
 - Corrected the scope after the user's clarification: rebuilt the main reader/home header, not About. Preserved the existing uncommitted work and all previous packages. No repository reset, commit, push, tag or GitHub publication.
