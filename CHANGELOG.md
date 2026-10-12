@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4 — 2026-10-12
+
+### Changed
+- Compact 40 px custom title bar (was 48 px), with header icons, search row, theme picker, tooltips and outline panel aligned to the new height.
+
+### Fixed
+- Clicking an outline heading always highlights that heading, even when short sections share one screen or the document end prevents it from becoming the top row. Scrolling or other navigation returns to position-based highlighting.
+
 ## 0.1.3 — 2026-10-12
 
 ### Added

@@ -1,5 +1,14 @@
 # Progress / continuation notes
 
+## 2026-10-12 — v0.1.4 compact header and outline click highlight release candidate
+
+- 作者/最后修改人：lianzy。标题栏由 48 px 收窄为 40 px（逻辑像素）；搜索行、主题弹层、提示与目录面板随 HEADER_HEIGHT 联动。
+- 修复：短章节同屏或文末无法把被点标题滚到顶行时，目录高亮停在最上方标题。点击后记录（标题索引，跳转后的顶行），顶行不变时高亮所点标题；滚动、跳转、重排、打开文件后回到按位置判断。跨页加载在页回复后再记录。
+- 证据（120 DPI，MSVC release 738,304 B）：fmt --check、clippy -D warnings、cargo test 全通过；ui、navigation（headings/wrapped）、scrollbar、window、typography（light/dark）、about（light/dark）冒烟均 PASS。window-smoke 新增 8 个短章节夹具，依次点击第 3/6/1 个标题并用 WM_APP+42/46 断言高亮索引，Home 后回到 0。已目视检查截图并更新 docs 预览图。
+- 限制：仍为隐藏窗口合成消息测试，未覆盖真实指针输入。
+- Version bump: Cargo/Cargo.lock (feathermd only), app.rc FileVersion/ProductVersion 0.1.4, package.ps1 default 0.1.4. Rebuilt and reran fmt, strict Clippy, cargo test --locked (40 tests) and all 9 native regressions against the 0.1.4 build: PASS. About light/dark show v0.1.4 (GDI 22→22); previews regenerated.
+- Delivery: dist/FeatherMD.exe 738304 bytes (721 KiB), SHA-256 33882b654634390d9b649aa8b66f2af167ff7ff9d1f06238ea3764a7ea2a3c87. dist/FeatherMD-0.1.4-windows-x64.zip 659473 bytes, SHA-256 081132a4ff717fd217bb7053e01356af165066fb2e3bfc7815ac4723763ddd6e. Build, delivery and ZIP EXE hashes match; earlier ZIPs preserved.
+
 ## 2026-10-12 — v0.1.3 anti-aliased icons, reading font settings and release candidate
 
 - Header, welcome and About icons now use GDI+ anti-aliased vector paths with round caps, drawn at the window DPI. Before/after icon captures show 6 vs 216 edge colors. No icon font, downloaded assets or third-party runtime were added.

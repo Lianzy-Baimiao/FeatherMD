@@ -112,12 +112,13 @@ impl App {
     pub(super) fn theme_menu_rect(&self) -> RECT {
         let right = self.header_left() + self.s(216);
         // Stay below the native search EDIT HWND; parent painting cannot cover a child window.
-        let top = self.s(if self.edit_mode.is_some() { 104 } else { 54 });
+        let gap = if self.edit_mode.is_some() { 56 } else { 6 };
+        let top = self.s(HEADER_HEIGHT + gap);
         chrome_rect(right - self.s(224), top, right, top + self.s(198))
     }
 
     pub(super) fn header_tip(&self) -> Option<&'static str> {
-        if self.theme_menu.is_some() || self.mouse.is_none_or(|(_, y)| y >= self.s(48)) {
+        if self.theme_menu.is_some() || self.mouse.is_none_or(|(_, y)| y >= self.s(HEADER_HEIGHT)) {
             return None;
         }
         Some(match self.hover? {
@@ -278,7 +279,12 @@ impl App {
                 .max(80));
             let left = ((hit.rect.left + hit.rect.right - width) / 2)
                 .clamp(self.s(8), self.width - width - self.s(8));
-            let r = chrome_rect(left, self.s(55), left + width, self.s(89));
+            let r = chrome_rect(
+                left,
+                self.s(HEADER_HEIGHT + 7),
+                left + width,
+                self.s(HEADER_HEIGHT + 41),
+            );
             chrome_round(dc, r, p.fg, self.s(6));
             self.label(
                 dc,
@@ -293,20 +299,27 @@ impl App {
     }
 
     pub(super) unsafe fn paint_header(&mut self, dc: HDC, p: Palette) {
-        Self::fill(dc, &chrome_rect(1, 1, self.width - 1, self.s(48)), p.panel);
+        let bottom = self.s(HEADER_HEIGHT);
+        let middle = HEADER_HEIGHT / 2;
+        Self::fill(dc, &chrome_rect(1, 1, self.width - 1, bottom), p.panel);
         let left = self.header_left();
         let controls_left = self.width - self.s(132) - 1;
         let brand = self.document.is_none() || self.width >= self.s(900);
         self.feather_mark(
             dc,
-            chrome_rect(self.s(16), self.s(12), self.s(40), self.s(36)),
+            chrome_rect(
+                self.s(16),
+                self.s(middle - 12),
+                self.s(40),
+                self.s(middle + 12),
+            ),
             p.accent,
         );
         if brand {
             self.label(
                 dc,
                 "FeatherMD",
-                chrome_rect(self.s(48), 1, self.s(142), self.s(48)),
+                chrome_rect(self.s(48), 1, self.s(142), bottom),
                 13,
                 true,
                 p.fg,
@@ -318,7 +331,12 @@ impl App {
             if brand {
                 Self::fill(
                     dc,
-                    &chrome_rect(self.s(147), self.s(17), self.s(147) + 1, self.s(31)),
+                    &chrome_rect(
+                        self.s(147),
+                        self.s(middle - 7),
+                        self.s(147) + 1,
+                        self.s(middle + 7),
+                    ),
                     p.edge,
                 );
             }
@@ -326,7 +344,7 @@ impl App {
             self.label(
                 dc,
                 &name,
-                chrome_rect(x, 1, left - self.s(16), self.s(48)),
+                chrome_rect(x, 1, left - self.s(16), bottom),
                 12,
                 false,
                 p.muted,
@@ -335,9 +353,14 @@ impl App {
         }
         chrome_round(
             dc,
-            chrome_rect(left, self.s(7), left + self.s(76), self.s(41)),
+            chrome_rect(
+                left,
+                self.s(middle - 15),
+                left + self.s(76),
+                self.s(middle + 15),
+            ),
             p.code,
-            self.s(9),
+            self.s(8),
         );
         for (offset, id, selected) in [
             (2, PREVIEW, !self.settings.raw),
@@ -345,9 +368,9 @@ impl App {
         ] {
             let rect = chrome_rect(
                 left + self.s(offset),
-                self.s(9),
+                self.s(middle - 13),
                 left + self.s(offset + 36),
-                self.s(39),
+                self.s(middle + 13),
             );
             self.chrome_button(
                 dc,
@@ -367,9 +390,9 @@ impl App {
             dc,
             &chrome_rect(
                 left + self.s(86),
-                self.s(17),
+                self.s(middle - 7),
                 left + self.s(86) + 1,
-                self.s(31),
+                self.s(middle + 7),
             ),
             p.edge,
         );
@@ -381,9 +404,9 @@ impl App {
         ] {
             let rect = chrome_rect(
                 left + self.s(offset),
-                self.s(7),
+                self.s(middle - 15),
                 left + self.s(offset + width),
-                self.s(41),
+                self.s(middle + 15),
             );
             self.chrome_button(
                 dc,
@@ -428,24 +451,25 @@ impl App {
         }
         for (index, id) in [MINIMIZE, MAXIMIZE, EXIT].into_iter().enumerate() {
             let x = controls_left + self.s(index as i32 * 44);
-            let rect = chrome_rect(x, 1, x + self.s(44), self.s(48));
+            let rect = chrome_rect(x, 1, x + self.s(44), bottom);
             self.chrome_button(dc, "", rect, id, ChromeTone::Quiet, p);
             self.chrome_window_icon(dc, rect, id, p.muted);
         }
         Self::fill(
             dc,
-            &chrome_rect(1, self.s(48), self.width - 1, self.s(48) + 1),
+            &chrome_rect(1, bottom, self.width - 1, bottom + 1),
             p.edge,
         );
 
         if self.edit_mode.is_some() {
+            let search_bottom = self.s(HEADER_HEIGHT + 53);
             Self::fill(
                 dc,
                 &chrome_rect(
                     self.sidebar_width().max(1),
-                    self.s(49),
+                    bottom + 1,
                     self.width - 1,
-                    self.s(101),
+                    search_bottom,
                 ),
                 p.panel,
             );
@@ -458,9 +482,9 @@ impl App {
                 },
                 chrome_rect(
                     self.width - self.s(146),
-                    self.s(60),
+                    self.s(HEADER_HEIGHT + 12),
                     self.width - self.s(66),
-                    self.s(92),
+                    self.s(HEADER_HEIGHT + 44),
                 ),
                 NEXT,
                 ChromeTone::Quiet,
@@ -468,9 +492,9 @@ impl App {
             );
             let close = chrome_rect(
                 self.width - self.s(56),
-                self.s(60),
+                self.s(HEADER_HEIGHT + 12),
                 self.width - self.s(24),
-                self.s(92),
+                self.s(HEADER_HEIGHT + 44),
             );
             self.chrome_button(dc, "", close, 0, ChromeTone::Quiet, p);
             self.chrome_window_icon(dc, close, 0, p.muted);
@@ -478,9 +502,9 @@ impl App {
                 dc,
                 &chrome_rect(
                     self.sidebar_width().max(1),
-                    self.s(101),
+                    search_bottom,
                     self.width - 1,
-                    self.s(101) + 1,
+                    search_bottom + 1,
                 ),
                 p.edge,
             );
@@ -493,23 +517,34 @@ impl App {
         }
         let width = self.sidebar_width();
         if width == 0 {
-            let expand = chrome_rect(self.s(6), self.s(62), self.s(38), self.s(94));
+            let expand = chrome_rect(
+                self.s(6),
+                self.s(HEADER_HEIGHT + 14),
+                self.s(38),
+                self.s(HEADER_HEIGHT + 46),
+            );
             chrome_round(dc, expand, p.panel, self.s(5));
             self.chrome_button(dc, "", expand, OUTLINE, ChromeTone::Quiet, p);
             self.chrome_window_icon(dc, expand, OUTLINE, p.muted);
             return;
         }
         let footer = self.height - self.s(30);
-        Self::fill(dc, &chrome_rect(1, self.s(49), width, footer), p.panel);
+        let panel_top = self.s(HEADER_HEIGHT) + 1;
+        Self::fill(dc, &chrome_rect(1, panel_top, width, footer), p.panel);
         Self::fill(
             dc,
-            &chrome_rect(width - 1, self.s(49), width, footer),
+            &chrome_rect(width - 1, panel_top, width, footer),
             p.edge,
         );
         self.label(
             dc,
             "目录",
-            chrome_rect(self.s(18), self.s(62), width - self.s(52), self.s(90)),
+            chrome_rect(
+                self.s(18),
+                self.s(HEADER_HEIGHT + 14),
+                width - self.s(52),
+                self.s(HEADER_HEIGHT + 42),
+            ),
             12,
             true,
             p.fg,
@@ -517,17 +552,17 @@ impl App {
         );
         let collapse = chrome_rect(
             width - self.s(42),
-            self.s(62),
+            self.s(HEADER_HEIGHT + 14),
             width - self.s(14),
-            self.s(90),
+            self.s(HEADER_HEIGHT + 42),
         );
         self.chrome_button(dc, "", collapse, OUTLINE, ChromeTone::Quiet, p);
         self.chrome_window_icon(dc, collapse, OUTLINE, p.muted);
-        let current = self.current();
         let visible = self.outline_visible_rows();
         let first = self.outline_top;
+        let active = self.outline_active();
         // Copy only visible labels so GDI font lookup can borrow App mutably.
-        let (entries, total, active, limited) = if let Some(outline) = &self.outline {
+        let (entries, total, limited) = if let Some(outline) = &self.outline {
             let entries: Vec<_> = outline
                 .headings
                 .iter()
@@ -536,23 +571,15 @@ impl App {
                 .take(visible)
                 .map(|(index, heading)| (index, heading.level, heading.text.clone()))
                 .collect();
-            (
-                entries,
-                outline.headings.len(),
-                outline
-                    .headings
-                    .iter()
-                    .rposition(|heading| heading.offset <= current),
-                outline.limited,
-            )
+            (entries, outline.headings.len(), outline.limited)
         } else {
-            (Vec::new(), 0, None, false)
+            (Vec::new(), 0, false)
         };
         let bottom = self.height - self.s(62);
         let saved = SaveDC(dc);
-        IntersectClipRect(dc, 1, self.s(104), width - 1, bottom);
+        IntersectClipRect(dc, 1, self.s(OUTLINE_ROWS_TOP), width - 1, bottom);
         for (row, (index, level, text)) in entries.into_iter().enumerate() {
-            let top = self.s(104 + row as i32 * 30);
+            let top = self.s(OUTLINE_ROWS_TOP + row as i32 * 30);
             if top >= bottom {
                 break;
             }
@@ -618,7 +645,7 @@ impl App {
             format!("{total} 个标题")
         };
         let status_top = if total == 0 {
-            self.s(112)
+            self.s(OUTLINE_ROWS_TOP + 8)
         } else {
             footer - self.s(27)
         };
@@ -637,7 +664,7 @@ impl App {
             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
         );
         if total > visible && visible > 0 {
-            let track_height = (bottom - self.s(104)).max(1);
+            let track_height = (bottom - self.s(OUTLINE_ROWS_TOP)).max(1);
             let thumb_height = ((track_height as i64 * visible as i64 / total as i64) as i32)
                 .max(self.s(18))
                 .min(track_height);
@@ -647,9 +674,9 @@ impl App {
                 dc,
                 chrome_rect(
                     width - self.s(5),
-                    self.s(104) + offset,
+                    self.s(OUTLINE_ROWS_TOP) + offset,
                     width - self.s(3),
-                    self.s(104) + offset + thumb_height,
+                    self.s(OUTLINE_ROWS_TOP) + offset + thumb_height,
                 ),
                 p.edge,
                 self.s(1),

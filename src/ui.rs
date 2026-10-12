@@ -70,6 +70,8 @@ const OUTLINE: usize = 411;
 const THEME_PICKER: usize = 412;
 const THEME_PANEL: usize = 413;
 const TYPOGRAPHY: usize = 414;
+const HEADER_HEIGHT: i32 = 40;
+const OUTLINE_ROWS_TOP: i32 = HEADER_HEIGHT + 56;
 const fn make_resource(id: u16) -> *const u16 {
     id as usize as *const u16
 }
@@ -211,6 +213,8 @@ struct App {
     outline_loading: bool,
     outline_error: Option<String>,
     outline_top: usize,
+    outline_selected: Option<(usize, usize)>,
+    outline_pending: Option<usize>,
     horizontal: i32,
     status: String,
     edit_mode: Option<usize>,
@@ -261,6 +265,8 @@ impl App {
             outline_loading: false,
             outline_error: None,
             outline_top: 0,
+            outline_selected: None,
+            outline_pending: None,
             horizontal: 0,
             status: "只读 · 离线阅读".into(),
             edit_mode: None,
@@ -273,7 +279,8 @@ impl App {
         self.fonts.scale(n)
     }
     fn content_top(&self) -> i32 {
-        self.s(if self.edit_mode.is_some() { 104 } else { 56 })
+        let gap = if self.edit_mode.is_some() { 56 } else { 8 };
+        self.s(HEADER_HEIGHT + gap)
     }
     fn content_bottom(&self) -> i32 {
         self.height - self.s(if self.horizontal_max() > 0 { 50 } else { 34 })
@@ -298,7 +305,7 @@ impl App {
         }
     }
     fn outline_visible_rows(&self) -> usize {
-        ((self.height - self.s(62) - self.s(104)) / self.s(30).max(1)).max(1) as usize
+        ((self.height - self.s(62) - self.s(OUTLINE_ROWS_TOP)) / self.s(30).max(1)).max(1) as usize
     }
     fn reading_percent(&self) -> f64 {
         let Some(page) = &self.page else {
@@ -354,6 +361,39 @@ impl App {
             .and_then(|l| l.rows.get(self.top))
             .map_or(self.anchor, |r| r.start)
     }
+    fn outline_active(&self) -> Option<usize> {
+        let outline = self.outline.as_ref()?;
+        // Near the end the clicked heading cannot become the top row, so keep the
+        // user's choice until the reader moves away from the position it produced.
+        if let Some((index, top)) = self.outline_selected
+            && top == self.top
+            && index < outline.headings.len()
+        {
+            return Some(index);
+        }
+        let current = self.current();
+        outline
+            .headings
+            .iter()
+            .rposition(|heading| heading.offset <= current)
+    }
+    unsafe fn select_heading(&mut self, index: usize) {
+        let Some(offset) = self
+            .outline
+            .as_ref()
+            .and_then(|o| o.headings.get(index))
+            .map(|h| h.offset)
+        else {
+            return;
+        };
+        self.outline_selected = None;
+        self.jump(offset);
+        if self.loading {
+            self.outline_pending = Some(index);
+        } else {
+            self.outline_selected = Some((index, self.top));
+        }
+    }
     unsafe fn invalidate(&self) {
         InvalidateRect(self.hwnd, null(), 0);
     }
@@ -363,6 +403,8 @@ impl App {
         self.outline_loading = false;
         self.outline_error = None;
         self.outline_top = 0;
+        self.outline_selected = None;
+        self.outline_pending = None;
         self.pending_scroll = None;
         self.workers.cancel_search();
         self.io_ticket += 1;
@@ -396,6 +438,7 @@ impl App {
     }
     unsafe fn request_page(&mut self, anchor: u64) {
         self.pending_scroll = None;
+        self.outline_pending = None;
         if let Some(doc) = &self.document {
             self.io_ticket += 1;
             self.loading = true;
@@ -409,6 +452,7 @@ impl App {
         }
     }
     unsafe fn relayout(&mut self, anchor: u64) {
+        self.outline_selected = None;
         if let Some(page) = &self.page {
             let blocks = markdown::blocks(&page.lines, self.settings.raw);
             let dc = GetDC(self.hwnd);
@@ -450,6 +494,7 @@ impl App {
                 Reply::Page(id, anchor, result) if id == self.io_ticket => {
                     self.loading = false;
                     let pending = self.pending_scroll.take();
+                    let heading = self.outline_pending.take();
                     match result {
                         Ok(page) => {
                             self.page = Some(page);
@@ -458,6 +503,9 @@ impl App {
                             if let Some((wrapped_row, delta)) = pending {
                                 self.position(anchor, wrapped_row);
                                 self.scroll(delta);
+                            }
+                            if let Some(index) = heading {
+                                self.outline_selected = Some((index, self.top));
                             }
                         }
                         Err(e) => {
@@ -496,6 +544,8 @@ impl App {
         }
     }
     unsafe fn jump(&mut self, anchor: u64) {
+        self.outline_selected = None;
+        self.outline_pending = None;
         if let Some(page) = &self.page
             && anchor >= page.start
             && anchor < page.end
@@ -869,7 +919,7 @@ impl App {
         MoveWindow(
             self.edit,
             left,
-            self.s(60),
+            self.s(HEADER_HEIGHT + 12),
             (self.width - left - self.s(164)).max(self.s(80)),
             self.s(32),
             1,
@@ -1143,7 +1193,7 @@ impl App {
             SETTINGS => {
                 let mut point = POINT {
                     x: self.width - self.s(145),
-                    y: self.s(46),
+                    y: self.s(HEADER_HEIGHT - 2),
                 };
                 ClientToScreen(self.hwnd, &mut point);
                 let id = TrackPopupMenu(
@@ -1609,6 +1659,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             43 => app.tooltip_visible as isize,
             44 => app.hover.map_or(-1, |id| id as isize),
             45 => app.theme_menu_rect().top as isize,
+            46 => app.outline_active().map_or(-1, |i| i as isize),
             37 => app
                 .outline
                 .as_ref()
@@ -1747,7 +1798,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     return hit as isize;
                 }
             }
-            if y < app.s(48) && !matches!(app.hit(x, y), Some(Hit::Command(_))) {
+            if y < app.s(HEADER_HEIGHT) && !matches!(app.hit(x, y), Some(Hit::Command(_))) {
                 HTCAPTION as isize
             } else {
                 HTCLIENT as isize
@@ -1811,7 +1862,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 y: (lp >> 16) as u16 as i16 as i32,
             };
             ScreenToClient(hwnd, &mut point);
-            if point.x >= 0 && point.x < app.sidebar_width() && point.y >= app.s(48) {
+            if point.x >= 0 && point.x < app.sidebar_width() && point.y >= app.s(HEADER_HEIGHT) {
                 app.scroll_outline(-steps * 3);
                 return 0;
             }
@@ -1873,7 +1924,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             app.hover_since = None;
             if app.theme_menu.is_some() {
                 let r = app.theme_menu_rect();
-                if y >= app.s(48) && !(x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
+                if y >= app.s(HEADER_HEIGHT)
+                    && !(x >= r.left && x < r.right && y >= r.top && y < r.bottom)
+                {
                     app.theme_menu = None;
                     app.invalidate();
                     return 0;
@@ -1980,14 +2033,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     return 0;
                 }
                 match hit {
-                    Some(Hit::Heading(index)) => {
-                        if let Some(heading) =
-                            app.outline.as_ref().and_then(|o| o.headings.get(index))
-                        {
-                            let offset = heading.offset;
-                            app.jump(offset);
-                        }
-                    }
+                    Some(Hit::Heading(index)) => app.select_heading(index),
                     Some(Hit::Command(0)) => app.hide_edit(),
                     Some(Hit::Command(NEXT)) if app.edit_mode.is_some() => app.submit(),
                     Some(Hit::Command(id)) => app.command(id),

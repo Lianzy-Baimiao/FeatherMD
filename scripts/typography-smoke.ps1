@@ -174,7 +174,7 @@ font_size=18
  Post $window 0x111 409;Start-Sleep -Milliseconds 120;Capture $window 'reading-segoe.png'
  $a=[Drawing.Bitmap]::new((Join-Path $Output 'reading-custom.png'));$b=[Drawing.Bitmap]::new((Join-Path $Output 'reading-segoe.png'))
  try {
-  $headerChanged=0;$bodyChanged=0;$dpi=[FontSmoke]::SendMessageW($window,0x802a,[IntPtr]3,[IntPtr]::Zero).ToInt64();$header=[int](48*$dpi/96)
+  $headerChanged=0;$bodyChanged=0;$dpi=[FontSmoke]::SendMessageW($window,0x802a,[IntPtr]3,[IntPtr]::Zero).ToInt64();$header=[int](40*$dpi/96)
   for($y=0;$y -lt $a.Height;$y++){for($x=0;$x -lt $a.Width;$x++){if($a.GetPixel($x,$y).ToArgb() -ne $b.GetPixel($x,$y).ToArgb()){if($y -lt $header){$headerChanged++}else{$bodyChanged++}}}}
   if($headerChanged -ne 0 -or $bodyChanged -lt 100){throw "Font application mismatch: header=$headerChanged body=$bodyChanged"}
  } finally {$a.Dispose();$b.Dispose()}
