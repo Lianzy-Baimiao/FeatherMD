@@ -23,7 +23,7 @@
 - [x] 更新项目记录、核对署名并交付可运行 EXE 与截图。
 - [x] 按最新反馈移除应用标题栏中的目录开关，展开时在目录标题右侧收起，隐藏时从内容区左边缘展开。
 - [x] 重新构建、验证开关与界面，更新 README 浅色/深色/隐藏目录预览。
-- [ ] 上传源代码，等待 GitHub CI 通过，发布 v0.1.2 Releases 并核对下载资产。
+- [x] 上传源代码，等待 GitHub CI 通过，发布 v0.1.2 Releases 并核对下载资产。
 
 ## 设计约束
 
@@ -44,3 +44,4 @@
 - ZIP SHA-256：`a8a4b47657319b73068bb90f088601e7e56eca73ffea53b421ab44a6b012f924`。包含 README 引用的全部截图。
 - 版本资源校验：FileVersion `0.1.2`；CompanyName `lianzy`；LegalCopyright `Copyright (c) lianzy`。dumpbin 确认仅依赖 Windows 提供的 DLL。
 - 未覆盖的实机边界：多显示器 DPI、Windows 10、Snap、完整辅助功能和隔离环境下的默认关联；目录上限为前 16 MiB / 4096 个 ATX 标题。
+- 已公开发布 [v0.1.2](https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.2)，标签指向 `8df8bbb5e22a75eb0a2344d223a74bb6e6c38a7f`。[GitHub CI](https://github.com/Lianzy-Baimiao/FeatherMD/actions/runs/38198642207) 的 Windows / Ubuntu 均通过；README 四张预览图已上传。重新下载 EXE、ZIP、SHA256SUMS，全部与本地哈希一致，旧版标签和资产未改动。
