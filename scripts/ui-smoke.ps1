@@ -41,16 +41,23 @@ try {
  for($i=0;$i -lt 500;$i++) { if([NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]2,[IntPtr]::Zero).ToInt64() -gt 0){break};Start-Sleep -Milliseconds 10 }
  if($i -eq 500){throw 'First page layout timed out'}
  $readyMs=$clock.Elapsed.TotalMilliseconds
+ # Keep first-layout timing independent of the optional outline worker.
+ for($i=0;$i -lt 500;$i++){if([NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]33,[IntPtr]::Zero).ToInt64() -eq 0){break};Start-Sleep -Milliseconds 10}
+ if($i -eq 500){throw 'Outline did not finish within the bounded scan timeout'}
  Write-Output ('ROWS='+[NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]2,[IntPtr]::Zero)+' DPI='+[NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]3,[IntPtr]::Zero))
  function Capture([string]$name){
   if([NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]4,[IntPtr]::Zero) -ne [IntPtr]1){throw 'Internal GDI capture failed'}
   $bmp=[Drawing.Bitmap]::new($env:FEATHERMD_TEST_SNAPSHOT)
   $bmp.Save((Join-Path $Output ($name+'.png')),[Drawing.Imaging.ImageFormat]::Png)
-  $a=$bmp.GetPixel(5,5).ToArgb();$b=$bmp.GetPixel(5,[Math]::Min(150,$bmp.Height-1)).ToArgb();$bmp.Dispose()
+  # The left edge is now the outline panel; sample the reader's right gutter.
+  $a=$bmp.GetPixel(5,5).ToArgb();$b=$bmp.GetPixel($bmp.Width-30,[Math]::Min(150,$bmp.Height-1)).ToArgb();$bmp.Dispose()
   if($a -eq $b){throw 'Header and document background did not render'}
  }
  Capture 'reading-light'
  $paintMs=$clock.Elapsed.TotalMilliseconds
+ [void][NativeSmoke]::SendMessageW($window,0x111,[IntPtr]411,[IntPtr]::Zero)
+ Capture 'reading-outline-hidden'
+ [void][NativeSmoke]::SendMessageW($window,0x111,[IntPtr]411,[IntPtr]::Zero)
  [void][NativeSmoke]::SendMessageW($window,0x111,[IntPtr]201,[IntPtr]::Zero)
  Capture 'reading-dark'
  [void][NativeSmoke]::SendMessageW($window,0x111,[IntPtr]102,[IntPtr]::Zero)

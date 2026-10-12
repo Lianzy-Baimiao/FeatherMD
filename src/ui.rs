@@ -1,9 +1,11 @@
 //! Native Win32 shell. All file I/O and searches run off the window thread.
 #![allow(unsafe_op_in_unsafe_fn)]
+mod chrome;
 use crate::layout::{FontKey, Fonts, Layout, Row};
 use feathermd::{
     document::{Document, Page, SearchResult, human_size},
     markdown,
+    scrollbar::ScrollTrack,
     settings::{Settings, Theme},
     viewport::Viewport,
     worker::{Reply, Request, SearchRequest, Workers},
@@ -19,10 +21,10 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::*,
-    Graphics::Gdi::*,
+    Graphics::{Dwm::*, Gdi::*},
     System::{DataExchange::*, LibraryLoader::*, Memory::*},
     UI::{
-        Controls::{Dialogs::*, SetScrollInfo},
+        Controls::{Dialogs::*, WM_MOUSELEAVE},
         HiDpi::*,
         Input::KeyboardAndMouse::*,
         Shell::*,
@@ -48,7 +50,13 @@ const ABOUT: usize = 401;
 const NEXT: usize = 402;
 const SETTINGS: usize = 403;
 const LICENSES: usize = 404;
-const RANGE: i32 = 1_000_000;
+const FILE_MENU: usize = 405;
+const HELP_MENU: usize = 406;
+const MINIMIZE: usize = 407;
+const MAXIMIZE: usize = 408;
+const PREVIEW: usize = 409;
+const SOURCE: usize = 410;
+const OUTLINE: usize = 411;
 const fn make_resource(id: u16) -> *const u16 {
     id as usize as *const u16
 }
@@ -105,15 +113,35 @@ impl Palette {
         }
     }
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum Hit {
     Command(usize),
     Link(String),
     Row(usize),
+    Heading(usize),
 }
 struct HitBox {
     rect: RECT,
     action: Hit,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Axis {
+    Vertical,
+    Horizontal,
+}
+#[derive(Clone, Copy)]
+struct ScrollDrag {
+    axis: Axis,
+    grab: i32,
+}
+struct Bar {
+    track: RECT,
+    thumb: RECT,
+    scale: ScrollTrack,
+    pixels: bool,
+}
+fn contains(rect: RECT, x: i32, y: i32) -> bool {
+    x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
 }
 struct App {
     hwnd: HWND,
@@ -137,6 +165,18 @@ struct App {
     hits: Vec<HitBox>,
     selection: Option<(usize, usize)>,
     selecting: bool,
+    mouse: Option<(i32, i32)>,
+    hover: Option<usize>,
+    pressed: Option<Hit>,
+    drag: Option<ScrollDrag>,
+    wheel_remainder: i32,
+    horizontal_wheel_remainder: i32,
+    document_name: String,
+    outline: Option<feathermd::outline::Outline>,
+    outline_ticket: u64,
+    outline_loading: bool,
+    outline_error: Option<String>,
+    outline_top: usize,
     horizontal: i32,
     status: String,
     edit_mode: Option<usize>,
@@ -170,8 +210,20 @@ impl App {
             hits: vec![],
             selection: None,
             selecting: false,
+            mouse: None,
+            hover: None,
+            pressed: None,
+            drag: None,
+            wheel_remainder: 0,
+            horizontal_wheel_remainder: 0,
+            document_name: String::new(),
+            outline: None,
+            outline_ticket: 0,
+            outline_loading: false,
+            outline_error: None,
+            outline_top: 0,
             horizontal: 0,
-            status: "离线阅读 · 按需加载 · 不修改文档".into(),
+            status: "只读 · 离线阅读".into(),
             edit_mode: None,
             query: String::new(),
             found: None,
@@ -182,18 +234,80 @@ impl App {
         self.fonts.scale(n)
     }
     fn content_top(&self) -> i32 {
-        self.s(if self.edit_mode.is_some() { 124 } else { 80 })
+        self.s(if self.edit_mode.is_some() { 104 } else { 56 })
+    }
+    fn content_bottom(&self) -> i32 {
+        self.height - self.s(if self.horizontal_max() > 0 { 50 } else { 34 })
     }
     fn body_width(&self) -> i32 {
-        let usable = (self.width - self.s(80)).max(self.s(80));
+        let usable = (self.width - self.sidebar_width() - self.s(80)).max(self.s(80));
         if self.settings.wide {
             usable
         } else {
-            usable.min(self.s(900))
+            usable.min(self.s(840))
         }
     }
     fn left(&self) -> i32 {
-        ((self.width - self.body_width()) / 2).max(self.s(20))
+        self.sidebar_width()
+            + ((self.width - self.sidebar_width() - self.body_width()) / 2).max(self.s(20))
+    }
+    fn sidebar_width(&self) -> i32 {
+        if self.settings.outline {
+            self.s(if self.width < self.s(800) { 192 } else { 232 })
+        } else {
+            0
+        }
+    }
+    fn outline_visible_rows(&self) -> usize {
+        ((self.height - self.s(62) - self.s(104)) / self.s(30).max(1)).max(1) as usize
+    }
+    fn reading_percent(&self) -> f64 {
+        let Some(page) = &self.page else {
+            return 0.0;
+        };
+        if page.size == 0 {
+            return 0.0;
+        }
+        if page.end >= page.size && self.top >= self.viewport().bottom_top() {
+            return 100.0;
+        }
+        self.current() as f64 * 100.0 / page.size as f64
+    }
+    unsafe fn start_outline(&mut self) {
+        if !self.settings.outline || self.outline.is_some() || self.outline_loading {
+            return;
+        }
+        if let Some(document) = &self.document {
+            self.outline_ticket = self.workers.cancel_outline();
+            self.outline_loading = true;
+            self.outline_error = None;
+            let _ = self
+                .workers
+                .outline
+                .send(feathermd::worker::OutlineRequest {
+                    document: document.clone(),
+                    ticket: self.outline_ticket,
+                });
+        }
+    }
+    unsafe fn toggle_outline(&mut self) {
+        self.settings.outline = !self.settings.outline;
+        if !self.settings.outline {
+            self.outline_ticket = self.workers.cancel_outline();
+            self.outline_loading = false;
+        }
+        self.persist();
+        self.start_outline();
+        if let Some(mode) = self.edit_mode {
+            self.position_edit(mode);
+        }
+    }
+    unsafe fn scroll_outline(&mut self, delta: i32) {
+        let count = self.outline.as_ref().map_or(0, |o| o.headings.len());
+        self.outline_top = (self.outline_top as i64 + i64::from(delta))
+            .clamp(0, count.saturating_sub(self.outline_visible_rows()) as i64)
+            as usize;
+        self.invalidate();
     }
     fn current(&self) -> u64 {
         self.layout
@@ -205,6 +319,11 @@ impl App {
         InvalidateRect(self.hwnd, null(), 0);
     }
     unsafe fn open(&mut self, path: PathBuf) {
+        self.outline_ticket = self.workers.cancel_outline();
+        self.outline = None;
+        self.outline_loading = false;
+        self.outline_error = None;
+        self.outline_top = 0;
         self.pending_scroll = None;
         self.workers.cancel_search();
         self.io_ticket += 1;
@@ -216,6 +335,13 @@ impl App {
         self.anchor = 0;
         self.horizontal = 0;
         self.selection = None;
+        self.drag = None;
+        self.wheel_remainder = 0;
+        self.document_name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         self.found = None;
         self.status = "正在读取首屏…".into();
         SetWindowTextW(
@@ -274,6 +400,7 @@ impl App {
                             self.anchor = 0;
                             self.status = "就绪".into();
                             self.relayout(0);
+                            self.start_outline();
                         }
                         Err(e) => {
                             self.status = format!("打开失败：{e}");
@@ -316,6 +443,14 @@ impl App {
                         Err(e) => self.status = format!("搜索失败：{e}"),
                     }
                 }
+                Reply::Outline(id, result) if id == self.outline_ticket => {
+                    self.outline_loading = false;
+                    match result {
+                        Ok(outline) => self.outline = Some(outline),
+                        Err(error) => self.outline_error = Some(error),
+                    }
+                    self.outline_top = 0;
+                }
                 _ => continue,
             }
             self.invalidate();
@@ -326,6 +461,11 @@ impl App {
             && anchor >= page.start
             && anchor < page.end
         {
+            // A drag can return to the cached page while an earlier seek is in flight.
+            // Invalidate that reply so it cannot move the reader back after release.
+            self.io_ticket += 1;
+            self.loading = false;
+            self.pending_scroll = None;
             self.anchor = anchor;
             self.position(anchor, 0);
             self.selection = None;
@@ -338,7 +478,7 @@ impl App {
     fn viewport(&self) -> Viewport<'_, Row> {
         Viewport::new(
             self.layout.as_ref().map_or(&[], |l| l.rows.as_slice()),
-            (self.height - self.s(32) - self.content_top() - self.s(12)).max(1),
+            (self.content_bottom() - self.content_top() - self.s(12)).max(1),
         )
     }
     fn clamp_top(&mut self) {
@@ -432,42 +572,174 @@ impl App {
         self.scrollbar();
         self.invalidate();
     }
-    unsafe fn scrollbar(&mut self) {
-        let size = self.page.as_ref().map_or(0, |p| p.size);
-        let pos = if size == 0 {
+    fn horizontal_max(&self) -> i32 {
+        if self.settings.wrap {
             0
         } else {
-            ((self.current() as u128 * RANGE as u128) / size as u128) as i32
+            self.layout
+                .as_ref()
+                .map_or(0, |l| (l.max_width - self.body_width()).max(0))
+        }
+    }
+    unsafe fn scrollbar(&mut self) {
+        self.horizontal = self.horizontal.clamp(0, self.horizontal_max());
+    }
+    fn scroll_bar(&self, axis: Axis) -> Option<Bar> {
+        let layout = self.layout.as_ref()?;
+        let page = self.page.as_ref()?;
+        let (track, maximum, visible, position, pixels) = match axis {
+            Axis::Horizontal => (
+                RECT {
+                    left: self.left(),
+                    top: self.height - self.s(46),
+                    right: self.left() + self.body_width(),
+                    bottom: self.height - self.s(32),
+                },
+                self.horizontal_max() as u64,
+                self.body_width() as u64,
+                self.horizontal as u64,
+                true,
+            ),
+            Axis::Vertical => {
+                let track = RECT {
+                    left: self.width - self.s(20),
+                    top: self.content_top() + self.s(12),
+                    right: self.width - self.s(5),
+                    bottom: self.content_bottom(),
+                };
+                let viewport = self.viewport();
+                let (maximum, visible, position, pixels) = if page.start <= 3
+                    && page.end >= page.size
+                {
+                    let sum = |end: usize| {
+                        layout.rows[..end.min(layout.rows.len())]
+                            .iter()
+                            .map(|r| r.height.max(1) as u64)
+                            .sum::<u64>()
+                    };
+                    (
+                        sum(viewport.bottom_top()),
+                        (track.bottom - track.top).max(1) as u64,
+                        sum(self.top),
+                        true,
+                    )
+                } else {
+                    let maximum = page.size.saturating_sub(1);
+                    let at_end = page.end >= page.size && self.top >= viewport.bottom_top();
+                    let position = if at_end {
+                        maximum
+                    } else {
+                        layout.rows.get(self.top).map_or(self.current(), |row| {
+                            let wrapped = self.wrapped_row(self.top);
+                            let count = layout
+                                .rows
+                                .iter()
+                                .filter(|r| r.start == row.start)
+                                .count()
+                                .max(1);
+                            row.start
+                                + (row.end.saturating_sub(row.start) as u128 * wrapped as u128
+                                    / count as u128) as u64
+                        })
+                    };
+                    let visible = layout
+                        .rows
+                        .get(viewport.visible_end(self.top).saturating_sub(1))
+                        .map_or(1, |r| r.end.saturating_sub(self.current()).max(1));
+                    (maximum, visible, position, false)
+                };
+                (track, maximum, visible, position, pixels)
+            }
         };
-        let info = SCROLLINFO {
-            cbSize: size_of::<SCROLLINFO>() as u32,
-            fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
-            nMin: 0,
-            nMax: RANGE,
-            nPage: 1,
-            nPos: pos,
-            nTrackPos: 0,
+        if maximum == 0 || track.bottom <= track.top || track.right <= track.left {
+            return None;
+        }
+        let (start, length) = match axis {
+            Axis::Vertical => (track.top, track.bottom - track.top),
+            Axis::Horizontal => (track.left, track.right - track.left),
         };
-        SetScrollInfo(self.hwnd, SB_VERT, &info, 1);
-        let max = self
-            .layout
-            .as_ref()
-            .map_or(0, |l| (l.max_width - self.body_width()).max(0));
-        self.horizontal = self.horizontal.clamp(0, max);
-        let info = SCROLLINFO {
-            cbSize: size_of::<SCROLLINFO>() as u32,
-            fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
-            nMin: 0,
-            nMax: if self.settings.wrap {
-                0
-            } else {
-                max + self.body_width()
+        let scale = ScrollTrack::new(start, length, maximum, visible, position, self.s(32));
+        let thumb = match axis {
+            Axis::Vertical => RECT {
+                top: scale.thumb_start,
+                bottom: scale.thumb_start + scale.thumb_length,
+                ..track
             },
-            nPage: self.body_width() as u32,
-            nPos: self.horizontal,
-            nTrackPos: 0,
+            Axis::Horizontal => RECT {
+                left: scale.thumb_start,
+                right: scale.thumb_start + scale.thumb_length,
+                ..track
+            },
         };
-        SetScrollInfo(self.hwnd, SB_HORZ, &info, 1);
+        Some(Bar {
+            track,
+            thumb,
+            scale,
+            pixels,
+        })
+    }
+    unsafe fn drag_scrollbar(&mut self, x: i32, y: i32) {
+        let Some(drag) = self.drag else {
+            return;
+        };
+        let Some(bar) = self.scroll_bar(drag.axis) else {
+            return;
+        };
+        let pointer = if drag.axis == Axis::Vertical { y } else { x };
+        let value = bar.scale.value_at(pointer, drag.grab);
+        if drag.axis == Axis::Horizontal {
+            self.horizontal = value as i32;
+        } else if bar.pixels {
+            if let Some(layout) = &self.layout {
+                let mut used = 0;
+                self.top = 0;
+                for row in layout.rows.iter().take(self.viewport().bottom_top()) {
+                    let next = used + row.height.max(1) as u64;
+                    if next > value {
+                        break;
+                    }
+                    used = next;
+                    self.top += 1;
+                }
+                self.anchor = self.current();
+                self.selection = None;
+            }
+        } else {
+            self.jump(value);
+        }
+        self.scrollbar();
+        self.invalidate();
+    }
+    unsafe fn begin_scrollbar(&mut self, x: i32, y: i32) -> bool {
+        for axis in [Axis::Vertical, Axis::Horizontal] {
+            let Some(bar) = self.scroll_bar(axis) else {
+                continue;
+            };
+            if !contains(bar.track, x, y) {
+                continue;
+            }
+            if contains(bar.thumb, x, y) {
+                let grab = if axis == Axis::Vertical {
+                    y - bar.thumb.top
+                } else {
+                    x - bar.thumb.left
+                };
+                self.drag = Some(ScrollDrag { axis, grab });
+                SetCapture(self.hwnd);
+            } else if axis == Axis::Vertical {
+                self.page_scroll(y >= bar.thumb.bottom);
+            } else {
+                self.horizontal += if x < bar.thumb.left {
+                    -self.body_width()
+                } else {
+                    self.body_width()
+                };
+                self.scrollbar();
+            }
+            self.invalidate();
+            return true;
+        }
+        false
     }
     unsafe fn persist(&mut self) {
         if let Err(e) = self.settings.save(&self.settings_path) {
@@ -482,6 +754,7 @@ impl App {
             (WRAP, self.settings.wrap),
             (RAW, self.settings.raw),
             (WIDE, self.settings.wide),
+            (OUTLINE, self.settings.outline),
         ] {
             CheckMenuItem(
                 self.menu,
@@ -542,16 +815,20 @@ impl App {
             }
         }
     }
-    unsafe fn show_edit(&mut self, mode: usize) {
-        self.edit_mode = Some(mode);
+    unsafe fn position_edit(&self, _mode: usize) {
+        let left = (self.sidebar_width() + self.s(24)).max(self.s(48));
         MoveWindow(
             self.edit,
-            self.s(40),
-            self.s(84),
-            (self.width - self.s(200)).max(self.s(80)),
-            self.s(29),
+            left,
+            self.s(60),
+            (self.width - left - self.s(164)).max(self.s(80)),
+            self.s(32),
             1,
         );
+    }
+    unsafe fn show_edit(&mut self, mode: usize) {
+        self.edit_mode = Some(mode);
+        self.position_edit(mode);
         ShowWindow(self.edit, SW_SHOW);
         SetWindowTextW(
             self.edit,
@@ -559,6 +836,7 @@ impl App {
         );
         SetFocus(self.edit);
         SendMessageW(self.edit, 0x00B1, 0, -1);
+        self.clamp_top();
         self.invalidate();
     }
     unsafe fn hide_edit(&mut self) {
@@ -567,6 +845,7 @@ impl App {
         ShowWindow(self.edit, SW_HIDE);
         SetFocus(self.hwnd);
         self.status = "就绪".into();
+        self.clamp_top();
         self.invalidate();
     }
     unsafe fn submit(&mut self) {
@@ -656,8 +935,23 @@ impl App {
             .visible_end(self.top)
             .saturating_sub(self.top)
     }
+    #[allow(
+        clippy::collapsible_match,
+        reason = "Keep user-confirmation side effects inside the selected command"
+    )]
     unsafe fn command(&mut self, id: usize) {
         match id {
+            OUTLINE => self.toggle_outline(),
+            MINIMIZE => { PostMessageW(self.hwnd, WM_SYSCOMMAND, SC_MINIMIZE as usize, 0); },
+            MAXIMIZE => { PostMessageW(self.hwnd, WM_SYSCOMMAND, if IsZoomed(self.hwnd) != 0 { SC_RESTORE } else { SC_MAXIMIZE } as usize, 0); },
+            PREVIEW | SOURCE => { self.settings.raw = id == SOURCE; self.persist(); },
+            FILE_MENU | HELP_MENU => {
+                let menu = GetSubMenu(self.menu, if id == FILE_MENU { 0 } else { 2 });
+                let mut point = POINT { x: self.s(20), y: self.s(94) };
+                ClientToScreen(self.hwnd, &mut point);
+                let selected = TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, self.hwnd, null());
+                if selected > 0 { self.command(selected as usize); }
+            },
             LICENSES=>self.export_licenses(),
             OPEN=>self.dialog(), FIND|GOTO=>self.show_edit(id), NEXT=>self.search(), COPY=>self.copy(), EXIT=>{DestroyWindow(self.hwnd);},
             RELOAD=>{if let Some(doc)=&self.document {let p=doc.path.clone();self.open(p);}},
@@ -665,8 +959,8 @@ impl App {
             ZOOM_IN=>{self.settings.font_size=(self.settings.font_size+2).min(36);self.persist();},
             ZOOM_OUT=>{self.settings.font_size=(self.settings.font_size-2).max(12);self.persist();},
             WRAP=>{self.settings.wrap= !self.settings.wrap;self.persist();}, RAW=>{self.settings.raw= !self.settings.raw;self.persist();}, WIDE=>{self.settings.wide= !self.settings.wide;self.persist();},
-            RESET=>{self.settings=Settings::default();self.persist();},
-            SETTINGS=>{let mut point=POINT{x:self.width-self.s(100),y:self.s(65)};ClientToScreen(self.hwnd,&mut point);let id=TrackPopupMenu(self.settings_menu,TPM_RIGHTALIGN|TPM_RETURNCMD,point.x,point.y,0,self.hwnd,null());if id>0{self.command(id as usize);}},
+            RESET=>{self.settings=Settings::default();self.persist();self.start_outline();},
+            SETTINGS=>{let mut point=POINT{x:self.width-self.s(145),y:self.s(46)};ClientToScreen(self.hwnd,&mut point);let id=TrackPopupMenu(self.settings_menu,TPM_RIGHTALIGN|TPM_RETURNCMD,point.x,point.y,0,self.hwnd,null());if id>0{self.command(id as usize);}},
             REGISTER=>{
                 if MessageBoxW(self.hwnd,w("将 FeatherMD 添加到 Windows 的打开方式列表。\n不会强行更改当前默认应用；下一步由你在系统设置中选择 .md → FeatherMD。\n\n建议先把 EXE 放在固定位置。是否继续？").as_ptr(),w("注册 Markdown 查看器").as_ptr(),MB_OKCANCEL|MB_ICONINFORMATION)==IDOK {
                     match std::env::current_exe().and_then(|p|crate::association::register(&p)) { Ok(())=>{self.status="已注册，请在系统默认应用中选择 FeatherMD".into();ShellExecuteW(self.hwnd,w("open").as_ptr(),w("ms-settings:defaultapps").as_ptr(),null(),null(),SW_SHOWNORMAL);},Err(e)=>self.error(&e.to_string()) }
@@ -686,6 +980,7 @@ impl App {
                 0x47 => self.command(GOTO),
                 0x43 => self.command(COPY),
                 0x52 => self.command(RAW),
+                0x42 => self.command(OUTLINE),
                 0x41 => {
                     if let Some(l) = &self.layout {
                         self.selection = Some((0, l.rows.len().saturating_sub(1)));
@@ -746,6 +1041,11 @@ impl App {
         color: u32,
         flags: u32,
     ) {
+        // DrawTextW may inspect the first UTF-16 code unit even with a zero count.
+        // Icon-only controls have no label and must not pass a dangling empty Vec.
+        if text.is_empty() {
+            return;
+        }
         let old = SelectObject(
             dc,
             self.fonts.get(FontKey {
@@ -763,30 +1063,6 @@ impl App {
         DrawTextW(dc, text.as_ptr(), text.len() as i32, &mut r, flags);
         SelectObject(dc, old);
     }
-    unsafe fn button(
-        &mut self,
-        dc: HDC,
-        text: &str,
-        rect: RECT,
-        id: usize,
-        primary: bool,
-        p: Palette,
-    ) {
-        Self::fill(dc, &rect, if primary { p.accent } else { p.code });
-        self.label(
-            dc,
-            text,
-            rect,
-            14,
-            true,
-            if primary { p.bg } else { p.fg },
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-        );
-        self.hits.push(HitBox {
-            rect,
-            action: Hit::Command(id),
-        });
-    }
     unsafe fn paint(&mut self, supplied: Option<HDC>) {
         let mut ps: PAINTSTRUCT = zeroed();
         let target = supplied.unwrap_or_else(|| BeginPaint(self.hwnd, &mut ps));
@@ -803,190 +1079,10 @@ impl App {
         Self::fill(dc, &all, p.bg);
         self.hits.clear();
         SetBkMode(dc, TRANSPARENT as i32);
-        let header = RECT {
-            left: 0,
-            top: 0,
-            right: self.width,
-            bottom: self.s(70),
-        };
-        Self::fill(dc, &header, p.panel);
-        let logo = RECT {
-            left: self.s(22),
-            top: self.s(19),
-            right: self.s(54),
-            bottom: self.s(51),
-        };
-        Self::fill(dc, &logo, p.accent);
-        self.label(
-            dc,
-            "F",
-            logo,
-            23,
-            true,
-            p.bg,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-        );
-        self.label(
-            dc,
-            "FeatherMD",
-            RECT {
-                left: self.s(66),
-                top: self.s(13),
-                right: self.s(225),
-                bottom: self.s(39),
-            },
-            19,
-            true,
-            p.fg,
-            DT_SINGLELINE,
-        );
-        self.label(
-            dc,
-            "羽读  /  轻一点，读更多",
-            RECT {
-                left: self.s(66),
-                top: self.s(40),
-                right: self.s(265),
-                bottom: self.s(60),
-            },
-            11,
-            false,
-            p.muted,
-            DT_SINGLELINE,
-        );
-        let actions = [
-            ("打开", OPEN, true),
-            ("搜索", FIND, false),
-            ("主题", THEME, false),
-            ("设置", SETTINGS, false),
-        ];
-        let button_w = self.s(66);
-        let gap = self.s(10);
-        let left = (self.width - self.s(24) - 4 * (button_w + gap)).max(self.s(270));
-        for (i, (text, id, primary)) in actions.iter().enumerate() {
-            let x = left + i as i32 * (button_w + gap);
-            self.button(
-                dc,
-                text,
-                RECT {
-                    left: x,
-                    top: self.s(21),
-                    right: x + button_w,
-                    bottom: self.s(50),
-                },
-                *id,
-                *primary,
-                p,
-            );
-        }
-        if self.edit_mode.is_some() {
-            self.button(
-                dc,
-                if self.edit_mode == Some(GOTO) {
-                    "跳转 %"
-                } else {
-                    "下一个"
-                },
-                RECT {
-                    left: self.width - self.s(146),
-                    top: self.s(84),
-                    right: self.width - self.s(66),
-                    bottom: self.s(114),
-                },
-                NEXT,
-                false,
-                p,
-            );
-            self.button(
-                dc,
-                "×",
-                RECT {
-                    left: self.width - self.s(56),
-                    top: self.s(84),
-                    right: self.width - self.s(24),
-                    bottom: self.s(114),
-                },
-                0,
-                false,
-                p,
-            );
-        }
+        self.paint_header(dc, p);
+        self.paint_outline(dc, p);
         if self.document.is_none() {
-            let x = self.left();
-            let y = (self.height / 3).max(self.s(130));
-            self.label(
-                dc,
-                "留白给阅读。",
-                RECT {
-                    left: x,
-                    top: y,
-                    right: self.width - self.s(30),
-                    bottom: y + self.s(70),
-                },
-                42,
-                true,
-                p.fg,
-                DT_SINGLELINE,
-            );
-            self.label(
-                dc,
-                "一个文件，一个安静的 Markdown 阅读器。",
-                RECT {
-                    left: x,
-                    top: y + self.s(86),
-                    right: self.width - self.s(30),
-                    bottom: y + self.s(123),
-                },
-                20,
-                false,
-                p.muted,
-                DT_SINGLELINE,
-            );
-            self.label(
-                dc,
-                "拖入 .md 文件，或从这里开始。大文件按需读取，不必等待全文载入。",
-                RECT {
-                    left: x,
-                    top: y + self.s(136),
-                    right: self.width - self.s(30),
-                    bottom: y + self.s(195),
-                },
-                14,
-                false,
-                p.muted,
-                DT_WORDBREAK,
-            );
-            self.button(
-                dc,
-                if self.loading {
-                    "正在打开…"
-                } else {
-                    "打开 Markdown   Ctrl+O"
-                },
-                RECT {
-                    left: x,
-                    top: y + self.s(209),
-                    right: x + self.s(235),
-                    bottom: y + self.s(255),
-                },
-                OPEN,
-                true,
-                p,
-            );
-            self.label(
-                dc,
-                "原生 Rust     /     离线优先     /     单文件运行",
-                RECT {
-                    left: x,
-                    top: y + self.s(286),
-                    right: self.width - self.s(30),
-                    bottom: y + self.s(320),
-                },
-                12,
-                false,
-                p.muted,
-                DT_SINGLELINE,
-            );
+            self.paint_welcome(dc, p);
         } else if self.page.as_ref().is_some_and(|p| p.size == 0) {
             self.label(
                 dc,
@@ -1006,7 +1102,7 @@ impl App {
             let left = self.left();
             let body_width = self.body_width();
             let mut y = self.content_top() + self.s(12);
-            let bottom = self.height - self.s(32);
+            let bottom = self.content_bottom();
             if let Some(layout) = &self.layout {
                 let saved = SaveDC(dc);
                 IntersectClipRect(dc, left, y, left + body_width, bottom);
@@ -1118,65 +1214,8 @@ impl App {
                 RestoreDC(dc, saved);
             }
         }
-        let footer = RECT {
-            left: 0,
-            top: self.height - self.s(29),
-            right: self.width,
-            bottom: self.height,
-        };
-        Self::fill(dc, &footer, p.panel);
-        let mut summary = self.status.clone();
-        if let Some(page) = &self.page {
-            let percent = if page.size == 0 {
-                0.0
-            } else {
-                self.current() as f64 * 100.0 / page.size as f64
-            };
-            summary = format!(
-                "{}  ·  {:.1}%  ·  {}  ·  {}",
-                human_size(page.size),
-                percent,
-                if self.settings.raw {
-                    "源码"
-                } else {
-                    "预览"
-                },
-                self.status
-            );
-            if page.invalid_utf8 {
-                summary.push_str("  ·  非 UTF-8：部分字符被替换");
-            } else if page.partial_context && !self.settings.raw {
-                summary.push_str("  ·  跨页语法可能不完整");
-            }
-        }
-        self.label(
-            dc,
-            &summary,
-            RECT {
-                left: self.s(22),
-                top: footer.top,
-                right: self.width - self.s(80),
-                bottom: self.height,
-            },
-            11,
-            false,
-            p.muted,
-            DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-        );
-        self.label(
-            dc,
-            &format!("{} px", self.settings.font_size),
-            RECT {
-                left: self.width - self.s(75),
-                top: footer.top,
-                right: self.width - self.s(18),
-                bottom: self.height,
-            },
-            11,
-            false,
-            p.muted,
-            DT_SINGLELINE | DT_VCENTER | DT_RIGHT,
-        );
+        self.paint_footer(dc, p);
+        self.paint_scrollbars(dc, p);
         BitBlt(target, 0, 0, self.width, self.height, dc, 0, 0, SRCCOPY);
         SelectObject(dc, old_bitmap);
         DeleteObject(bitmap);
@@ -1261,6 +1300,13 @@ impl App {
     }
 }
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    // The entire window is our client surface; Windows still owns move/resize/snap.
+    if msg == WM_NCCALCSIZE || msg == WM_NCPAINT {
+        return 0;
+    }
+    if msg == WM_NCACTIVATE {
+        return 1;
+    }
     if msg == WM_DESTROY {
         KillTimer(hwnd, 1);
         PostQuitMessage(0);
@@ -1296,6 +1342,37 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             12 => app.settings.font_size as isize,
             13 => app.top as isize,
             14 => app.wrapped_row(app.top) as isize,
+            18 => app.horizontal as isize,
+            19..=24 => app.scroll_bar(Axis::Vertical).map_or(-1, |bar| match wp {
+                19 => bar.track.left,
+                20 => bar.track.top,
+                21 => bar.track.right,
+                22 => bar.track.bottom,
+                23 => bar.thumb.top,
+                _ => bar.thumb.bottom,
+            } as isize),
+            25..=30 => app.scroll_bar(Axis::Horizontal).map_or(-1, |bar| match wp {
+                25 => bar.track.left,
+                26 => bar.track.top,
+                27 => bar.track.right,
+                28 => bar.track.bottom,
+                29 => bar.thumb.left,
+                _ => bar.thumb.right,
+            } as isize),
+            31 => app.horizontal_max() as isize,
+            32 => app.settings.outline as isize,
+            33 => app.outline_loading as isize,
+            34 => app
+                .outline
+                .as_ref()
+                .map_or(0, |o| o.headings.len() as isize),
+            35 => app.sidebar_width() as isize,
+            36 => app.outline_top as isize,
+            37 => app
+                .outline
+                .as_ref()
+                .and_then(|o| o.headings.get(lp as usize))
+                .map_or(-1, |h| h.offset as isize),
             17 => app
                 .hits
                 .iter()
@@ -1335,13 +1412,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_SIZE => {
-            app.width = (lp as u32 & 0xffff) as i32;
-            app.height = ((lp as u32 >> 16) & 0xffff) as i32;
             if wp != SIZE_MINIMIZED as usize {
+                app.width = (lp as u32 & 0xffff) as i32;
+                app.height = ((lp as u32 >> 16) & 0xffff) as i32;
+                app.drag = None;
+                app.hover = None;
+                app.pressed = None;
                 let anchor = app.current();
+                let wrapped = app.wrapped_row(app.top);
                 app.relayout(anchor);
+                app.position(anchor, wrapped);
                 if let Some(mode) = app.edit_mode {
-                    app.show_edit(mode);
+                    app.position_edit(mode);
                 }
             }
             0
@@ -1350,9 +1432,59 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let info = &mut *(lp as *mut MINMAXINFO);
             info.ptMinTrackSize = POINT {
                 x: app.s(640),
-                y: app.s(400),
+                y: app.s(480),
             };
+            let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut monitor_info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..zeroed()
+            };
+            if GetMonitorInfoW(monitor, &mut monitor_info) != 0 {
+                let work = monitor_info.rcWork;
+                info.ptMaxPosition = POINT {
+                    x: work.left - monitor_info.rcMonitor.left,
+                    y: work.top - monitor_info.rcMonitor.top,
+                };
+                info.ptMaxSize = POINT {
+                    x: work.right - work.left,
+                    y: work.bottom - work.top,
+                };
+            }
             0
+        }
+        WM_NCHITTEST => {
+            let mut point = POINT {
+                x: lp as u16 as i16 as i32,
+                y: (lp >> 16) as u16 as i16 as i32,
+            };
+            ScreenToClient(hwnd, &mut point);
+            let (x, y) = (point.x, point.y);
+            let edge = app.s(6);
+            if IsZoomed(hwnd) == 0 {
+                let left = x < edge;
+                let right = x >= app.width - edge;
+                let top = y < edge;
+                let bottom = y >= app.height - edge;
+                let hit = match (left, right, top, bottom) {
+                    (true, _, true, _) => HTTOPLEFT,
+                    (_, true, true, _) => HTTOPRIGHT,
+                    (true, _, _, true) => HTBOTTOMLEFT,
+                    (_, true, _, true) => HTBOTTOMRIGHT,
+                    (true, _, _, _) => HTLEFT,
+                    (_, true, _, _) => HTRIGHT,
+                    (_, _, true, _) => HTTOP,
+                    (_, _, _, true) => HTBOTTOM,
+                    _ => HTCLIENT,
+                };
+                if hit != HTCLIENT {
+                    return hit as isize;
+                }
+            }
+            if y < app.s(48) && !matches!(app.hit(x, y), Some(Hit::Command(_))) {
+                HTCAPTION as isize
+            } else {
+                HTCLIENT as isize
+            }
         }
         WM_DPICHANGED => {
             let anchor = app.current();
@@ -1380,6 +1512,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             });
             SendMessageW(app.edit, WM_SETFONT, font as usize, 1);
             app.relayout(anchor);
+            if let Some(mode) = app.edit_mode {
+                app.position_edit(mode);
+            }
             0
         }
         WM_COMMAND => {
@@ -1390,16 +1525,45 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             if app.keyboard(wp, GetKeyState(VK_CONTROL as i32) < 0) {
                 0
             } else {
+                drop(app);
                 DefWindowProcW(hwnd, msg, wp, lp)
             }
         }
         WM_MOUSEWHEEL => {
             let delta = ((wp >> 16) as u16 as i16) as i32;
-            if GetKeyState(VK_CONTROL as i32) < 0 {
-                app.command(if delta > 0 { ZOOM_IN } else { ZOOM_OUT });
-            } else {
-                app.scroll(-(delta / 120) * 3);
+            app.wheel_remainder += delta;
+            let steps = app.wheel_remainder / 120;
+            app.wheel_remainder %= 120;
+            if steps == 0 {
+                return 0;
             }
+            let mut point = POINT {
+                x: lp as u16 as i16 as i32,
+                y: (lp >> 16) as u16 as i16 as i32,
+            };
+            ScreenToClient(hwnd, &mut point);
+            if point.x >= 0 && point.x < app.sidebar_width() && point.y >= app.s(48) {
+                app.scroll_outline(-steps * 3);
+                return 0;
+            }
+            if GetKeyState(VK_CONTROL as i32) < 0 {
+                app.command(if steps > 0 { ZOOM_IN } else { ZOOM_OUT });
+            } else if GetKeyState(VK_SHIFT as i32) < 0 {
+                app.horizontal -= steps * app.s(60);
+                app.scrollbar();
+                app.invalidate();
+            } else {
+                app.scroll(-steps * 3);
+            }
+            0
+        }
+        WM_MOUSEHWHEEL => {
+            app.horizontal_wheel_remainder += ((wp >> 16) as u16 as i16) as i32;
+            let steps = app.horizontal_wheel_remainder / 120;
+            app.horizontal_wheel_remainder %= 120;
+            app.horizontal += steps * app.s(60);
+            app.scrollbar();
+            app.invalidate();
             0
         }
         WM_VSCROLL => {
@@ -1413,41 +1577,40 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     let n = app.page.as_ref().map_or(0, |p| p.size.saturating_sub(1));
                     app.jump(n);
                 }
-                SB_THUMBTRACK | SB_THUMBPOSITION => {
-                    let mut info: SCROLLINFO = zeroed();
-                    info.cbSize = size_of::<SCROLLINFO>() as u32;
-                    info.fMask = SIF_TRACKPOS;
-                    GetScrollInfo(hwnd, SB_VERT, &mut info);
-                    let size = app.page.as_ref().map_or(0, |p| p.size);
-                    let anchor =
-                        (size as u128 * info.nTrackPos.max(0) as u128 / RANGE as u128) as u64;
-                    app.request_page(anchor);
-                }
                 _ => {}
             }
             0
         }
         WM_HSCROLL => {
-            let mut info: SCROLLINFO = zeroed();
-            info.cbSize = size_of::<SCROLLINFO>() as u32;
-            info.fMask = SIF_ALL;
-            GetScrollInfo(hwnd, SB_HORZ, &mut info);
             match (wp & 0xffff) as i32 {
                 SB_LINELEFT => app.horizontal -= app.s(40),
                 SB_LINERIGHT => app.horizontal += app.s(40),
                 SB_PAGELEFT => app.horizontal -= app.body_width(),
                 SB_PAGERIGHT => app.horizontal += app.body_width(),
-                SB_THUMBTRACK | SB_THUMBPOSITION => app.horizontal = info.nTrackPos,
+                SB_LEFT => app.horizontal = 0,
+                SB_RIGHT => app.horizontal = app.horizontal_max(),
                 _ => {}
             }
             app.scrollbar();
             app.invalidate();
             0
         }
-        WM_LBUTTONDOWN => {
+        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
             SetFocus(hwnd);
             let x = lp as u16 as i16 as i32;
             let y = (lp >> 16) as u16 as i16 as i32;
+            app.pressed = None;
+            if app.begin_scrollbar(x, y) {
+                return 0;
+            }
+            app.pressed = app.hit(x, y);
+            if matches!(
+                app.pressed,
+                Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_))
+            ) {
+                SetCapture(hwnd);
+                app.invalidate();
+            }
             if let Some(Hit::Row(row)) = app.hit(x, y) {
                 app.selection = Some((row, row));
                 app.selecting = true;
@@ -1457,8 +1620,29 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_MOUSEMOVE => {
-            if app.selecting {
-                let y = (lp >> 16) as u16 as i16 as i32;
+            let x = lp as u16 as i16 as i32;
+            let y = (lp >> 16) as u16 as i16 as i32;
+            let hover = if let Some(Hit::Command(id)) = app.hit(x, y) {
+                Some(id)
+            } else {
+                None
+            };
+            let previous_mouse = app.mouse;
+            app.mouse = Some((x, y));
+            if app.hover != hover || previous_mouse != app.mouse {
+                app.hover = hover;
+                app.invalidate();
+            }
+            let mut tracking = TRACKMOUSEEVENT {
+                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            TrackMouseEvent(&mut tracking);
+            if app.drag.is_some() {
+                app.drag_scrollbar(x, y);
+            } else if app.selecting {
                 let row = app.hits.iter().find_map(|h| {
                     if y >= h.rect.top && y < h.rect.bottom {
                         if let Hit::Row(i) = h.action {
@@ -1478,13 +1662,33 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_LBUTTONUP => {
-            if app.selecting {
+            let x = lp as u16 as i16 as i32;
+            let y = (lp >> 16) as u16 as i16 as i32;
+            let pressed = app.pressed.take();
+            if app.drag.is_some() {
+                app.drag_scrollbar(x, y);
+                app.drag = None;
+                ReleaseCapture();
+                app.invalidate();
+            } else if app.selecting {
                 app.selecting = false;
                 ReleaseCapture();
             } else {
-                let x = lp as u16 as i16 as i32;
-                let y = (lp >> 16) as u16 as i16 as i32;
-                match app.hit(x, y) {
+                ReleaseCapture();
+                let hit = app.hit(x, y);
+                if pressed != hit {
+                    app.invalidate();
+                    return 0;
+                }
+                match hit {
+                    Some(Hit::Heading(index)) => {
+                        if let Some(heading) =
+                            app.outline.as_ref().and_then(|o| o.headings.get(index))
+                        {
+                            let offset = heading.offset;
+                            app.jump(offset);
+                        }
+                    }
                     Some(Hit::Command(0)) => app.hide_edit(),
                     Some(Hit::Command(NEXT)) if app.edit_mode.is_some() => app.submit(),
                     Some(Hit::Command(id)) => app.command(id),
@@ -1516,9 +1720,41 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             0
         }
-        WM_CAPTURECHANGED => {
+        WM_CAPTURECHANGED | WM_CANCELMODE => {
             app.selecting = false;
+            app.drag = None;
+            app.pressed = None;
+            if msg == WM_CANCELMODE {
+                ReleaseCapture();
+            }
+            app.invalidate();
             0
+        }
+        WM_MOUSELEAVE => {
+            app.hover = None;
+            app.mouse = None;
+            app.invalidate();
+            0
+        }
+        WM_SETCURSOR if lp as u16 as u32 == HTCLIENT => {
+            let clickable = app.mouse.is_some_and(|(x, y)| {
+                matches!(
+                    app.hit(x, y),
+                    Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_))
+                )
+            });
+            SetCursor(LoadCursorW(
+                null_mut(),
+                if clickable { IDC_HAND } else { IDC_ARROW },
+            ));
+            1
+        }
+        WM_CTLCOLOREDIT => {
+            let p = Palette::new(app.settings.theme);
+            SetTextColor(wp as HDC, p.fg);
+            SetBkColor(wp as HDC, p.bg);
+            SetDCBrushColor(wp as HDC, p.bg);
+            GetStockObject(DC_BRUSH) as isize
         }
         WM_DROPFILES => {
             let drop = wp as HDROP;
@@ -1538,7 +1774,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             PostQuitMessage(0);
             0
         }
-        _ => DefWindowProcW(hwnd, msg, wp, lp),
+        _ => {
+            // Native move/resize/scroll tracking runs a nested message loop.
+            // Let those callbacks borrow App instead of silently bypassing them.
+            drop(app);
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
     }
 }
 unsafe fn add(menu: HMENU, id: usize, text: &str) {
@@ -1560,6 +1801,8 @@ unsafe fn menus() -> (HMENU, HMENU) {
     AppendMenuW(menu, MF_POPUP, file as usize, w("文件(&F)").as_ptr());
     let settings = CreatePopupMenu();
     for (id, text) in [
+        (GOTO, "跳转到百分比…\tCtrl+G"),
+        (OUTLINE, "显示目录\tCtrl+B"),
         (THEME, "切换主题：浅色 / 深色 / 护眼"),
         (ZOOM_IN, "放大字号\tCtrl++"),
         (ZOOM_OUT, "缩小字号\tCtrl+-"),
@@ -1567,6 +1810,10 @@ unsafe fn menus() -> (HMENU, HMENU) {
         (WIDE, "宽屏阅读"),
         (RAW, "源码模式\tCtrl+R"),
         (RESET, "恢复默认阅读设置"),
+        (RELOAD, "重新载入\tF5"),
+        (COPY, "复制选中行 / 可见内容\tCtrl+C"),
+        (ABOUT, "帮助 / 快捷键\tF1"),
+        (LICENSES, "导出内置许可证…"),
         (REGISTER, "注册为 Markdown 查看器…"),
         (UNREGISTER, "移除打开方式注册…"),
     ] {
@@ -1587,7 +1834,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
         let icon = LoadIconW(instance, make_resource(1));
         let wc = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
-            style: CS_HREDRAW | CS_VREDRAW,
+            style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
             lpfnWndProc: Some(wndproc),
             hInstance: instance,
             hIcon: icon,
@@ -1605,13 +1852,13 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
             w("FeatherMD 羽读").as_ptr(),
-            WS_OVERLAPPEDWINDOW | WS_VSCROLL | WS_HSCROLL,
+            (WS_OVERLAPPEDWINDOW & !WS_CAPTION) | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             1080,
             820,
             null_mut(),
-            menu,
+            null_mut(),
             instance,
             (&*app as *const RefCell<App>).cast(),
         );
@@ -1619,6 +1866,23 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             DestroyMenu(menu);
             return Err(std::io::Error::last_os_error().to_string());
         }
+        // CreateWindow may add caption bits to an overlapped top-level window.
+        // Remove them explicitly before calculating the final client geometry.
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        SetWindowLongPtrW(
+            hwnd,
+            GWL_STYLE,
+            (style & !(WS_CAPTION | WS_VSCROLL | WS_HSCROLL)) as isize,
+        );
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
         {
             let mut a = app.borrow_mut();
             a.hwnd = hwnd;
@@ -1626,7 +1890,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             a.settings_menu = settings_menu;
             a.fonts = Fonts::new(GetDpiForWindow(hwnd));
             a.edit = CreateWindowExW(
-                WS_EX_CLIENTEDGE,
+                0,
                 w("EDIT").as_ptr(),
                 w("").as_ptr(),
                 WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL as u32,
@@ -1657,6 +1921,20 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
                 a.open(path);
             }
         }
+        let no_border = 0xffff_fffe_u32;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR as u32,
+            (&no_border as *const u32).cast(),
+            size_of::<u32>() as u32,
+        );
+        let round = DWMWCP_ROUND;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            (&round as *const DWM_WINDOW_CORNER_PREFERENCE).cast(),
+            size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        );
         SetTimer(hwnd, 1, 30, None);
         ShowWindow(hwnd, SW_SHOWDEFAULT);
         UpdateWindow(hwnd);
@@ -1689,6 +1967,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+        DestroyMenu(menu);
         Ok(())
     }
 }

@@ -6,11 +6,24 @@
 
 ![FeatherMD 浅色阅读界面](docs/reading-light.png)
 
+目录开关位于目录区域：展开时在“目录”标题右侧，隐藏后在内容区左边缘。打开、查找和更多操作都收在同一行标题栏。
+
+<details>
+<summary>更多预览：深色阅读、隐藏目录与欢迎页</summary>
+
+![FeatherMD 深色阅读界面](docs/reading-dark.png)
+
+![FeatherMD 隐藏目录后的阅读界面](docs/reading-outline-hidden.png)
+
+![FeatherMD 欢迎页](docs/welcome-light.png)
+
+</details>
+
 ## 为什么做这个
 
 打开一份 Markdown，不应该先启动一个浏览器。
 
-FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测或自动联网。v0.1.1 的 Windows x64 EXE 约 **642 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
+FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测或自动联网。v0.1.2 的 Windows x64 EXE 约 **669 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
 
 **大文件不是先全部载入再显示：** 每次只读取附近 128 KiB，后台读取与搜索，前台只绘制可见行。文件总长度不决定首屏需要分配的内存。
 
@@ -18,21 +31,31 @@ FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测�
 
 1. 从 Releases 下载 **FeatherMD.exe**，放到喜欢的文件夹，双击运行。
 2. 拖入 Markdown，或按 **Ctrl+O**。
-3. 通过“设置”调整主题、字号、自动换行、阅读宽度或源码模式。
+3. 左侧目录点击标题即可跳转；点“目录”标题右侧按钮收起，点内容区左边缘按钮展开，也可按 **Ctrl+B** 切换，状态会保存。
+4. 打开、查找和“更多”收在同一行标题栏；通过“更多”调整主题、字号、自动换行、阅读宽度或源码模式。
 
 支持 Windows 10（1607+）/ Windows 11 **x64**。当前实测环境为 Windows 11 x64；其他版本尚未逐个实机验证。无安装器，无管理员权限要求。尚未购买代码签名证书，Windows SmartScreen 可能提醒未知发布者；请核对来源和 SHA-256，不要关闭系统防护。
 
 ### 设置为默认 Markdown 查看器
 
 - 先将 EXE 放在**固定位置**。
-- 点击 **设置 → 注册为 Markdown 查看器**，确认后会打开 Windows“默认应用”。
+- 点击 **更多 → 注册为 Markdown 查看器**，确认后会打开 Windows“默认应用”。
 - 搜索 **.md**，选择 **FeatherMD**；也可以右键文件 → 打开方式 → 选择其他应用 → FeatherMD → 始终使用。
 - 支持注册 .md / .markdown / .mdown / .mkd。
 - “移除打开方式注册”只移除 FeatherMD 自己的注册项。
 
 **不会绕过 Windows 保护、覆盖 UserChoice 或偷偷改变你现有的默认程序。** 移动 EXE 后需要重新注册。
 
-### v0.1.1 阅读改进
+### v0.1.2 界面与导航
+
+- 自绘标题栏、边框、窗口按钮和浅色/深色/护眼界面；移除独立工具栏，增加正文空间。
+- 可隐藏的分级标题目录，独立滚轮滚动、点击定位，后台提取不阻塞首屏。
+- 自绘纵向/横向滚动条支持拖动和轨道翻页，修复原生拖动消息重入导致正文不移动的问题。
+- 快速拖离缓存再返回时，过期分页结果不会把阅读位置拉走；短文件隐藏无用滚动条。
+
+目录支持 `#` 至 `######` 标题，并排除代码围栏内容。为保持大文件响应速度，每份目录最多扫描前 **16 MiB**、显示 **4096 个标题**；达到上限时目录底部提示。Setext（下划线式）标题不收录；正文阅读与全文搜索不受目录范围限制。重新加载（F5）会重新提取目录。
+
+### 已有阅读改进
 
 - End 会显示完整末屏，最后一段很长且自动换行时也能到达真正结尾。
 - PageUp / PageDown 按实际行高翻页并保留重叠行，避免大标题导致漏读。
@@ -44,6 +67,7 @@ FeatherMD 使用 Win32 + GDI，没有 Electron、WebView、JavaScript、遥测�
 | 操作 | 快捷键 |
 | --- | --- |
 | 打开文件 | Ctrl+O / 拖放 |
+| 显示 / 隐藏目录 | Ctrl+B / 目录区域的折叠按钮 |
 | 后台查找（区分大小写的原文搜索） | Ctrl+F |
 | 下一个匹配（到末尾会回绕） | Enter / F3 |
 | 取消搜索 / 关闭搜索栏 | Esc |
@@ -111,6 +135,8 @@ cargo +stable-x86_64-pc-windows-msvc build --release
 ./scripts/ui-smoke.ps1
 ./scripts/navigation-smoke.ps1
 ./scripts/navigation-smoke.ps1 -Shape wrapped -Output ./test-artifacts/navigation-wrapped
+./scripts/scrollbar-smoke.ps1
+./scripts/window-smoke.ps1
 
 # 生成 1 MiB / 64 MiB / 1 GiB 实体测试文件（约占 1.1 GiB）
 ./scripts/make-fixtures.ps1
@@ -121,4 +147,4 @@ cargo +stable-x86_64-pc-windows-msvc run --release --example bench -- test-artif
 
 ## License
 
-[MIT](LICENSE)。依赖许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，也内置在 EXE 中，可通过“帮助 → 导出内置许可证”保存。
+[MIT](LICENSE)。依赖许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，也内置在 EXE 中，可通过“更多 → 导出内置许可证”保存。

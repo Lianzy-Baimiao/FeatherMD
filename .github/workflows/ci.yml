@@ -27,6 +27,8 @@ jobs:
           ./scripts/ui-smoke.ps1
           ./scripts/navigation-smoke.ps1
           ./scripts/navigation-smoke.ps1 -Shape wrapped -Output ./test-artifacts/navigation-wrapped
+          ./scripts/scrollbar-smoke.ps1
+          ./scripts/window-smoke.ps1
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
@@ -36,3 +38,6 @@ jobs:
             test-artifacts/*.png
             test-artifacts/ui-smoke.json
             test-artifacts/navigation*/navigation.json
+            test-artifacts/scrollbar/scrollbar.json
+            test-artifacts/window/*.png
+            test-artifacts/window/window.json

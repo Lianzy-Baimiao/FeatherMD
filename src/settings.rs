@@ -16,6 +16,7 @@ pub struct Settings {
     pub wrap: bool,
     pub raw: bool,
     pub wide: bool,
+    pub outline: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -25,6 +26,7 @@ impl Default for Settings {
             wrap: true,
             raw: false,
             wide: false,
+            outline: true,
         }
     }
 }
@@ -67,6 +69,7 @@ impl Settings {
                     "wrap" => s.wrap = value.trim() != "false",
                     "raw" => s.raw = value.trim() == "true",
                     "wide" => s.wide = value.trim() == "true",
+                    "outline" => s.outline = value.trim() != "false",
                     _ => {}
                 }
             }
@@ -75,7 +78,7 @@ impl Settings {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "# FeatherMD settings\nfont_size={}\ntheme={}\nwrap={}\nraw={}\nwide={}\n",
+            "# FeatherMD settings\nfont_size={}\ntheme={}\nwrap={}\nraw={}\nwide={}\noutline={}\n",
             self.font_size,
             match self.theme {
                 Theme::Light => "light",
@@ -84,7 +87,8 @@ impl Settings {
             },
             self.wrap,
             self.raw,
-            self.wide
+            self.wide,
+            self.outline
         )
     }
     pub fn save(&self, path: &Path) -> io::Result<()> {

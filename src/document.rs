@@ -68,6 +68,14 @@ fn continuation(b: u8) -> bool {
     b & 0xc0 == 0x80
 }
 impl Document {
+    pub(crate) fn current_size(&self) -> io::Result<u64> {
+        Ok(self.file.metadata()?.len())
+    }
+    /// A caller-owned buffer cannot increase one background read beyond 256 KiB.
+    pub(crate) fn read_bounded(&self, out: &mut [u8], offset: u64) -> io::Result<usize> {
+        let len = out.len().min(SEARCH_BYTES);
+        fill_at(&self.file, &mut out[..len], offset)
+    }
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let file = File::open(path.as_ref())?;
         let meta = file.metadata()?;
