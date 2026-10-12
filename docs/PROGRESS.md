@@ -9,6 +9,12 @@
 - Version bump: Cargo/Cargo.lock (feathermd only), app.rc FileVersion/ProductVersion 0.1.4, package.ps1 default 0.1.4. Rebuilt and reran fmt, strict Clippy, cargo test --locked (40 tests) and all 9 native regressions against the 0.1.4 build: PASS. About light/dark show v0.1.4 (GDI 22→22); previews regenerated.
 - Delivery: dist/FeatherMD.exe 738304 bytes (721 KiB), SHA-256 33882b654634390d9b649aa8b66f2af167ff7ff9d1f06238ea3764a7ea2a3c87. dist/FeatherMD-0.1.4-windows-x64.zip 659473 bytes, SHA-256 081132a4ff717fd217bb7053e01356af165066fb2e3bfc7815ac4723763ddd6e. Build, delivery and ZIP EXE hashes match; earlier ZIPs preserved.
 
+## v0.1.4 publication record — 2026-10-12
+
+- 作者/最后修改人：lianzy。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.4
+- Tag/source: 9c4868a2ac0ee712cc5f6944b12730b4072bc0ce (annotated tag v0.1.4). GitHub Actions run 38269151582 (main) passed on Windows and Ubuntu, including the native Windows smoke steps; tag run 38269160330 also passed: https://github.com/Lianzy-Baimiao/FeatherMD/actions/runs/38269151582
+- Assets: FeatherMD.exe 738304 bytes, FeatherMD-0.1.4-windows-x64.zip 659473 bytes, SHA256SUMS.txt 180 bytes (SHA-256 1971e812bb68c9e961fa1070efae231d918951689804d2a4fee6a487077f632e). All three were downloaded again; hashes match the local distribution and GitHub asset digests. EXE/ZIP hashes are recorded in the v0.1.4 entry above.
+- Versioned release-note preview URLs under v0.1.4/docs return HTTP 200. Earlier tags and release assets are unchanged.
 ## 2026-10-12 — v0.1.3 anti-aliased icons, reading font settings and release candidate
 
 - Header, welcome and About icons now use GDI+ anti-aliased vector paths with round caps, drawn at the window DPI. Before/after icon captures show 6 vs 216 edge colors. No icon font, downloaded assets or third-party runtime were added.
