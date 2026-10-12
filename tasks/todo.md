@@ -13,7 +13,7 @@
 - [x] 新增 settings-smoke（浅/深）、editor-smoke；更新 window/typography 回归；fmt、严格 Clippy、43 项测试、Release 构建、全部原生回归通过。
 - [x] 实图检查（原尺寸 + 放大，96/120/144 DPI，可见窗口透明度与设置窗口标题栏）、更新截图与文档，版本 0.1.5。
 - [x] 本地打包交付：dist/FeatherMD.exe（765 KiB）与 0.1.5 ZIP，构建/交付/包内哈希一致，交付 EXE 全部原生回归通过。
-- [ ] 用户已确认：推送 GitHub，CI（Windows / Ubuntu）通过后发布 v0.1.5，重新下载 EXE、ZIP、SHA256SUMS 核对哈希。
+- [x] 推送 GitHub，CI（run 38309195090，Windows / Ubuntu）通过后发布 [v0.1.5](https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.5)，重新下载的 EXE、ZIP、SHA256SUMS 哈希一致。
 
 ## 已完成：紧凑标题栏与目录点击高亮（v0.1.4）
 

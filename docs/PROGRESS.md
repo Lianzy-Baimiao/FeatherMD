@@ -1,5 +1,12 @@
 # Progress / continuation notes
 
+## v0.1.5 publication record — 2026-10-13
+
+- 作者/最后修改人：lianzy。用户明确要求“提交推送并发布”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.5
+- Tag/source: ffbdaac331b4725548450a92a1c881c8ead4d636 (annotated tag v0.1.5). GitHub Actions run 38309195090 (main) passed on Windows and Ubuntu, including the new settings/editor smokes; the Windows runner showed the real context menu (native_context_menu_label_and_keyboard_launch=true). Tag run 38309635003 also passed: https://github.com/Lianzy-Baimiao/FeatherMD/actions/runs/38309195090
+- Assets: FeatherMD.exe 783360 bytes, FeatherMD-0.1.5-windows-x64.zip 874161 bytes, SHA256SUMS.txt 180 bytes (SHA-256 e5383fae1f2a5a9dc1c2fa2367e943f60d3c4b52bc250209db6f3490248ed33b). All three were downloaded again; hashes match the local distribution and GitHub asset digests. EXE/ZIP hashes are recorded in the v0.1.5 candidate entry below.
+- Release-note preview URLs under v0.1.5/docs return HTTP 200. v0.1.4 tag (9c4868a) and its asset digests are unchanged.
+
 ## 2026-10-13 — v0.1.5 release candidate: right-click edit, skins and opacity, 34 px header
 
 - 作者/最后修改人：lianzy。用户需求：①正文右键增加编辑，设置界面可选默认编辑应用；②标题栏再矮一点，图标同步缩小、圆润无锯齿；③设置界面增加皮肤（书本、古籍、常用颜色）并支持调整透明度。
@@ -12,7 +19,7 @@
 - wrapped 页数与 v0.1.4 记录的 473/523 不同；用 dist 中的 v0.1.4 EXE 在本机重跑同样得到 449/504，差异来自本机环境而非本次改动，原因未查明。
 - 实机可见窗口检查（短暂显示后关闭）：80% 不透明度下标题栏像素与桌面混合（F4F6F3 → C8CAC9），圆角裁切保持；设置窗口标题栏随书本皮肤着色。主窗口 DWMWA_BORDER_COLOR 改为边线色在本机像素逐字节无差别，已恢复为 DWMWA_COLOR_NONE。
 - Delivery: dist/FeatherMD.exe 783,360 字节（765 KiB），SHA-256 cc576f353784206352389aaa934ad3452d4b5425af7b466ec05562a332e73578；dist/FeatherMD-0.1.5-windows-x64.zip 874,161 字节，SHA-256 37029a56e5837ccdd7f2f75bf6f22764422f641f122039c86b14db61acc68140（新增 5 张截图）。构建、交付与 ZIP 内 EXE 哈希一致；早期 ZIP 均保留，此前的本地候选包改名为 0.1.5-candidate。全部 12 项原生回归针对交付 EXE 通过；演示文档首屏 80.99 ms 为单次本地小文件样本。
-- 限制：隐藏窗口 + 原生消息测试，非物理指针；Ctrl+E 需要真实键盘状态，未自动化；编辑器用 examples/editor_probe 替身，未启动真实编辑器或 Windows edit 动词；CI 上用 -AllowNoPopup 容许服务桌面不显示弹出菜单。未做多显示器 DPI 与 Windows 10 实机验证。用户确认后推送 GitHub，CI 通过后发布；发布记录见下一条。
+- 限制：隐藏窗口 + 原生消息测试，非物理指针；Ctrl+E 需要真实键盘状态，未自动化；编辑器用 examples/editor_probe 替身，未启动真实编辑器或 Windows edit 动词；CI 上用 -AllowNoPopup 容许服务桌面不显示弹出菜单。未做多显示器 DPI 与 Windows 10 实机验证。用户确认后推送 GitHub，CI 通过后发布；发布记录见上一条。
 
 ## 2026-10-12 — v0.1.4 compact header and outline click highlight release candidate
 
