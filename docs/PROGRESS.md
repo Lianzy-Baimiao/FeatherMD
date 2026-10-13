@@ -1,5 +1,13 @@
 # Progress / continuation notes
 
+## v0.1.7 publication record — 2026-10-13
+
+- 作者/最后修改人：lianzy。用户明确要求“提交推送发布”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.7
+- Tag/source: 6682e23ba3ba16ea62461126c607c9f67f43ba17 (annotated tag v0.1.7). GitHub Actions run 38350463869 (main) passed on Windows and Ubuntu, including table-smoke light/dark. The Windows runner is 96 DPI with a 1024×720 work area (default_window "1024x720 in 1024x720"), so the default frame was capped by the work area; table-smoke scrolled the wide table into view before comparing horizontal positions (reading width 712, fitting table right edge 712, wide table 1343; 7 lines default, 16 narrow; auto-scroll 21/20 rows, GDI 24→24). navigation headings 384/456 on CI. Tag run 38351047039 also passed: https://github.com/Lianzy-Baimiao/FeatherMD/actions/runs/38350463869
+- Assets: FeatherMD.exe 855040 bytes, FeatherMD-0.1.7-windows-x64.zip 1059359 bytes, SHA256SUMS.txt 180 bytes (SHA-256 0358f79fa690857000b8450a9575d9d367e2b23d0d5ced0b159443bed8a3e3fb). All three were downloaded again; they are byte-identical to the local distribution and match the GitHub asset digests. Before committing, all 24 non-EXE ZIP entries were byte-identical to the committed blobs. EXE/ZIP hashes are recorded in the v0.1.7 candidate entry below.
+- Release-note preview URLs v0.1.7/docs/reading-table.png (101,200 bytes) and source-selection.png (20,047 bytes) return HTTP 200, same sizes as the tagged blobs. releases/latest reports v0.1.7. v0.1.6 tag (646b79b) and its asset digests are unchanged.
+- 实网检查（下载的 EXE、各自的临时便携 INI、真实 GitHub API、系统代理设置）：已发布的 v0.1.6 显示“发现新版本 v0.1.7”，详情“FeatherMD 羽读 v0.1.7 · 表格与按字符选择　发布于 2026-10-13”，显示“前往下载页…”与更多按钮徽标，874 ms；v0.1.7 显示“已是最新版本”，无下载按钮与徽标，625 ms（均为单次本机样本）。两者自动检查关闭时都没有自动检查，INI 记录 update_latest=v0.1.7，update_check 仍为 false；临时 INI 已删除。
+
 ## 2026-10-13 — v0.1.7 local candidate: tables, source character selection, DPI-scaled default window
 
 - 作者/最后修改人：lianzy。用户需求：①默认窗口跟着缩放调整；②解析表格，按窗口大小自动调整，避免窗口太小时显示混乱；③源码模式按字符选择复制，而不是按行。
