@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.6 — 2026-10-13
+
+### Added
+- Update checks against GitHub Releases. More → Check for updates opens the new Settings "Updates" page and checks at once; results show up to date, a newer release (name and date) or the reason a check failed.
+- Optional check on start, **off by default**: when enabled, a background check about 3 s after first paint, at most once per 24 h; failures are silent and retried on a later start.
+- A newer release is marked by a small dot on the More button and a "发现新版本 vX.Y.Z…" menu entry, kept across restarts until you upgrade. "Go to download page" opens the release page after a confirmation; nothing is downloaded or installed.
+- Native update regression (update-smoke, light/dark) against a loopback stand-in for the GitHub API: default-off, once-daily start check, request headers, badge, menu label, manual results, HTTP/HTML failures, link confirmation, checkbox persistence and closing during a check.
+
+### Network boundary
+- The only request is an HTTPS GET of `api.github.com/repos/Lianzy-Baimiao/FeatherMD/releases/latest` through Windows' WinHTTP, using the system proxy and certificate validation. Responses are capped at 1 MiB and parsed by a bounded reader; release pages are built from the fixed repository, not from response URLs. A check always ends within 15 s.
+- About now says "默认不联网" (offline by default) instead of "无自动联网".
+
+### Fixed
+- Native About and update tests wait for confirmation dialogs to be filled in before reading them (a rare race in about-smoke).
+- Native window and navigation tests no longer assume display scaling of 125% or less. At 150% the default window is under 800 logical px wide, so window-smoke widens it before its wide-outline checks, and the paging loop limit is now only a hang guard (the headings fixture needs 1111 pages there). The 0.1.5 reader failed both tests the same way; the reader itself is unchanged.
+
 ## 0.1.5 — 2026-10-13
 
 ### Added

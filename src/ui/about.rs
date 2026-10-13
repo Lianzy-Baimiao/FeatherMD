@@ -20,7 +20,7 @@ fn destination(button: usize) -> Option<&'static str> {
     }
 }
 
-unsafe fn open_link(owner: HWND, url: &str) {
+pub(super) unsafe fn open_link(owner: HWND, url: &str) {
     if MessageBoxW(
         owner,
         w(&format!("使用默认浏览器打开此链接？\n\n{url}")).as_ptr(),
@@ -123,7 +123,7 @@ impl About {
             ),
             (
                 2005,
-                "原生 Windows   ·   轻量便携   ·   无自动联网",
+                "原生 Windows   ·   轻量便携   ·   默认不联网",
                 [32, 204, 456, 24],
                 13,
                 false,

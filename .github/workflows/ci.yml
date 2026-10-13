@@ -20,9 +20,9 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
       - run: cargo build --release --locked
-      - name: Build stand-in editor for the edit smoke test
+      - name: Build stand-ins for the edit and update smoke tests
         if: runner.os == 'Windows'
-        run: cargo build --release --locked --example editor_probe
+        run: cargo build --release --locked --example editor_probe --example update_server
       - name: Native Windows smoke test
         if: runner.os == 'Windows'
         shell: pwsh
@@ -39,6 +39,8 @@ jobs:
           ./scripts/settings-smoke.ps1
           ./scripts/settings-smoke.ps1 -Theme dark -Output ./test-artifacts/settings-dark
           ./scripts/editor-smoke.ps1 -AllowNoPopup
+          ./scripts/update-smoke.ps1 -AllowNoPopup
+          ./scripts/update-smoke.ps1 -Theme dark -Output ./test-artifacts/update-dark -AllowNoPopup
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
@@ -58,3 +60,5 @@ jobs:
             test-artifacts/settings*/*.png
             test-artifacts/settings*/settings.json
             test-artifacts/editor/editor.json
+            test-artifacts/update*/*.png
+            test-artifacts/update*/update.json

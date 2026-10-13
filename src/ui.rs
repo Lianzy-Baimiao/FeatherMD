@@ -81,6 +81,7 @@ const THEME_PANEL: usize = 413;
 const TYPOGRAPHY: usize = 414;
 const PREFERENCES: usize = 415;
 const EDITOR_SETTINGS: usize = 416;
+const CHECK_UPDATES: usize = 417;
 const HEADER_HEIGHT: i32 = 34;
 const OUTLINE_ROWS_TOP: i32 = HEADER_HEIGHT + 56;
 /// Posted to open Settings once the App borrow is released; WPARAM is the page.
@@ -88,6 +89,11 @@ const OPEN_PREFERENCES: u32 = WM_APP + 44;
 /// Sent by Settings for live skin/opacity drafts. WPARAM: theme index or
 /// usize::MAX to clear the draft; LPARAM: opacity percent.
 const PREVIEW_APPEARANCE: u32 = WM_APP + 45;
+/// Sent (same thread) by Settings with a finished manual check; LPARAM: `*const Outcome`.
+const UPDATE_RESULT: u32 = WM_APP + 46;
+/// One-shot timer for the optional startup update check.
+const UPDATE_TIMER: usize = 2;
+const UPDATE_DELAY_MS: u32 = 3000;
 const fn make_resource(id: u16) -> *const u16 {
     id as usize as *const u16
 }
@@ -378,6 +384,10 @@ struct App {
     preview: Option<(Theme, u8)>,
     /// F5 restores this source byte and wrapped row once the reopened document is ready.
     reload_anchor: Option<(u64, usize)>,
+    /// Automatic update check in flight (manual checks belong to Settings).
+    update_check: Option<crate::updater::Pending>,
+    /// Automatic checks started in this session (diagnostics).
+    update_checks: usize,
 }
 impl App {
     fn new() -> Self {
@@ -432,7 +442,33 @@ impl App {
             search_ticket: 0,
             preview: None,
             reload_anchor: None,
+            update_check: None,
+            update_checks: 0,
         }
+    }
+    /// A newer published release recorded by the last successful check.
+    fn update_available(&self) -> Option<&str> {
+        let latest = feathermd::update::Version::parse(&self.settings.update_latest)?;
+        (latest > feathermd::update::current()).then_some(self.settings.update_latest.as_str())
+    }
+    unsafe fn start_update_check(&mut self) {
+        if self.update_check.is_none() {
+            self.update_check = Some(crate::updater::start());
+            self.update_checks += 1;
+        }
+    }
+    /// Record a finished check. Automatic failures stay silent and retry next launch.
+    unsafe fn record_update(&mut self, outcome: &crate::updater::Outcome, manual: bool) {
+        let Ok(release) = outcome else {
+            return;
+        };
+        self.settings.update_checked = feathermd::update::now();
+        self.settings.update_latest = release.tag.clone();
+        self.save_preferences();
+        if !manual && self.update_available().is_some() {
+            self.status = format!("发现新版本 {} · 更多 → 检查更新", release.tag);
+        }
+        self.invalidate();
     }
     fn s(&self, n: i32) -> i32 {
         self.fonts.scale(n)
@@ -674,6 +710,10 @@ impl App {
         self.invalidate();
     }
     unsafe fn receive(&mut self) {
+        if let Some(outcome) = self.update_check.as_ref().and_then(|p| p.poll()) {
+            self.update_check = None;
+            self.record_update(&outcome, false);
+        }
         while let Ok(reply) = self.workers.replies.try_recv() {
             match reply {
                 Reply::Opened(id, result) if id == self.io_ticket => {
@@ -1077,6 +1117,7 @@ impl App {
         self.settings.theme = draft.theme;
         self.settings.opacity = draft.opacity;
         self.settings.editor = draft.editor;
+        self.settings.update_check = draft.update_check;
         self.preview = None;
         self.system_dark = system_uses_dark_theme();
         self.apply_opacity();
@@ -1453,6 +1494,10 @@ impl App {
             EDITOR_SETTINGS => {
                 PostMessageW(self.hwnd, OPEN_PREFERENCES, 2, 0);
             }
+            CHECK_UPDATES => {
+                // Opens the update page and checks right away.
+                PostMessageW(self.hwnd, OPEN_PREFERENCES, 3, 1);
+            }
             EDIT_DOCUMENT => self.edit_document(),
             SELECT_ALL => {
                 if let Some(l) = &self.layout {
@@ -1551,12 +1596,29 @@ impl App {
                 self.persist();
             }
             RESET => {
-                self.settings = Settings::default();
+                // Restores reading settings; update bookkeeping is not a preference.
+                self.settings = Settings {
+                    update_checked: self.settings.update_checked,
+                    update_latest: std::mem::take(&mut self.settings.update_latest),
+                    ..Settings::default()
+                };
                 self.reading_fonts = Fonts::with_family(self.fonts.dpi, &self.settings.font_family);
                 self.persist();
                 self.start_outline();
             }
             SETTINGS => {
+                // The update entry names a newer release when one is known.
+                let label = match self.update_available() {
+                    Some(tag) => format!("发现新版本 {tag}…"),
+                    None => "检查更新…".to_string(),
+                };
+                ModifyMenuW(
+                    self.settings_menu,
+                    CHECK_UPDATES as u32,
+                    MF_BYCOMMAND | MF_STRING,
+                    CHECK_UPDATES,
+                    w(&label).as_ptr(),
+                );
                 let mut point = POINT {
                     x: self.width - self.s(145),
                     y: self.s(HEADER_HEIGHT - 2),
@@ -1941,8 +2003,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         if IsWindowEnabled(hwnd) != 0 {
             let settings = (*ptr).try_borrow().ok().map(|app| app.settings.clone());
             if let Some(settings) = settings {
-                // No App borrow may cross the modal loop; drafts arrive as PREVIEW_APPEARANCE.
-                let saved = preferences::show(hwnd, &settings, wp.min(2));
+                // No App borrow may cross the modal loop; drafts arrive as
+                // PREVIEW_APPEARANCE, finished update checks as UPDATE_RESULT.
+                let saved = preferences::show(hwnd, &settings, wp.min(3), lp == 1);
                 if let Ok(mut app) = (*ptr).try_borrow_mut() {
                     match saved {
                         Some(draft) => app.apply_preferences(draft),
@@ -1955,6 +2018,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     }
                 }
             }
+        }
+        return 0;
+    }
+    if msg == UPDATE_RESULT {
+        if lp != 0
+            && let Ok(mut app) = (*ptr).try_borrow_mut()
+        {
+            app.record_update(&*(lp as *const crate::updater::Outcome), true);
         }
         return 0;
     }
@@ -2083,6 +2154,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             50 => {
                 app.reading_area(lp as u16 as i16 as i32, (lp >> 16) as u16 as i16 as i32) as isize
             }
+            // Automatic update checks started, a known newer release, a check in flight.
+            51 => app.update_checks as isize,
+            52 => app.update_available().is_some() as isize,
+            53 => app.update_check.is_some() as isize,
             37 => app
                 .outline
                 .as_ref()
@@ -2128,6 +2203,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_PAINT => {
             app.paint(None);
+            0
+        }
+        WM_TIMER if wp == UPDATE_TIMER => {
+            KillTimer(hwnd, UPDATE_TIMER);
+            // The preference may have been turned off since launch.
+            if app.settings.update_check {
+                app.start_update_check();
+            }
             0
         }
         WM_TIMER => {
@@ -2583,6 +2666,7 @@ unsafe fn menus() -> (HMENU, HMENU) {
         (RESET, "恢复默认阅读设置"),
         (RELOAD, "重新载入\tF5"),
         (COPY, "复制选中行 / 可见内容\tCtrl+C"),
+        (CHECK_UPDATES, "检查更新…"),
         (ABOUT, "关于 FeatherMD…\tF1"),
         (LICENSES, "导出内置许可证…"),
     ] {
@@ -2725,6 +2809,17 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
         );
         SetTimer(hwnd, 1, 30, None);
+        // Opt-in startup check: after first paint, at most once a day.
+        {
+            let a = app.borrow();
+            if feathermd::update::due(
+                a.settings.update_check,
+                a.settings.update_checked,
+                feathermd::update::now(),
+            ) {
+                SetTimer(hwnd, UPDATE_TIMER, UPDATE_DELAY_MS, None);
+            }
+        }
         ShowWindow(hwnd, SW_SHOWDEFAULT);
         UpdateWindow(hwnd);
         let mut msg: MSG = zeroed();

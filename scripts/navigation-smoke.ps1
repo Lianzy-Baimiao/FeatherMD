@@ -67,19 +67,23 @@ try {
  for($i=0;$i -lt 5;$i++){Key 0x28}
  if((Cursor) -ne $bottom){throw 'Down overscrolled past the final full viewport'}
  Key 0x24
- for($i=0;$i -lt 1000;$i++) {
+ # A hang guard, not a page budget: at 150% scaling the default 1080x820 physical
+ # window is 720x547 logical pixels and the headings fixture needs 1111 PageDowns.
+ $maxPages=10000
+ for($i=0;$i -lt $maxPages;$i++) {
   Capture
   $before=Cursor; $last=LastCursor
   Key 0x22
   $after=Cursor
   if($after -gt $last){throw "PageDown skipped visible content at step $i : $before -> $after (last visible $last)"}
+  if($after -lt $before){throw "PageDown moved backwards at step $i : $before -> $after"}
   if($after -eq $before){break}
  }
- if($i -eq 1000){throw 'Forward paging failed to reach EOF'}
+ if($i -eq $maxPages){throw "Forward paging failed to reach EOF: byte=$(Query 9) size=$(Query 10) dpi=$(Query 3) client=$(Query 0)x$(Query 1)"}
  $forward=$i
  Capture
  if((Query 15) -ne ((Query 10)-[Text.Encoding]::UTF8.GetByteCount($lines[-1]+[Environment]::NewLine))){throw "EOF not visible after paging: last=$(Query 15) size=$(Query 10)"}
- for($i=0;$i -lt 1000;$i++) {
+ for($i=0;$i -lt $maxPages;$i++) {
   $before=Cursor
   Key 0x21
   Capture
@@ -88,7 +92,7 @@ try {
   if($after -eq 0){break}
   if($after -ge $before){throw 'Backward paging stopped before the beginning'}
  }
- if($i -eq 1000){throw 'Backward paging failed to reach beginning'}
+ if($i -eq $maxPages){throw "Backward paging failed to reach beginning: byte=$(Query 9) dpi=$(Query 3) client=$(Query 0)x$(Query 1)"}
  $backward=$i+1
  # Every font size reachable by the +/- controls; actual GDI layout, not synthetic rows.
  for($i=0;$i -lt 15;$i++){[void][NavigationSmoke]::SendMessageW($window,0x111,[IntPtr]203,[IntPtr]::Zero)}

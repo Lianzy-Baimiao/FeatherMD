@@ -36,7 +36,7 @@
 
 打开一份 Markdown，不应该先启动一个浏览器。
 
-FeatherMD 使用 Win32 + GDI/GDI+，没有 Electron、WebView、JavaScript、遥测或自动联网。v0.1.5 的 Windows x64 EXE 约 **765 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
+FeatherMD 使用 Win32 + GDI/GDI+，没有 Electron、WebView、JavaScript 或遥测，默认不联网；只有开启自动检查或手动“检查更新”时才访问 GitHub Releases。v0.1.6 的 Windows x64 EXE 约 **802 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
 
 **大文件不是先全部载入再显示：** 每次只读取附近 128 KiB，后台读取与搜索，前台只绘制可见行。文件总长度不决定首屏需要分配的内存。
 
@@ -47,6 +47,7 @@ FeatherMD 使用 Win32 + GDI/GDI+，没有 Electron、WebView、JavaScript、遥
 3. 左侧目录点击标题即可跳转；点“目录”标题右侧按钮收起，点内容区左边缘按钮展开，也可按 **Ctrl+B** 切换，状态会保存。
 4. 顶部眼睛/代码图标切换预览/源码，外观按钮选择皮肤；省略号“更多 → 设置…”（Ctrl+,）调整皮肤、透明度、字体字号与默认编辑应用，自动换行与阅读宽度也在“更多”中。
 5. **更多 → 关于 FeatherMD**（F1）查看版本、快捷键和阅读说明，或前往 GitHub 项目主页、爱发电支持作者。外部链接会先确认，再交给默认浏览器打开。
+6. **更多 → 检查更新…** 手动检查新版本；也可在设置的“更新”页开启打开时自动检查（默认关闭）。
 
 支持 Windows 10（1607+）/ Windows 11 **x64**。当前实测环境为 Windows 11 x64；其他版本尚未逐个实机验证。无安装器，无管理员权限要求。尚未购买代码签名证书，Windows SmartScreen 可能提醒未知发布者；请核对来源和 SHA-256，不要关闭系统防护。
 
@@ -82,6 +83,18 @@ FeatherMD 只读。需要修改时，在正文 **右键 → 编辑**，或按 **
 编辑应用找不到时会提示并可直接重新选择。这个设置不会修改 Windows 的默认打开方式或文件关联。
 
 ![FeatherMD 默认编辑应用设置（书本皮肤）](docs/settings-editor.png)
+
+### 检查更新
+
+更新源是本项目的 [GitHub Releases](https://github.com/Lianzy-Baimiao/FeatherMD/releases)。
+
+- **手动检查**：更多 → 检查更新…，打开设置的“更新”页并立即检查。结果显示“已是最新版本”、“发现新版本”（含版本名与发布日期）或失败原因（网络、代理、GitHub 访问频率限制等）。
+- **打开时自动检查**：在“更新”页勾选并保存，**默认关闭**。开启后在启动约 3 秒后于后台检查，每 24 小时最多一次；失败时不打扰，下次启动再试。
+- **发现新版本**时，顶部“更多”按钮出现一个小圆点，菜单项显示“发现新版本 vX.Y.Z…”，升级后自动消失。“前往下载页…”会先确认，再用默认浏览器打开对应的 Release 页面。
+
+检查只通过 Windows 自带的 WinHTTP 以 HTTPS 请求 `api.github.com` 上的公开版本信息，沿用系统代理设置和证书校验；不上传文档、设置或其他数据，也**不会自动下载或安装**任何文件。关闭自动检查且不点“立即检查”时，FeatherMD 不会联网。
+
+![FeatherMD 检查更新设置](docs/settings-update.png)
 
 ### 字体与默认字号
 
@@ -167,13 +180,14 @@ Windows 10/11 要求用户在系统界面确认默认应用，普通桌面程序
 | 选择当前缓存分页 | Ctrl+A |
 | 复制选中行；未选择时复制可见内容 | Ctrl+C |
 | 恢复默认阅读设置 | Ctrl+0 |
+| 检查更新 | 更多 → 检查更新… |
 | 帮助 | F1 |
 
 鼠标支持**整行拖选**。关闭换行后可使用底部滚动条或左右方向键。
 
 ### 设置文件
 
-默认写入 %APPDATA%\FeatherMD\settings.ini，每次修改自动保存。文档本身始终只读。皮肤、透明度与编辑应用分别保存为 `theme`、`opacity`、`editor`；无效值回到默认，带 BOM 的 UTF-8 文件也能读取。
+默认写入 %APPDATA%\FeatherMD\settings.ini，每次修改自动保存。文档本身始终只读。皮肤、透明度与编辑应用分别保存为 `theme`、`opacity`、`editor`；自动检查开关为 `update_check`，上次成功检查的时间与所见最新版本为 `update_checked`、`update_latest`。无效值回到默认，带 BOM 的 UTF-8 文件也能读取。
 
 需要可携带设置时，在 EXE 旁创建一个空的 **FeatherMD.ini**，以后设置随这个文件保存。只想单文件运行则不需要它。最近文件和文档正文不会写入设置。
 
@@ -225,9 +239,10 @@ cargo +stable-x86_64-pc-windows-msvc build --release
 ./scripts/scrollbar-smoke.ps1
 ./scripts/window-smoke.ps1
 ./scripts/settings-smoke.ps1
-# 编辑测试使用不弹窗的替身编辑器
-cargo +stable-x86_64-pc-windows-msvc build --release --example editor_probe
+# 编辑与更新测试使用替身编辑器和本机回环的替身 GitHub 接口，不访问网络
+cargo +stable-x86_64-pc-windows-msvc build --release --example editor_probe --example update_server
 ./scripts/editor-smoke.ps1
+./scripts/update-smoke.ps1
 
 # 生成 1 MiB / 64 MiB / 1 GiB 实体测试文件（约占 1.1 GiB）
 ./scripts/make-fixtures.ps1

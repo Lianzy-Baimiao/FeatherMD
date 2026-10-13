@@ -1,5 +1,21 @@
 # Progress / continuation notes
 
+## 2026-10-13 — v0.1.6 release candidate: update checks via GitHub Releases
+
+- 作者/最后修改人：lianzy。用户需求：接入打开检查更新，默认关闭，支持手动检查更新；更新源为 GitHub Releases。
+- 这是项目首个网络访问，与 AGENTS.md 原“无网络获取”约束冲突；按用户明确要求实现为唯一例外并更新 AGENTS.md、README、关于窗口措辞（“无自动联网”→“默认不联网”）。范围：仅 HTTPS GET api.github.com/repos/Lianzy-Baimiao/FeatherMD/releases/latest（系统 WinHTTP、系统代理、默认证书校验），只读公开版本信息；不下载、不安装、不上传。
+- 打开时自动检查（update_check，默认 false）：首屏约 3 秒后后台检查，每 24 小时最多一次；仅成功检查记录 update_checked / update_latest，失败静默。手动：更多 → 检查更新…打开设置新增的“更新”页并立即检查；结果显示已是最新 / 发现新版本（版本名、发布日期）/ 失败原因；“前往下载页…”经确认后打开固定仓库的 Release 页面。发现新版本时“更多”按钮有圆点、菜单项为“发现新版本 vX.Y.Z…”，跨会话保留至升级。
+- 实测问题：WinHTTP 的 WinHttpSetTimeouts 与 WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT 在回环测试中不可靠（1 s 超时 2.5 s 后才触发；0.4 s、2 s 未触发）。改为在 UI 轮询时强制 15 s 截止（updater::Pending），超时后放弃该线程，WinHTTP 句柄在其返回时关闭；有单元测试覆盖。原因未进一步查明。
+- 测试：纯逻辑（版本比较含 SemVer 预发布、只取顶层字段、BOM/转义/代理对、截断与 4000 次变异不崩溃、24 小时判定、设置往返与注入）；WinHTTP 回环（请求行与头、200/404/403/429/500、1 MiB 上限、截止时间）；update-smoke 浅/深（默认关闭零请求、开启后启动一次、重启 24 小时内不重复、徽标像素与“更多”菜单真实文字、手动已是最新/新版本/403/HTML、链接确认、复选框仅保存时生效、检查中关闭、GDI 前后一致）。
+- 实网检查一次（本机，经系统代理设置）：v0.1.6 对 GitHub 最新 v0.1.5 显示“当前版本比 GitHub 最新发布更新”，耗时约 0.4–0.65 s，未显示徽标；控制台乱码仅为代码页显示问题，按 UTF-8 校验文字正确。
+- 其他：about-smoke 曾单次失败（读取确认框文字早于其填充），三次单独重跑均通过；该脚本与 update-smoke 改为等待文字出现。设置截图改为只绘制 WS_VISIBLE 子控件（WM_PRINT 会画出隐藏的“前往下载页…”）。首屏时间交替测 0.1.5 / 0.1.6 各三次（72/76/81 vs 78/70/71 ms），无可见差异。
+- 候选证据（120 DPI，候选 EXE e20e4536…，同一源码）：fmt --check、clippy -D warnings、cargo test --locked（53 项）通过；14 项原生回归全部 PASS：ui（GDI 33→33）、navigation headings 454/535、wrapped 449/504、scrollbar、window（51 项命中）、typography 浅/深、about 浅/深（GDI 22→22）、settings 浅/深、editor、update 浅/深（各 14 次回环请求）。update-smoke 另连续重复 10 次（浅/深各 5）通过。dumpbin：仅 Windows 系统 DLL，新增 winhttp.dll。
+- 发布构建：按待提交的树以 --locked 重新构建；fmt、clippy、test --locked（53 项）通过，构建、交付与 ZIP 内 EXE 哈希一致。此时本机显示缩放已变为 150%（应用报告 144 DPI），首轮 window 与 navigation（headings）失败：默认窗口 1080×820 物理像素在 150% 下只有 720×547 逻辑像素，低于宽目录阈值 800；headings 需要 1111 次 PageDown，超过脚本的 1000 次上限。已发布的 v0.1.5 EXE 两项以完全相同的方式失败，不是本版回归。只修测试脚本，产品未改：window-smoke 在逻辑宽度不足 800 时先加宽到 1080×820 逻辑像素再检查宽目录，并在 JSON 记录 widened_default_window；navigation 上限改为 10000，仅作防挂起。修正后 v0.1.5 与 v0.1.6 在 144 DPI 下同为 1111/1280。96/120 DPI 下默认窗口已不小于 800 逻辑像素，两个脚本行为不变。
+- 发布证据（144 DPI，交付 EXE）：14 项原生回归全部 PASS：ui（首屏 69.04 ms，单次演示文档样本；GDI 35→35）、navigation headings 1111/1280、wrapped 749/823、scrollbar、window（51 项命中，widened_default_window=true）、typography 浅/深（35→35）、about 浅/深（25→25）、settings 浅/深（35→35）、editor（真实右键菜单）、update 浅/深（各 14 次回环请求，“更多”菜单真实文字已核对，GDI 36→36）。
+- 偶发失败记录：一次中途被 `| head -5` 截断的验证运行之后约 10 分钟内，navigation（headings）连续约 8 次报“Forward paging failed to reach EOF”，包括已发布的 v0.1.5 EXE；随后又全部通过。当时推测是被截断的后台验证与之重叠。上述 150% 缩放下会稳定出现同一报错，更可能是当时显示缩放临时变化；当时的失败信息还没有 DPI，无法证实。
+- Delivery: dist/FeatherMD.exe 821,248 字节（802 KiB），SHA-256 2dd3cc2a86742c994695cf9b71c76d393b5552657d0da9a6e332e41e9fdfb575；dist/FeatherMD-0.1.6-windows-x64.zip 935,663 字节，SHA-256 1cac87a9e38563c05cb58f51c196849b827bfa2e86cdc2d1fcc04ee1b355f4fd（新增 settings-update.png）。早期 ZIP 均保留，此前的本地候选包改名为 0.1.6-candidate。用户的 %APPDATA% 设置文件未被测试改动（修改时间仍为 05:01）。
+- 限制：CI 只用回环替身，不访问 GitHub；真实代理、PAC、证书失败路径未自动化。默认窗口大小不随 DPI 缩放（自首个版本起如此）：150% 下 720×547 逻辑像素，按计算 200% 下会小于 640×480 的最小尺寸（未实测）；本版未改，留待后续。用户确认后推送 GitHub，CI 通过后发布；发布记录见上一条。
+
 ## v0.1.5 publication record — 2026-10-13
 
 - 作者/最后修改人：lianzy。用户明确要求“提交推送并发布”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.5

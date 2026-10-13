@@ -9,6 +9,7 @@ pub(super) const RESTORE: usize = 10002;
 pub(super) const PALETTE: usize = 10004;
 pub(super) const BOOK: usize = 10005;
 pub(super) const PENCIL: usize = 10006;
+pub(super) const UPDATE: usize = 10007;
 
 pub(super) struct Session(usize);
 impl Session {
@@ -363,6 +364,11 @@ pub(super) unsafe fn icon(dc: HDC, r: RECT, id: usize, color: u32, scale: f32) {
                 ]);
             }
             c.line(&[(0.0, -5.5), (0.0, 7.5)]);
+        }
+        UPDATE => {
+            // Clockwise circular arrow: open circle, arrowhead pointing into the gap.
+            c.arc((0.0, 0.0), 6.0, 60.0, 290.0);
+            c.line(&[(3.81, -4.02), (5.91, -1.04), (8.69, -2.82)]);
         }
         PENCIL => {
             // A pencil at 45°: parallel body edges, tip, and the ferrule line.

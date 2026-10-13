@@ -7,6 +7,8 @@ mod editor;
 mod layout;
 #[cfg(windows)]
 mod ui;
+#[cfg(windows)]
+mod updater;
 fn main() {
     #[cfg(windows)]
     {

@@ -180,7 +180,12 @@ impl App {
                 SOURCE => "源码 · Ctrl+R",
                 OPEN => "打开文档 · Ctrl+O",
                 FIND => "查找 · Ctrl+F",
-                SETTINGS => "更多选项",
+                SETTINGS => {
+                    return Some(match self.update_available() {
+                        Some(tag) => format!("更多选项 · 发现新版本 {tag}"),
+                        None => "更多选项".to_string(),
+                    });
+                }
                 THEME_PICKER => {
                     return Some(format!("外观：{} · Ctrl+T", skin_name(self.settings.theme)));
                 }
@@ -509,6 +514,18 @@ impl App {
                 icon.right -= self.s(9);
             }
             self.header_glyph(dc, icon, glyph, p.muted);
+            if id == SETTINGS && self.update_available().is_some() {
+                // A small accent dot: a newer release is available (More → 发现新版本).
+                let (x, y) = (rect.right - self.s(7), rect.top + self.s(6));
+                let r = self.s(3);
+                chrome_round(
+                    dc,
+                    chrome_rect(x - r - 1, y - r - 1, x + r + 1, y + r + 1),
+                    p.panel,
+                    r + 1,
+                );
+                chrome_round(dc, chrome_rect(x - r, y - r, x + r, y + r), p.accent, r);
+            }
             if id == THEME_PICKER {
                 self.header_glyph(
                     dc,

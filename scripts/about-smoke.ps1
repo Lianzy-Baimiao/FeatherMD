@@ -127,6 +127,8 @@ try {
   Post ([AboutSmoke]::GetDlgItem($dialog, $link[0])) 0xf5 0
   $confirmation = WaitWindow '#32770' '打开外部链接'
   [void][AboutSmoke]::ShowWindow($confirmation, 0)
+  # The message box can be found before its text control is filled in.
+  for ($i = 0; $i -lt 100 -and -not [AboutSmoke]::Content($confirmation).Contains($link[1]); $i++) { Start-Sleep -Milliseconds 20 }
   if (-not [AboutSmoke]::Content($confirmation).Contains($link[1])) { throw 'Wrong confirmation destination' }
   $default = [AboutSmoke]::SendMessageW($confirmation, 0x400, [IntPtr]::Zero, [IntPtr]::Zero).ToInt64() -band 0xffff
   if ($default -ne 2) { throw 'External link confirmation must default to Cancel' }

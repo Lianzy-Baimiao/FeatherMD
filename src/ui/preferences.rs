@@ -4,7 +4,8 @@
 use super::*;
 use std::os::windows::ffi::OsStrExt;
 use windows_sys::Win32::UI::Controls::{
-    CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDRF_DODEFAULT, CDRF_NOTIFYITEMDRAW, CDRF_SKIPDEFAULT,
+    BST_CHECKED, CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDIS_DISABLED, CDIS_FOCUS, CDIS_HOT,
+    CDIS_SELECTED, CDIS_SHOWKEYBOARDCUES, CDRF_DODEFAULT, CDRF_NOTIFYITEMDRAW, CDRF_SKIPDEFAULT,
     DRAWITEMSTRUCT, EM_SETLIMITTEXT, ICC_BAR_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx,
     MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW, NMHDR, ODS_FOCUS, ODS_NOACCEL, ODS_NOFOCUSRECT,
     ODS_SELECTED, TBCD_CHANNEL, TBCD_THUMB, TBM_GETTHUMBRECT, TBM_SETLINESIZE, TBM_SETPAGESIZE,
@@ -20,22 +21,31 @@ const FAMILY: usize = 1101;
 const SIZE: usize = 1102;
 const DEFAULTS: usize = 1103;
 const ERROR: usize = 1104;
-const NAV: [usize; 3] = [1110, 1111, 1112];
+const NAV: [usize; 4] = [1110, 1111, 1112, 1113];
 const CARD: usize = 1120;
 const OPACITY: usize = 1140;
 const OPACITY_VALUE: usize = 1141;
 const EDITOR_LIST: usize = 1150;
 const BROWSE: usize = 1151;
 const EDITOR_PATH: usize = 1152;
+const AUTO_CHECK: usize = 1160;
+const CHECK_NOW: usize = 1161;
+const UPDATE_OPEN: usize = 1162;
+const UPDATE_STATUS: usize = 1163;
+const UPDATE_DETAIL: usize = 1164;
+const UPDATE_LAST: usize = 1165;
+/// Polls a manual update check; the check itself runs off the UI thread.
+const UPDATE_POLL: usize = 7;
 const WIDTH: i32 = 720;
 const HEIGHT: i32 = 552;
 const NAV_WIDTH: i32 = 184;
 /// Content column origin.
 const X0: i32 = 212;
-const PAGES: [(&str, usize); 3] = [
+const PAGES: [(&str, usize); 4] = [
     ("外观(&A)", smooth::PALETTE),
     ("阅读(&R)", smooth::BOOK),
     ("编辑(&E)", smooth::PENCIL),
+    ("更新(&U)", smooth::UPDATE),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -75,6 +85,13 @@ struct Prefs {
     valid: bool,
     controls: Vec<Control>,
     result: Option<Settings>,
+    /// Manual update check in flight, and the release a finished check found.
+    checking: Option<crate::updater::Pending>,
+    found: Option<feathermd::update::Release>,
+    /// Colour of the update status line (accent for a newer release).
+    update_tone: Tone,
+    /// Start a manual check once the dialog exists (More → 检查更新).
+    check_now: bool,
 }
 
 unsafe extern "system" fn enum_font(
@@ -369,6 +386,84 @@ impl Prefs {
             );
         }
 
+        // Updates.
+        let page = Some(3);
+        self.label("检查更新", 1240, (page, [X0, 24, 400, 30]), TITLE);
+        self.label(
+            "更新源：GitHub Releases（Lianzy-Baimiao/FeatherMD）。",
+            1241,
+            (page, [X0, 58, 480, 22]),
+            NOTE,
+        );
+        self.label("当前版本", 1242, (page, [X0, 98, 120, 22]), BODY);
+        self.label(
+            concat!("v", env!("CARGO_PKG_VERSION")),
+            1243,
+            (page, [X0 + 120, 98, 200, 22]),
+            Look(14, true, Tone::Accent),
+        );
+        let auto = self.add(
+            "BUTTON",
+            "打开时自动检查更新(&S)",
+            AUTO_CHECK,
+            WS_TABSTOP | BS_AUTOCHECKBOX as u32,
+            (page, [X0, 134, 360, 26]),
+            BODY,
+        );
+        SendMessageW(
+            auto,
+            BM_SETCHECK,
+            if self.draft.update_check {
+                BST_CHECKED as usize
+            } else {
+                0
+            },
+            0,
+        );
+        self.label(
+            "默认关闭。开启后启动几秒在后台检查，每天最多一次，失败时不打扰。",
+            1244,
+            (page, [X0 + 28, 162, 452, 20]),
+            Look(12, false, Tone::Muted),
+        );
+        self.button("立即检查(&C)", CHECK_NOW, (page, [X0, 198, 120, 32]));
+        let open = self.button("前往下载页…", UPDATE_OPEN, (page, [X0 + 132, 198, 130, 32]));
+        ShowWindow(open, SW_HIDE);
+        self.label(
+            "",
+            UPDATE_STATUS,
+            (page, [X0, 242, 480, 24]),
+            Look(14, true, Tone::Text),
+        );
+        self.label("", UPDATE_DETAIL, (page, [X0, 268, 480, 22]), NOTE);
+        self.label(
+            "",
+            UPDATE_LAST,
+            (page, [X0, 292, 480, 20]),
+            Look(12, false, Tone::Muted),
+        );
+        self.label(
+            "隐私与安全",
+            1245,
+            (page, [X0 + 20, 338, 440, 24]),
+            Look(14, true, Tone::Info),
+        );
+        for (i, text) in [
+            "只向 api.github.com 请求公开的最新版本信息，不上传文档或设置。",
+            "不会自动下载或安装；前往下载页前会再次确认。",
+            "关闭自动检查且不点“立即检查”时，FeatherMD 不会联网。",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.label(
+                text,
+                1246 + i,
+                (page, [X0 + 20, 368 + i as i32 * 26, 440, 22]),
+                Look(13, false, Tone::InfoMuted),
+            );
+        }
+
         // Shared actions.
         self.button("恢复默认", DEFAULTS, (None, [X0, 500, 106, 32]));
         self.button(
@@ -381,7 +476,106 @@ impl Prefs {
         self.layout(true);
         self.update();
         self.show_editor();
+        self.show_update();
         SendMessageW(self.hwnd, DM_SETDEFID, IDOK as usize, 0);
+    }
+    /// Starts a manual check; the result arrives through UPDATE_POLL.
+    unsafe fn start_check(&mut self) {
+        if self.checking.is_some() {
+            return;
+        }
+        self.checking = Some(crate::updater::start());
+        SetTimer(self.hwnd, UPDATE_POLL, 50, None);
+        self.show_update();
+    }
+    /// Status line, detail, last-check time and button states for the update page.
+    unsafe fn show_update(&mut self) {
+        let current = feathermd::update::current();
+        let latest = feathermd::update::Version::parse(&self.draft.update_latest);
+        let (status, detail, tone) = if self.checking.is_some() {
+            ("正在检查更新…".to_string(), String::new(), Tone::Muted)
+        } else if let Some(release) = &self.found {
+            let mut detail = release.title.clone();
+            if !release.published.is_empty() {
+                detail = format!("{detail}　发布于 {}", release.published);
+            }
+            match release.version.cmp(&current) {
+                std::cmp::Ordering::Greater => (
+                    format!("发现新版本 {}", release.tag),
+                    detail.trim().to_string(),
+                    Tone::Accent,
+                ),
+                std::cmp::Ordering::Equal => (
+                    "已是最新版本".to_string(),
+                    detail.trim().to_string(),
+                    Tone::Text,
+                ),
+                std::cmp::Ordering::Less => (
+                    "当前版本比 GitHub 最新发布更新".to_string(),
+                    format!("最新发布 {}", release.tag),
+                    Tone::Text,
+                ),
+            }
+        } else if let Some(latest) = latest.filter(|latest| *latest > current) {
+            (
+                format!("发现新版本 v{latest}"),
+                "点“立即检查”刷新信息".to_string(),
+                Tone::Accent,
+            )
+        } else {
+            (String::new(), String::new(), Tone::Text)
+        };
+        self.update_tone = tone;
+        SetDlgItemTextW(self.hwnd, UPDATE_STATUS as i32, w(&status).as_ptr());
+        SetDlgItemTextW(self.hwnd, UPDATE_DETAIL as i32, w(&detail).as_ptr());
+        let last = format!(
+            "上次成功检查：{}",
+            feathermd::update::ago(self.draft.update_checked, feathermd::update::now())
+        );
+        SetDlgItemTextW(self.hwnd, UPDATE_LAST as i32, w(&last).as_ptr());
+        EnableWindow(
+            GetDlgItem(self.hwnd, CHECK_NOW as i32),
+            self.checking.is_none() as i32,
+        );
+        let newer = self.release_url().is_some();
+        ShowWindow(
+            GetDlgItem(self.hwnd, UPDATE_OPEN as i32),
+            if newer && self.page == 3 {
+                SW_SHOWNA
+            } else {
+                SW_HIDE
+            },
+        );
+        InvalidateRect(self.hwnd, null(), 0);
+    }
+    /// Release page for a newer version, from a fresh result or the saved tag.
+    fn release_url(&self) -> Option<String> {
+        let current = feathermd::update::current();
+        match &self.found {
+            Some(release) => (release.version > current).then(|| release.page()),
+            None => feathermd::update::Version::parse(&self.draft.update_latest)
+                .filter(|latest| *latest > current)
+                .and_then(|_| feathermd::update::release_page(&self.draft.update_latest)),
+        }
+    }
+    /// A finished manual check: shown here, recorded by the reader.
+    unsafe fn finish_check(&mut self, outcome: &crate::updater::Outcome) {
+        self.checking = None;
+        KillTimer(self.hwnd, UPDATE_POLL);
+        match outcome {
+            Ok(release) => {
+                self.draft.update_checked = feathermd::update::now();
+                self.draft.update_latest = release.tag.clone();
+                self.found = Some(release.clone());
+                self.show_update();
+            }
+            Err(error) => {
+                self.show_update();
+                self.update_tone = Tone::Muted;
+                SetDlgItemTextW(self.hwnd, UPDATE_STATUS as i32, w("检查失败").as_ptr());
+                SetDlgItemTextW(self.hwnd, UPDATE_DETAIL as i32, w(error).as_ptr());
+            }
+        }
     }
     unsafe fn layout(&mut self, center: bool) {
         let old_ui =
@@ -409,6 +603,8 @@ impl Prefs {
             height,
             SWP_NOZORDER | if center { 0 } else { SWP_NOMOVE },
         );
+        // "Go to download" only appears for a newer release.
+        let download = self.release_url().is_some();
         for control in &self.controls {
             let [x, y, w, h] = control.rect;
             let Look(size, bold, _) = control.look;
@@ -429,14 +625,9 @@ impl Prefs {
                 self.ui.scale(h),
                 SWP_NOZORDER,
             );
-            ShowWindow(
-                control.hwnd,
-                if control.page.is_none_or(|page| page == self.page) {
-                    SW_SHOWNA
-                } else {
-                    SW_HIDE
-                },
-            );
+            let visible = control.page.is_none_or(|page| page == self.page)
+                && (download || GetDlgCtrlID(control.hwnd) != UPDATE_OPEN as i32);
+            ShowWindow(control.hwnd, if visible { SW_SHOWNA } else { SW_HIDE });
         }
         for id in [FAMILY, EDITOR_LIST] {
             for item in [0, usize::MAX] {
@@ -493,7 +684,10 @@ impl Prefs {
             match self.page {
                 0 => (CARD + self.draft.theme.index()) as i32,
                 1 => FAMILY as i32,
-                _ => EDITOR_LIST as i32,
+                2 => EDITOR_LIST as i32,
+                // "Check now" is disabled while a check runs.
+                _ if self.checking.is_some() => AUTO_CHECK as i32,
+                _ => CHECK_NOW as i32,
             },
         )
     }
@@ -612,10 +806,14 @@ impl Prefs {
                 self.set_draft();
                 self.update();
             }
-            _ => {
+            2 => {
                 self.draft.editor = defaults.editor;
                 self.set_draft();
                 self.show_editor();
+            }
+            _ => {
+                self.draft.update_check = defaults.update_check;
+                SendDlgItemMessageW(self.hwnd, AUTO_CHECK as i32, BM_SETCHECK, 0, 0);
             }
         }
     }
@@ -719,6 +917,7 @@ impl Prefs {
                 }
             }
             2 => chrome::chrome_round(dc, self.rect(X0, 222, 480, 140), p.code, self.s(12)),
+            3 => chrome::chrome_round(dc, self.rect(X0, 326, 480, 128), p.code, self.s(12)),
             _ => {}
         }
         RestoreDC(dc, saved);
@@ -1083,6 +1282,91 @@ impl Prefs {
         }
         RestoreDC(dc, saved);
     }
+    /// A real BS_AUTOCHECKBOX (keyboard, accessibility, BM_GETCHECK) drawn in the
+    /// skin's colours; themed checkboxes ignore WM_CTLCOLOR text colours.
+    unsafe fn checkbox(&mut self, draw: &NMCUSTOMDRAW) -> isize {
+        if draw.dwDrawStage != CDDS_PREPAINT {
+            return CDRF_DODEFAULT as isize;
+        }
+        let p = self.palette();
+        let dc = draw.hdc;
+        let saved = SaveDC(dc);
+        let r = draw.rc;
+        let checked = SendMessageW(draw.hdr.hwndFrom, BM_GETCHECK, 0, 0) == BST_CHECKED as isize;
+        let state = draw.uItemState;
+        Self::fill(dc, &r, p.page);
+        let size = self.s(18);
+        let top = (r.top + r.bottom - size) / 2;
+        let bx = RECT {
+            left: r.left + self.s(1),
+            top,
+            right: r.left + self.s(1) + size,
+            bottom: top + size,
+        };
+        let hot = state & (CDIS_HOT | CDIS_SELECTED) != 0;
+        if checked {
+            chrome::chrome_round(dc, bx, p.accent, self.s(5));
+            smooth::icon(
+                dc,
+                bx,
+                smooth::CHECK,
+                p.page,
+                self.ui.dpi as f32 / 96.0 * 0.85,
+            );
+        } else {
+            chrome::chrome_round(dc, bx, if hot { p.accent } else { p.muted }, self.s(5));
+            let inner = RECT {
+                left: bx.left + self.s(1).max(1),
+                top: bx.top + self.s(1).max(1),
+                right: bx.right - self.s(1).max(1),
+                bottom: bx.bottom - self.s(1).max(1),
+            };
+            chrome::chrome_round(dc, inner, if hot { p.code } else { p.page }, self.s(4));
+        }
+        let mut text = [0u16; 128];
+        GetWindowTextW(draw.hdr.hwndFrom, text.as_mut_ptr(), text.len() as i32);
+        let label =
+            String::from_utf16_lossy(&text[..text.iter().position(|c| *c == 0).unwrap_or(0)]);
+        let mut label_rect = RECT {
+            left: bx.right + self.s(10),
+            ..r
+        };
+        self.text(
+            dc,
+            &label,
+            label_rect,
+            BODY,
+            if state & CDIS_DISABLED != 0 {
+                p.muted
+            } else {
+                p.fg
+            },
+            DT_SINGLELINE
+                | DT_VCENTER
+                | if state & CDIS_SHOWKEYBOARDCUES == 0 {
+                    DT_HIDEPREFIX
+                } else {
+                    0
+                },
+        );
+        if state & CDIS_FOCUS != 0 && state & CDIS_SHOWKEYBOARDCUES != 0 {
+            let mut measure = label_rect;
+            DrawTextW(
+                dc,
+                w(&label).as_ptr(),
+                -1,
+                &mut measure,
+                DT_SINGLELINE | DT_CALCRECT,
+            );
+            label_rect.right = measure.right + self.s(3);
+            label_rect.left -= self.s(3);
+            label_rect.top = top - self.s(2);
+            label_rect.bottom = top + size + self.s(2);
+            DrawFocusRect(dc, &label_rect);
+        }
+        RestoreDC(dc, saved);
+        CDRF_SKIPDEFAULT as isize
+    }
     /// Opacity slider: rounded channel with the filled part in the accent colour.
     unsafe fn slider(&mut self, draw: &NMCUSTOMDRAW) -> isize {
         if draw.dwDrawStage == CDDS_PREPAINT {
@@ -1324,6 +1608,9 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         let mut state = (*(lp as *const RefCell<Prefs>)).borrow_mut();
         state.hwnd = hwnd;
         state.init();
+        if state.check_now {
+            state.start_check();
+        }
         let focus = state.first_focus();
         drop(state);
         SetFocus(focus);
@@ -1341,11 +1628,12 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         let captured = snapshot::capture(hwnd, |dc| {
             let mut state = (*ptr).borrow_mut();
             state.background(dc);
-            let page = state.page;
+            // WM_PRINT also draws hidden windows, so follow each control's own
+            // WS_VISIBLE style (the dialog itself may be hidden by the test).
             let children: Vec<HWND> = state
                 .controls
                 .iter()
-                .filter(|c| c.page.is_none_or(|p| p == page))
+                .filter(|c| GetWindowLongPtrW(c.hwnd, GWL_STYLE) as u32 & WS_VISIBLE != 0)
                 .map(|c| c.hwnd)
                 .collect();
             // Children paint through WM_CTLCOLOR/WM_DRAWITEM/WM_NOTIFY back into us.
@@ -1381,6 +1669,26 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         browse(ptr);
         return 1;
     }
+    if msg == WM_COMMAND && wp & 0xffff == UPDATE_OPEN {
+        // The link confirmation runs a modal loop; no Prefs borrow may cross it.
+        let url = (*ptr).try_borrow().ok().and_then(|s| s.release_url());
+        if let Some(url) = url {
+            about::open_link(hwnd, &url);
+        }
+        return 1;
+    }
+    if msg == WM_TIMER && wp == UPDATE_POLL {
+        let finished = (*ptr).try_borrow_mut().ok().and_then(|mut state| {
+            let outcome = state.checking.as_ref()?.poll()?;
+            state.finish_check(&outcome);
+            Some((state.owner, outcome))
+        });
+        // The reader records the result (last check, latest tag, header badge).
+        if let Some((owner, outcome)) = finished {
+            SendMessageW(owner, UPDATE_RESULT, 0, &outcome as *const _ as isize);
+        }
+        return 1;
+    }
     let Ok(mut state) = (*ptr).try_borrow_mut() else {
         return 0;
     };
@@ -1411,6 +1719,12 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
                 state.update();
             } else if id == EDITOR_LIST && code == CBN_SELCHANGE as usize {
                 state.pick_editor();
+            } else if id == CHECK_NOW {
+                state.start_check();
+            } else if id == AUTO_CHECK {
+                state.draft.update_check =
+                    SendDlgItemMessageW(hwnd, AUTO_CHECK as i32, BM_GETCHECK, 0, 0)
+                        == BST_CHECKED as isize;
             }
             1
         }
@@ -1421,8 +1735,15 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         }
         WM_NOTIFY => {
             let header = &*(lp as *const NMHDR);
-            if header.idFrom == OPACITY && header.code == NM_CUSTOMDRAW {
-                let result = state.slider(&*(lp as *const NMCUSTOMDRAW));
+            if header.code == NM_CUSTOMDRAW
+                && (header.idFrom == OPACITY || header.idFrom == AUTO_CHECK)
+            {
+                let draw = &*(lp as *const NMCUSTOMDRAW);
+                let result = if header.idFrom == OPACITY {
+                    state.slider(draw)
+                } else {
+                    state.checkbox(draw)
+                };
                 SetWindowLongPtrW(hwnd, DWLP_MSGRESULT as i32, result);
                 return 1;
             }
@@ -1461,11 +1782,15 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         }
         WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
             let p = state.palette();
-            let tone = state
-                .controls
-                .iter()
-                .find(|c| c.hwnd == lp as HWND)
-                .map_or(Tone::Text, |c| c.look.2);
+            let tone = if GetDlgCtrlID(lp as HWND) == UPDATE_STATUS as i32 {
+                state.update_tone
+            } else {
+                state
+                    .controls
+                    .iter()
+                    .find(|c| c.hwnd == lp as HWND)
+                    .map_or(Tone::Text, |c| c.look.2)
+            };
             let (fg, bg) = match tone {
                 Tone::Text => (p.fg, p.page),
                 Tone::Muted => (p.muted, p.page),
@@ -1509,9 +1834,15 @@ struct EmptyDialog {
     class: u16,
     title: u16,
 }
-/// Modal Settings opened on `page` (0 appearance, 1 reading, 2 editor).
-/// Returns the saved draft, or None when cancelled.
-pub(super) unsafe fn show(owner: HWND, settings: &Settings, page: usize) -> Option<Settings> {
+/// Modal Settings opened on `page` (0 appearance, 1 reading, 2 editor, 3 updates);
+/// `check_now` starts a manual update check. Returns the saved draft, or None
+/// when cancelled. Check results are sent to the owner as UPDATE_RESULT either way.
+pub(super) unsafe fn show(
+    owner: HWND,
+    settings: &Settings,
+    page: usize,
+    check_now: bool,
+) -> Option<Settings> {
     let classes = INITCOMMONCONTROLSEX {
         dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
         dwICC: ICC_BAR_CLASSES,
@@ -1530,6 +1861,10 @@ pub(super) unsafe fn show(owner: HWND, settings: &Settings, page: usize) -> Opti
         valid: true,
         controls: Vec::new(),
         result: None,
+        checking: None,
+        found: None,
+        update_tone: Tone::Text,
+        check_now: check_now && page == 3,
     });
     let template = EmptyDialog {
         template: DLGTEMPLATE {

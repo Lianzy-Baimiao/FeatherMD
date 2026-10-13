@@ -64,6 +64,7 @@ $window = [IntPtr]::Zero
 $createdIni = $false
 $requiresRows = $false
 $dpi = 96
+$widened = $false
 $hitTests = 0
 function Query([int]$id, [int]$index = 0) { [WindowSmoke]::SendMessageW($window, 0x802a, [IntPtr]$id, [IntPtr]$index).ToInt64() }
 function Scale([int]$value) { [int][Math]::Floor($value * $dpi / 96) }
@@ -77,6 +78,15 @@ function Idle {
   Start-Sleep -Milliseconds 10
  }
  throw 'Window layout timed out'
+}
+# The default window is 1080x820 physical pixels, under the 800 logical px wide-outline
+# threshold from 150% scaling upward. Widen it there so the wide-window checks still apply.
+function WideLogical {
+ if ((Query 0) -ge (Scale 800)) { return }
+ if (-not [WindowSmoke]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, (Scale 1080), (Scale 820), 0x16)) { throw 'Native widening resize failed' }
+ Idle
+ if ((Query 0) -lt (Scale 800)) { throw "Widened window is still narrow: $(Query 0) at $dpi DPI" }
+ $script:widened = $true
 }
 function StartReader([string]$path = '') {
  $script:requiresRows = [bool]$path
@@ -94,6 +104,7 @@ function StartReader([string]$path = '') {
  if ($window -eq [IntPtr]::Zero) { throw 'Native window not created' }
  Idle
  $script:dpi = [int](Query 3)
+ WideLogical
 }
 function StopReader {
  if ($process -and -not $process.HasExited) {
@@ -383,7 +394,7 @@ try {
  $metrics = [ordered]@{
   result = 'PASS'; author = 'lianzy'; company = 'lianzy'; last_modified_by = 'lianzy'
   input = 'hidden windows; native messages and SetWindowPos; no desktop input injection'
-  dpi = $dpi; min_client_width = $minWidth; min_client_height = $minHeight
+  dpi = $dpi; widened_default_window = $widened; min_client_width = $minWidth; min_client_height = $minHeight
   native_caption_absent = $true; native_scrollbars_absent = $true; native_menu_absent = $true
   hit_tests = $hitTests; fixture_bytes = $size; before_resize_byte = $beforeResize; after_resize_byte = $afterResize
   outline_headings = $headingCount; outline_clicked_byte = $headingOffset; outline_wheel_top = $outlineAfterWheel

@@ -125,6 +125,12 @@ pub struct Settings {
     pub raw: bool,
     pub wide: bool,
     pub outline: bool,
+    /// Check GitHub Releases shortly after start, at most daily. Off by default.
+    pub update_check: bool,
+    /// Unix time of the last completed check (automatic or manual).
+    pub update_checked: u64,
+    /// Latest published tag seen by that check, so a notice survives restarts.
+    pub update_latest: String,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -138,6 +144,9 @@ impl Default for Settings {
             raw: false,
             wide: false,
             outline: true,
+            update_check: false,
+            update_checked: 0,
+            update_latest: String::new(),
         }
     }
 }
@@ -207,6 +216,18 @@ impl Settings {
                     "raw" => s.raw = value.trim() == "true",
                     "wide" => s.wide = value.trim() == "true",
                     "outline" => s.outline = value.trim() != "false",
+                    "update_check" => s.update_check = value.trim() == "true",
+                    "update_checked" => {
+                        if let Ok(v) = value.trim().parse::<u64>() {
+                            s.update_checked = v;
+                        }
+                    }
+                    "update_latest" => {
+                        let tag = value.trim();
+                        if crate::update::valid_tag(tag) {
+                            s.update_latest = tag.to_string();
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -215,7 +236,7 @@ impl Settings {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "# FeatherMD settings\nfont_family={}\nfont_size={}\ntheme={}\nopacity={}\neditor={}\nwrap={}\nraw={}\nwide={}\noutline={}\n",
+            "# FeatherMD settings\nfont_family={}\nfont_size={}\ntheme={}\nopacity={}\neditor={}\nwrap={}\nraw={}\nwide={}\noutline={}\nupdate_check={}\nupdate_checked={}\nupdate_latest={}\n",
             Self::validate_font_family(&self.font_family).unwrap_or("Microsoft YaHei UI"),
             self.font_size,
             self.theme.key(),
@@ -224,7 +245,14 @@ impl Settings {
             self.wrap,
             self.raw,
             self.wide,
-            self.outline
+            self.outline,
+            self.update_check,
+            self.update_checked,
+            if crate::update::valid_tag(&self.update_latest) {
+                self.update_latest.as_str()
+            } else {
+                ""
+            }
         )
     }
     pub fn save(&self, path: &Path) -> io::Result<()> {

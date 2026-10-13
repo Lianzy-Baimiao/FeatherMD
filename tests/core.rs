@@ -60,6 +60,36 @@ fn skins_opacity_and_editor_roundtrip_with_safe_fallbacks() {
         );
     }
     assert_eq!(Settings::parse("opacity=half").opacity, 100);
+    // Update checks are opt-in; bookkeeping survives a round trip and rejects injection.
+    let defaults = Settings::default();
+    assert!(
+        !defaults.update_check && defaults.update_checked == 0 && defaults.update_latest.is_empty()
+    );
+    let checked =
+        Settings::parse("update_check=true\nupdate_checked=1800000000\nupdate_latest=v0.2.0");
+    assert!(checked.update_check);
+    assert_eq!(
+        (checked.update_checked, checked.update_latest.as_str()),
+        (1_800_000_000, "v0.2.0")
+    );
+    assert_eq!(Settings::parse(&checked.serialize()), checked);
+    for bad in [
+        "update_check=yes",
+        "update_checked=-1",
+        "update_latest=v1/../x",
+        "update_latest=v1 2",
+    ] {
+        let s = Settings::parse(bad);
+        assert!(
+            !s.update_check && s.update_checked == 0 && s.update_latest.is_empty(),
+            "{bad}"
+        );
+    }
+    let injected = Settings {
+        update_latest: "v1.0.0\nraw=true".into(),
+        ..Settings::default()
+    };
+    assert!(!Settings::parse(&injected.serialize()).raw);
     // A UTF-8 BOM must not hide the first setting.
     let bom = Settings::parse("\u{feff}theme=light\nfont_size=20");
     assert_eq!((bom.theme, bom.font_size), (Theme::Light, 20));
