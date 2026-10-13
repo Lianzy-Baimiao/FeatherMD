@@ -41,6 +41,8 @@ jobs:
           ./scripts/editor-smoke.ps1 -AllowNoPopup
           ./scripts/update-smoke.ps1 -AllowNoPopup
           ./scripts/update-smoke.ps1 -Theme dark -Output ./test-artifacts/update-dark -AllowNoPopup
+          ./scripts/table-smoke.ps1
+          ./scripts/table-smoke.ps1 -Theme dark -Output ./test-artifacts/table-dark
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
@@ -62,3 +64,5 @@ jobs:
             test-artifacts/editor/editor.json
             test-artifacts/update*/*.png
             test-artifacts/update*/update.json
+            test-artifacts/table*/*.png
+            test-artifacts/table*/table.json

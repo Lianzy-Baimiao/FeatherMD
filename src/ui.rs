@@ -11,6 +11,7 @@ use feathermd::{
     markdown,
     scrollbar::ScrollTrack,
     settings::{Editor, Settings, Theme},
+    text::{self, Caret},
     viewport::Viewport,
     worker::{Reply, Request, SearchRequest, Workers},
 };
@@ -84,6 +85,9 @@ const EDITOR_SETTINGS: usize = 416;
 const CHECK_UPDATES: usize = 417;
 const HEADER_HEIGHT: i32 = 34;
 const OUTLINE_ROWS_TOP: i32 = HEADER_HEIGHT + 56;
+/// Default and minimum window sizes in logical (96 DPI) pixels.
+const DEFAULT_SIZE: (i32, i32) = (1080, 820);
+const MIN_SIZE: (i32, i32) = (640, 480);
 /// Posted to open Settings once the App borrow is released; WPARAM is the page.
 const OPEN_PREFERENCES: u32 = WM_APP + 44;
 /// Sent by Settings for live skin/opacity drafts. WPARAM: theme index or
@@ -93,12 +97,68 @@ const PREVIEW_APPEARANCE: u32 = WM_APP + 45;
 const UPDATE_RESULT: u32 = WM_APP + 46;
 /// One-shot timer for the optional startup update check.
 const UPDATE_TIMER: usize = 2;
+/// Shift held during a mouse message (WPARAM flag).
+const MK_SHIFT: usize = 0x0004;
 const UPDATE_DELAY_MS: u32 = 3000;
 const fn make_resource(id: u16) -> *const u16 {
     id as usize as *const u16
 }
 fn w(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
+}
+/// First frame for a new reader: the default size at the window's DPI, kept
+/// inside the monitor work area (never below the minimum size), at the
+/// system-chosen position moved back inside the work area when it overflows.
+fn initial_frame(dpi: u32, origin: POINT, work: RECT) -> RECT {
+    let scale = |n: i32| (n as i64 * dpi.max(96) as i64 / 96) as i32;
+    let fit = |size: i32, min: i32, span: i32| scale(size).min(span).max(scale(min));
+    let width = fit(DEFAULT_SIZE.0, MIN_SIZE.0, work.right - work.left);
+    let height = fit(DEFAULT_SIZE.1, MIN_SIZE.1, work.bottom - work.top);
+    let left = origin.x.min(work.right - width).max(work.left);
+    let top = origin.y.min(work.bottom - height).max(work.top);
+    RECT {
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+    }
+}
+/// Loaded source line a layout row belongs to (rows share their line's start).
+fn line_of(
+    lines: &[feathermd::document::SourceLine],
+    start: u64,
+) -> Option<&feathermd::document::SourceLine> {
+    let i = lines.partition_point(|l| l.start < start);
+    lines.get(i).filter(|l| l.start == start)
+}
+/// Displayed units `[from, to)` of `row` inside a source selection, and whether the
+/// selection continues past the row's line break.
+fn selected_units(
+    lines: &[feathermd::document::SourceLine],
+    (a, b): (Caret, Caret),
+    row: &Row,
+) -> Option<(usize, usize, bool)> {
+    let (from, to) = (a.min(b), a.max(b));
+    if from == to || row.start < from.line || row.start > to.line {
+        return None;
+    }
+    let line = line_of(lines, row.start)?;
+    let start = if line.start == from.line {
+        text::units_before(&line.text, from.index)
+    } else {
+        0
+    };
+    let end = if line.start == to.line {
+        text::units_before(&line.text, to.index)
+    } else {
+        usize::MAX
+    };
+    let span: usize = row.runs.iter().map(|r| r.text.len()).sum();
+    let (first, last) = (row.unit, row.unit + span);
+    let tail = last == text::units_before(&line.text, line.text.len());
+    let (a, b) = (start.max(first), end.min(last));
+    let eol = tail && end == usize::MAX && !line.continued;
+    (a < b || eol).then(|| (a.min(b) - first, b - first, eol))
 }
 fn rgb(r: u32, g: u32, b: u32) -> u32 {
     r | (g << 8) | (b << 16)
@@ -135,6 +195,15 @@ struct Palette {
     ornament: Option<u32>,
 }
 impl Palette {
+    /// Source-mode text selection: the accent blended into the code background, so a
+    /// selection stands out on code rows in every skin.
+    fn text_highlight(&self) -> u32 {
+        let mix = |shift: u32| {
+            let (a, b) = ((self.accent >> shift) & 255, (self.code >> shift) & 255);
+            (a * 28 + b * 72) / 100
+        };
+        mix(0) | (mix(8) << 8) | (mix(16) << 16)
+    }
     #[allow(
         clippy::too_many_arguments,
         reason = "One positional constructor keeps twelve palettes scannable"
@@ -355,8 +424,13 @@ struct App {
     width: i32,
     height: i32,
     hits: Vec<HitBox>,
+    /// Preview mode: selected layout rows.
     selection: Option<(usize, usize)>,
+    /// Source mode: character selection as (anchor, active) carets.
+    text_selection: Option<(Caret, Caret)>,
     selecting: bool,
+    /// Pointer while dragging a source selection; outside the text it scrolls.
+    drag_point: Option<(i32, i32)>,
     mouse: Option<(i32, i32)>,
     hover: Option<usize>,
     pressed: Option<Hit>,
@@ -416,7 +490,9 @@ impl App {
             height: 760,
             hits: vec![],
             selection: None,
+            text_selection: None,
             selecting: false,
+            drag_point: None,
             mouse: None,
             hover: None,
             pressed: None,
@@ -654,6 +730,7 @@ impl App {
         self.anchor = 0;
         self.horizontal = 0;
         self.selection = None;
+        self.text_selection = None;
         self.drag = None;
         self.wheel_remainder = 0;
         self.document_name = path
@@ -919,12 +996,53 @@ impl App {
         self.invalidate();
     }
     fn horizontal_max(&self) -> i32 {
-        if self.settings.wrap {
+        // Wrapped text always fits; only a table whose narrowest columns do not fit scrolls.
+        self.layout.as_ref().map_or(0, |l| {
+            let right = if self.settings.wrap {
+                l.table_width
+            } else {
+                l.max_width
+            };
+            (right - self.body_width()).max(0)
+        })
+    }
+    /// Diagnostics per table of the page: (right edge, visual lines, rows, columns,
+    /// first layout row). Lines of one table share their rule positions.
+    fn tables(&self) -> Vec<(i32, usize, usize, usize, usize)> {
+        let mut out: Vec<(i32, usize, usize, usize, usize)> = Vec::new();
+        let mut current: Option<(&std::rc::Rc<[i32]>, u64)> = None;
+        for (index, row) in self.layout.iter().flat_map(|l| l.rows.iter().enumerate()) {
+            let Some(line) = &row.table else {
+                current = None;
+                continue;
+            };
+            let same = current.is_some_and(|(edges, _)| std::rc::Rc::ptr_eq(edges, &line.edges));
+            if !same {
+                let right = line.edges.last().map_or(0, |e| e + 1);
+                out.push((right, 0, 0, line.edges.len() - 1, index));
+                current = None;
+            }
+            let entry = out.last_mut().expect("pushed above");
+            entry.1 += 1;
+            if current.is_none_or(|(_, start)| start != row.start) {
+                entry.2 += 1;
+            }
+            current = Some((&line.edges, row.start));
+        }
+        out
+    }
+    /// Horizontal scroll applied to `row`. With wrapping on, only tables wider than
+    /// the reading column scroll; text and tables that fit stay in place.
+    fn shift(&self, row: &Row) -> i32 {
+        let overflows = row
+            .table
+            .as_ref()
+            .and_then(|t| t.edges.last())
+            .is_some_and(|&edge| edge + 1 > self.body_width());
+        if self.settings.wrap && !overflows {
             0
         } else {
-            self.layout
-                .as_ref()
-                .map_or(0, |l| (l.max_width - self.body_width()).max(0))
+            self.horizontal
         }
     }
     unsafe fn scrollbar(&mut self) {
@@ -1271,23 +1389,180 @@ impl App {
             self.invalidate();
         }
     }
-    unsafe fn copy(&mut self) {
-        let Some(layout) = &self.layout else {
+    /// Source caret nearest to client `x` on layout row `index` (source mode), and the
+    /// byte under the pointer, for word selection.
+    unsafe fn caret_at(&mut self, index: usize, x: i32) -> Option<(Caret, usize)> {
+        let origin = {
+            let row = self.layout.as_ref()?.rows.get(index)?;
+            self.left() - self.shift(row)
+        };
+        let (Some(layout), Some(page)) = (&self.layout, &self.page) else {
+            return None;
+        };
+        let row = layout.rows.get(index)?;
+        let line = line_of(&page.lines, row.start)?;
+        let run = row.runs.first()?;
+        let mut dx = vec![0; run.text.len()];
+        if !run.text.is_empty() {
+            let dc = GetDC(self.hwnd);
+            let old = SelectObject(dc, self.reading_fonts.get(run.font));
+            let (mut fit, mut size) = (0, SIZE::default());
+            GetTextExtentExPointW(
+                dc,
+                run.text.as_ptr(),
+                run.text.len() as i32,
+                i32::MAX / 4,
+                &mut fit,
+                dx.as_mut_ptr(),
+                &mut size,
+            );
+            SelectObject(dc, old);
+            ReleaseDC(self.hwnd, dc);
+        }
+        let local = x - origin - run.x;
+        let pen = |k: usize| if k == 0 { 0 } else { dx[k - 1] };
+        let (first, last) = (row.unit, row.unit + run.text.len());
+        let (mut best, mut under, mut unit) = (None::<(i32, usize)>, None, 0);
+        let ends = std::iter::once((line.text.len(), 0));
+        for (byte, width) in line
+            .text
+            .char_indices()
+            .map(|(i, c)| (i, text::units_of(c)))
+            .chain(ends)
+        {
+            if unit > last {
+                break;
+            }
+            if unit >= first {
+                let at = pen(unit - first);
+                let distance = (at - local).abs();
+                if best.is_none_or(|(d, _)| distance < d) {
+                    best = Some((distance, byte));
+                }
+                if width > 0
+                    && unit + width <= last
+                    && local >= at
+                    && local < pen(unit + width - first)
+                {
+                    under = Some(byte);
+                }
+            }
+            unit += width;
+        }
+        let (_, byte) = best?;
+        Some((
+            Caret {
+                line: line.start,
+                index: byte,
+            },
+            under.unwrap_or(byte),
+        ))
+    }
+    /// Caret at the start or end of a source-mode layout row.
+    fn row_caret(&self, row: &Row, end: bool) -> Option<Caret> {
+        let line = line_of(&self.page.as_ref()?.lines, row.start)?;
+        let units = row.unit
+            + if end {
+                row.runs.iter().map(|r| r.text.len()).sum()
+            } else {
+                0
+            };
+        Some(Caret {
+            line: line.start,
+            index: text::index_at_unit(&line.text, units),
+        })
+    }
+    /// Layout row painted at client `y`, clamped to the rows on screen.
+    fn row_near(&self, y: i32) -> Option<usize> {
+        let layout = self.layout.as_ref()?;
+        let end = self.viewport().visible_end(self.top);
+        let mut top = self.content_top() + self.s(12);
+        for index in self.top..end {
+            let height = layout.rows[index].height;
+            if y < top + height {
+                return Some(index);
+            }
+            top += height;
+        }
+        end.checked_sub(1).filter(|&last| last >= self.top)
+    }
+    /// Moves the active end of a source selection to the pointer.
+    unsafe fn drag_to(&mut self, x: i32, y: i32) {
+        let Some(index) = self.row_near(y) else {
             return;
         };
-        let range = self.selection.unwrap_or((
-            self.top,
-            (self.top + self.visible_rows().saturating_sub(1))
-                .min(layout.rows.len().saturating_sub(1)),
-        ));
+        if let (Some((caret, _)), Some((anchor, _))) =
+            (self.caret_at(index, x), self.text_selection)
+        {
+            self.text_selection = Some((anchor, caret));
+            self.invalidate();
+        }
+    }
+    /// Scrolls while a source selection is dragged above or below the text.
+    unsafe fn drag_scroll(&mut self) {
+        let Some((x, y)) = self.drag_point.filter(|_| self.selecting) else {
+            return;
+        };
+        let (top, bottom) = (self.content_top(), self.content_bottom());
+        let distance = if y < top {
+            y - top
+        } else if y >= bottom {
+            y - bottom + 1
+        } else {
+            return;
+        };
+        // Farther from the text scrolls faster, up to ten rows per tick.
+        let rows = (1 + distance.abs() / self.s(20)).min(10);
+        self.scroll(rows * distance.signum());
+        self.drag_to(x, y);
+    }
+    /// What Copy puts on the clipboard, and the status line describing it.
+    fn copy_text(&self) -> Option<(String, &'static str)> {
+        let layout = self.layout.as_ref()?;
+        let last_visible = (self.top + self.visible_rows().saturating_sub(1))
+            .min(layout.rows.len().saturating_sub(1));
+        if self.settings.raw {
+            let lines = &self.page.as_ref()?.lines;
+            if let Some((a, b)) = self.text_selection.filter(|(a, b)| a != b) {
+                let (text, clipped) = text::selected(lines, a, b);
+                let status = if clipped {
+                    "已复制选中文本中已载入的部分"
+                } else {
+                    "已复制选中文本"
+                };
+                return Some((text, status));
+            }
+            // Nothing selected: the exact source of the rows on screen.
+            let from = self.row_caret(layout.rows.get(self.top)?, false)?;
+            let to = self.row_caret(layout.rows.get(last_visible)?, true)?;
+            return Some((text::selected(lines, from, to).0, "已复制可见内容"));
+        }
+        let range = self.selection.unwrap_or((self.top, last_visible));
         let (a, b) = (range.0.min(range.1), range.0.max(range.1));
         let mut text = String::new();
+        let mut table_row = None;
         for row in layout.rows.get(a..=b).unwrap_or(&[]) {
+            if let Some(line) = &row.table {
+                // A wrapped table row is copied once, as tab-separated cells.
+                if table_row != Some(row.start) {
+                    table_row = Some(row.start);
+                    text.push_str(&line.copy);
+                    text.push_str("\r\n");
+                }
+                continue;
+            }
+            table_row = None;
             for run in &row.runs {
                 text.push_str(&String::from_utf16_lossy(&run.text));
             }
             text.push_str("\r\n");
         }
+        Some((text, "已复制选中行（未选择时复制可见内容）"))
+    }
+    unsafe fn copy(&mut self) {
+        let Some((text, status)) = self.copy_text() else {
+            return;
+        };
         let data = w(&text);
         if OpenClipboard(self.hwnd) == 0 {
             self.status = "剪贴板暂不可用，请重试".into();
@@ -1300,7 +1575,7 @@ impl App {
                 std::ptr::copy_nonoverlapping(data.as_ptr(), dest.cast(), data.len());
                 GlobalUnlock(memory);
                 if EmptyClipboard() != 0 && !SetClipboardData(13, memory).is_null() {
-                    self.status = "已复制选中行（未选择时复制可见内容）".into();
+                    self.status = status.into();
                 } else {
                     GlobalFree(memory);
                 }
@@ -1417,11 +1692,15 @@ impl App {
             menu,
             state(self.layout.is_some()),
             COPY,
-            w(if self.selection.is_some() {
-                "复制选中行\tCtrl+C"
-            } else {
-                "复制可见内容\tCtrl+C"
-            })
+            w(
+                if self.settings.raw && self.text_selection.is_some_and(|(a, b)| a != b) {
+                    "复制选中文本\tCtrl+C"
+                } else if !self.settings.raw && self.selection.is_some() {
+                    "复制选中行\tCtrl+C"
+                } else {
+                    "复制可见内容\tCtrl+C"
+                },
+            )
             .as_ptr(),
         );
         AppendMenuW(
@@ -1500,7 +1779,23 @@ impl App {
             }
             EDIT_DOCUMENT => self.edit_document(),
             SELECT_ALL => {
-                if let Some(l) = &self.layout {
+                if self.settings.raw {
+                    if let Some(page) = &self.page
+                        && let (Some(first), Some(last)) = (page.lines.first(), page.lines.last())
+                    {
+                        self.text_selection = Some((
+                            Caret {
+                                line: first.start,
+                                index: 0,
+                            },
+                            Caret {
+                                line: last.start,
+                                index: last.text.len(),
+                            },
+                        ));
+                        self.status = "已全选当前分页".into();
+                    }
+                } else if let Some(l) = &self.layout {
                     self.selection = Some((0, l.rows.len().saturating_sub(1)));
                 }
             }
@@ -1589,6 +1884,7 @@ impl App {
             }
             RAW => {
                 self.settings.raw = !self.settings.raw;
+                self.text_selection = None;
                 self.persist();
             }
             WIDE => {
@@ -1737,6 +2033,13 @@ impl App {
             0x72 => self.command(NEXT),
             0x74 => self.command(RELOAD),
             0x70 => self.command(ABOUT),
+            0x1b if self.edit_mode.is_none()
+                && (self.selection.is_some() || self.text_selection.is_some()) =>
+            {
+                self.selection = None;
+                self.text_selection = None;
+                self.invalidate();
+            }
             0x1b => self.hide_edit(),
             _ => return false,
         }
@@ -1838,20 +2141,88 @@ impl App {
                         right: left + body_width,
                         bottom: y + row.height,
                     };
-                    let selected = self
-                        .selection
-                        .is_some_and(|(a, b)| index >= a.min(b) && index <= a.max(b));
+                    let selected = !self.settings.raw
+                        && self
+                            .selection
+                            .is_some_and(|(a, b)| index >= a.min(b) && index <= a.max(b));
                     let found = self.found.is_some_and(|n| n >= row.start && n < row.end);
+                    let shift = self.shift(row);
                     if selected || found {
                         Self::fill(dc, &rect, p.selection);
                     } else if matches!(
                         row.kind,
-                        markdown::Kind::Code
-                            | markdown::Kind::Fence
-                            | markdown::Kind::Table
-                            | markdown::Kind::Quote
+                        markdown::Kind::Code | markdown::Kind::Fence | markdown::Kind::Quote
                     ) {
                         Self::fill(dc, &rect, p.code);
+                    }
+                    if let Some(table) = &row.table {
+                        let (x0, x1) = (
+                            left + table.edges[0] - shift,
+                            left + table.edges[table.edges.len() - 1] - shift,
+                        );
+                        if table.header && !selected && !found {
+                            Self::fill(
+                                dc,
+                                &RECT {
+                                    left: x0,
+                                    right: x1,
+                                    ..rect
+                                },
+                                p.code,
+                            );
+                        }
+                        let line = |top: i32| RECT {
+                            left: x0,
+                            top,
+                            right: x1 + 1,
+                            bottom: top + 1,
+                        };
+                        if table.first {
+                            Self::fill(dc, &line(y), p.edge);
+                        }
+                        if table.close {
+                            Self::fill(dc, &line(y + row.height - 1), p.edge);
+                        }
+                        for &edge in table.edges.iter() {
+                            let x = left + edge - shift;
+                            Self::fill(
+                                dc,
+                                &RECT {
+                                    left: x,
+                                    top: y,
+                                    right: x + 1,
+                                    bottom: y + row.height,
+                                },
+                                p.edge,
+                            );
+                        }
+                    }
+                    // Source mode: highlight the selected characters only.
+                    if self.settings.raw
+                        && let (Some(sel), Some(page), Some(run)) =
+                            (self.text_selection, &self.page, row.runs.first())
+                        && let Some((a, b, eol)) = selected_units(&page.lines, sel, row)
+                    {
+                        let old = SelectObject(dc, self.reading_fonts.get(run.font));
+                        let pen = |n: usize| {
+                            let mut size = SIZE::default();
+                            if n > 0 {
+                                GetTextExtentPoint32W(dc, run.text.as_ptr(), n as i32, &mut size);
+                            }
+                            size.cx
+                        };
+                        let x = left + run.x - shift;
+                        let right = x + pen(b) + if eol { self.s(6) } else { 0 };
+                        Self::fill(
+                            dc,
+                            &RECT {
+                                left: x + pen(a),
+                                right,
+                                ..rect
+                            },
+                            p.text_highlight(),
+                        );
+                        SelectObject(dc, old);
                     }
                     if row.kind == markdown::Kind::Quote {
                         Self::fill(
@@ -1879,9 +2250,14 @@ impl App {
                         rect,
                         action: Hit::Row(index),
                     });
+                    // Table lines centre the text in their band below the cell padding.
+                    let (inset, band) = row
+                        .table
+                        .as_ref()
+                        .map_or((0, row.height), |t| (t.inset, t.band));
                     for run in &row.runs {
-                        let x = left + run.x - self.horizontal;
-                        let text_y = y + (row.height - self.fonts.scale(run.font.size)) / 2 - 1;
+                        let x = left + run.x - shift;
+                        let text_y = y + inset + (band - self.fonts.scale(run.font.size)) / 2 - 1;
                         let old = SelectObject(dc, self.reading_fonts.get(run.font));
                         if run.code && !selected && !found {
                             Self::fill(
@@ -1890,7 +2266,7 @@ impl App {
                                     left: x - self.s(2),
                                     top: text_y - self.s(1),
                                     right: x + run.width + self.s(2),
-                                    bottom: y + row.height - self.s(3),
+                                    bottom: y + inset + band - self.s(3),
                                 },
                                 p.code,
                             );
@@ -2158,6 +2534,48 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             51 => app.update_checks as isize,
             52 => app.update_available().is_some() as isize,
             53 => app.update_check.is_some() as isize,
+            // Tables: right edge of the widest table, the reading width, visual table
+            // lines, distinct table rows and the first table's column count.
+            54 => app.layout.as_ref().map_or(0, |l| l.table_width as isize),
+            55 => app.body_width() as isize,
+            // Per table LPARAM of this page: right edge, visual lines, rows, columns,
+            // first layout row; 65 is the number of tables.
+            56..=58 | 64 => app.tables().get(lp as usize).map_or(-1, |t| match wp {
+                56 => t.0 as isize,
+                57 => t.1 as isize,
+                58 => t.3 as isize,
+                _ => t.4 as isize,
+            }),
+            65 => app.tables().len() as isize,
+            66 => app.tables().get(lp as usize).map_or(-1, |t| t.2 as isize),
+            // Layout row LPARAM on screen: client left / right of its text and middle y.
+            59..=61 => {
+                let index = lp as usize;
+                app.hits
+                    .iter()
+                    .find(|h| h.action == Hit::Row(index))
+                    .zip(app.layout.as_ref().and_then(|l| l.rows.get(index)))
+                    .map_or(-1, |(hit, row)| {
+                        let left = app.left() - app.shift(row);
+                        let value = match wp {
+                            59 => left + row.runs.first().map_or(0, |r| r.x),
+                            60 => left + row.runs.last().map_or(0, |r| r.x + r.width),
+                            _ => (hit.rect.top + hit.rect.bottom) / 2,
+                        };
+                        value as isize
+                    })
+            }
+            // Test seam: write what Copy would put on the clipboard next to the
+            // snapshot file and return its UTF-8 length (-1 without a test path).
+            62 => match (std::env::var_os("FEATHERMD_TEST_SNAPSHOT"), app.copy_text()) {
+                (Some(path), Some((text, _))) => {
+                    let path = PathBuf::from(path).with_file_name("copy.txt");
+                    std::fs::write(&path, text.as_bytes()).map_or(-1, |_| text.len() as isize)
+                }
+                _ => -1,
+            },
+            // Source selection present and non-empty.
+            63 => app.text_selection.is_some_and(|(a, b)| a != b) as isize,
             37 => app
                 .outline
                 .as_ref()
@@ -2215,6 +2633,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_TIMER => {
             app.receive();
+            app.drag_scroll();
             if !app.tooltip_visible
                 && app.header_tip().is_some()
                 && app
@@ -2255,8 +2674,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_GETMINMAXINFO => {
             let info = &mut *(lp as *mut MINMAXINFO);
             info.ptMinTrackSize = POINT {
-                x: app.s(640),
-                y: app.s(480),
+                x: app.s(MIN_SIZE.0),
+                y: app.s(MIN_SIZE.1),
             };
             let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
             let mut monitor_info = MONITORINFO {
@@ -2456,9 +2875,43 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 app.invalidate();
             }
             if let Some(Hit::Row(row)) = app.hit(x, y) {
-                app.selection = Some((row, row));
-                app.selecting = true;
-                SetCapture(hwnd);
+                if app.settings.raw {
+                    // Source mode selects characters: double-click a word, Shift extends.
+                    if let Some((caret, under)) = app.caret_at(row, x) {
+                        if msg == WM_LBUTTONDBLCLK {
+                            let word = app
+                                .page
+                                .as_ref()
+                                .and_then(|p| line_of(&p.lines, caret.line))
+                                .map(|l| text::word_at(&l.text, under));
+                            if let Some((a, b)) = word {
+                                app.text_selection = Some((
+                                    Caret {
+                                        line: caret.line,
+                                        index: a,
+                                    },
+                                    Caret {
+                                        line: caret.line,
+                                        index: b,
+                                    },
+                                ));
+                            }
+                        } else {
+                            let anchor = match app.text_selection {
+                                Some((anchor, _)) if wp & MK_SHIFT != 0 => anchor,
+                                _ => caret,
+                            };
+                            app.text_selection = Some((anchor, caret));
+                            app.selecting = true;
+                            app.drag_point = Some((x, y));
+                            SetCapture(hwnd);
+                        }
+                    }
+                } else {
+                    app.selection = Some((row, row));
+                    app.selecting = true;
+                    SetCapture(hwnd);
+                }
                 app.invalidate();
             }
             0
@@ -2499,6 +2952,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             if app.drag.is_some() {
                 app.drag_scrollbar(x, y);
+            } else if app.selecting && app.settings.raw {
+                app.drag_point = Some((x, y));
+                app.drag_to(x, y);
             } else if app.selecting {
                 let row = app.hits.iter().find_map(|h| {
                     if y >= h.rect.top && y < h.rect.bottom {
@@ -2529,6 +2985,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 app.invalidate();
             } else if app.selecting {
                 app.selecting = false;
+                app.drag_point = None;
                 ReleaseCapture();
             } else {
                 ReleaseCapture();
@@ -2572,6 +3029,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_CAPTURECHANGED | WM_CANCELMODE => {
             app.selecting = false;
+            app.drag_point = None;
             app.drag = None;
             app.pressed = None;
             if msg == WM_CANCELMODE {
@@ -2595,9 +3053,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_))
                 )
             });
+            // Source text is selectable by character.
+            let text = app.settings.raw
+                && app
+                    .mouse
+                    .is_some_and(|(x, y)| app.reading_area(x, y) && !clickable);
             SetCursor(LoadCursorW(
                 null_mut(),
-                if clickable { IDC_HAND } else { IDC_ARROW },
+                if clickable {
+                    IDC_HAND
+                } else if text {
+                    IDC_IBEAM
+                } else {
+                    IDC_ARROW
+                },
             ));
             1
         }
@@ -2726,8 +3195,8 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             (WS_OVERLAPPEDWINDOW & !WS_CAPTION) | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            1080,
-            820,
+            DEFAULT_SIZE.0,
+            DEFAULT_SIZE.1,
             null_mut(),
             null_mut(),
             instance,
@@ -2745,14 +3214,36 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             GWL_STYLE,
             (style & !(WS_CAPTION | WS_VSCROLL | WS_HSCROLL)) as isize,
         );
+        // Per-monitor aware windows are created in physical pixels, so scale the
+        // default size to the monitor Windows chose before the window is shown.
+        let mut frame = RECT::default();
+        GetWindowRect(hwnd, &mut frame);
+        let mut monitor = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..zeroed()
+        };
+        let placed = GetMonitorInfoW(
+            MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+            &mut monitor,
+        ) != 0;
+        if placed {
+            let origin = POINT {
+                x: frame.left,
+                y: frame.top,
+            };
+            frame = initial_frame(GetDpiForWindow(hwnd), origin, monitor.rcWork);
+        }
         SetWindowPos(
             hwnd,
             null_mut(),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            frame.left,
+            frame.top,
+            frame.right - frame.left,
+            frame.bottom - frame.top,
+            SWP_NOZORDER
+                | SWP_NOACTIVATE
+                | SWP_FRAMECHANGED
+                | if placed { 0 } else { SWP_NOMOVE | SWP_NOSIZE },
         );
         {
             let mut a = app.borrow_mut();
@@ -2896,5 +3387,60 @@ mod tests {
             assert!(contrast(p.page, p.accent) >= 4.5, "{name} primary button");
             assert!(!skin_name(theme).is_empty());
         }
+    }
+    #[test]
+    fn source_selection_stands_out_on_code_rows_and_keeps_text_readable() {
+        for theme in Theme::ALL {
+            let p = Palette::new(theme.resolve(false));
+            let name = skin_name(theme);
+            let mark = p.text_highlight();
+            // Measured 1.43-1.89:1 on code rows and >= 6.0:1 for text in 2026-10.
+            assert!(
+                contrast(mark, p.code) >= 1.4,
+                "{name} selection on code rows"
+            );
+            assert!(contrast(p.fg, mark) >= 4.5, "{name} selected source text");
+        }
+    }
+    #[test]
+    fn default_window_follows_display_scaling_inside_the_work_area() {
+        let rect = |left, top, right, bottom| RECT {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        let at = |x, y| POINT { x, y };
+        let edges = |r: RECT| (r.left, r.top, r.right, r.bottom);
+        let size = |r: RECT| (r.right - r.left, r.bottom - r.top);
+        let screen = rect(0, 0, 2560, 1552);
+        // The same logical size at every scale; a failed DPI query (0) acts as 100%.
+        assert_eq!(size(initial_frame(96, at(26, 26), screen)), (1080, 820));
+        assert_eq!(size(initial_frame(120, at(26, 26), screen)), (1350, 1025));
+        assert_eq!(size(initial_frame(144, at(26, 26), screen)), (1620, 1230));
+        assert_eq!(size(initial_frame(0, at(26, 26), screen)), (1080, 820));
+        // A cascade position that would overflow moves back inside the work area.
+        assert_eq!(
+            edges(initial_frame(144, at(1200, 600), screen)),
+            (940, 322, 2560, 1552)
+        );
+        // Small work areas cap the size, but never below the minimum size.
+        assert_eq!(
+            edges(initial_frame(96, at(0, 0), rect(0, 0, 1024, 728))),
+            (0, 0, 1024, 728)
+        );
+        assert_eq!(
+            edges(initial_frame(192, at(0, 0), rect(0, 0, 1920, 1032))),
+            (0, 0, 1920, 1032)
+        );
+        assert_eq!(
+            size(initial_frame(144, at(0, 0), rect(0, 0, 800, 560))),
+            (960, 720)
+        );
+        // Monitors left of the primary one have negative coordinates.
+        assert_eq!(
+            edges(initial_frame(144, at(-2500, 10), rect(-1920, 0, 0, 1040))),
+            (-1920, 0, -300, 1040)
+        );
     }
 }

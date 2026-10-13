@@ -12,6 +12,9 @@ public static class WindowSmoke {
  public struct Point { public int X, Y; }
  public struct Rect { public int Left, Top, Right, Bottom; }
  public struct MinMaxInfo { public Point Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize; }
+ public struct MonitorInfo { public int Size; public Rect Monitor, Work; public uint Flags; }
+ [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+ [DllImport("user32.dll")] public static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr data);
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassNameW(IntPtr hwnd, System.Text.StringBuilder text, int count);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint id);
@@ -64,7 +67,7 @@ $window = [IntPtr]::Zero
 $createdIni = $false
 $requiresRows = $false
 $dpi = 96
-$widened = $false
+$defaultFrame = ''
 $hitTests = 0
 function Query([int]$id, [int]$index = 0) { [WindowSmoke]::SendMessageW($window, 0x802a, [IntPtr]$id, [IntPtr]$index).ToInt64() }
 function Scale([int]$value) { [int][Math]::Floor($value * $dpi / 96) }
@@ -79,14 +82,22 @@ function Idle {
  }
  throw 'Window layout timed out'
 }
-# The default window is 1080x820 physical pixels, under the 800 logical px wide-outline
-# threshold from 150% scaling upward. Widen it there so the wide-window checks still apply.
-function WideLogical {
- if ((Query 0) -ge (Scale 800)) { return }
- if (-not [WindowSmoke]::SetWindowPos($window, [IntPtr]::Zero, 0, 0, (Scale 1080), (Scale 820), 0x16)) { throw 'Native widening resize failed' }
- Idle
- if ((Query 0) -lt (Scale 800)) { throw "Widened window is still narrow: $(Query 0) at $dpi DPI" }
- $script:widened = $true
+# A new reader is 1080x820 logical pixels at its monitor's scale, capped by the
+# work area but never below the 640x480 minimum, and placed inside the work area.
+function AssertDefaultFrame {
+ $info = [WindowSmoke+MonitorInfo]::new()
+ $info.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][WindowSmoke+MonitorInfo])
+ if (-not [WindowSmoke]::GetMonitorInfoW([WindowSmoke]::MonitorFromWindow($window, 2), [ref]$info)) { throw 'Cannot read the reader monitor' }
+ $work = $info.Work
+ $width = [Math]::Max([Math]::Min((Scale 1080), $work.Right - $work.Left), (Scale 640))
+ $height = [Math]::Max([Math]::Min((Scale 820), $work.Bottom - $work.Top), (Scale 480))
+ $outer = [WindowSmoke+Rect]::new()
+ if (-not [WindowSmoke]::GetWindowRect($window, [ref]$outer)) { throw 'Cannot read the default window frame' }
+ $actual = "$($outer.Right - $outer.Left)x$($outer.Bottom - $outer.Top)"
+ if ($actual -ne "${width}x$height") { throw "Default window is $actual at $dpi DPI; expected ${width}x$height in work area $($work.Right - $work.Left)x$($work.Bottom - $work.Top)" }
+ if ($outer.Left -lt $work.Left -or $outer.Top -lt $work.Top -or ($width -le ($work.Right - $work.Left) -and $outer.Right -gt $work.Right) -or ($height -le ($work.Bottom - $work.Top) -and $outer.Bottom -gt $work.Bottom)) { throw "Default window $($outer.Left),$($outer.Top),$($outer.Right),$($outer.Bottom) leaves work area $($work.Left),$($work.Top),$($work.Right),$($work.Bottom)" }
+ if ((Query 0) -lt (Scale 800)) { throw "Work area too narrow for the wide-outline checks: $(Query 0) px at $dpi DPI" }
+ $script:defaultFrame = "$actual in $($work.Right - $work.Left)x$($work.Bottom - $work.Top)"
 }
 function StartReader([string]$path = '') {
  $script:requiresRows = [bool]$path
@@ -104,7 +115,7 @@ function StartReader([string]$path = '') {
  if ($window -eq [IntPtr]::Zero) { throw 'Native window not created' }
  Idle
  $script:dpi = [int](Query 3)
- WideLogical
+ AssertDefaultFrame
 }
 function StopReader {
  if ($process -and -not $process.HasExited) {
@@ -394,7 +405,7 @@ try {
  $metrics = [ordered]@{
   result = 'PASS'; author = 'lianzy'; company = 'lianzy'; last_modified_by = 'lianzy'
   input = 'hidden windows; native messages and SetWindowPos; no desktop input injection'
-  dpi = $dpi; widened_default_window = $widened; min_client_width = $minWidth; min_client_height = $minHeight
+  dpi = $dpi; default_window = $defaultFrame; min_client_width = $minWidth; min_client_height = $minHeight
   native_caption_absent = $true; native_scrollbars_absent = $true; native_menu_absent = $true
   hit_tests = $hitTests; fixture_bytes = $size; before_resize_byte = $beforeResize; after_resize_byte = $afterResize
   outline_headings = $headingCount; outline_clicked_byte = $headingOffset; outline_wheel_top = $outlineAfterWheel

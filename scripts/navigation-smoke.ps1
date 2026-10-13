@@ -67,8 +67,8 @@ try {
  for($i=0;$i -lt 5;$i++){Key 0x28}
  if((Cursor) -ne $bottom){throw 'Down overscrolled past the final full viewport'}
  Key 0x24
- # A hang guard, not a page budget: at 150% scaling the default 1080x820 physical
- # window is 720x547 logical pixels and the headings fixture needs 1111 PageDowns.
+ # A hang guard, not a page budget: page counts follow the window's logical size
+ # (a 720x547 logical window needs 1111 PageDowns for the headings fixture).
  $maxPages=10000
  for($i=0;$i -lt $maxPages;$i++) {
   Capture

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.7 — 2026-10-13
+
+### Added
+- Tables. GitHub-style pipe tables (header row plus a `| --- | :-: | --: |` delimiter row) render as a grid with a shaded header and rules; cells keep bold, inline code and links, and the delimiter colons set left/centre/right alignment. Previously every `|` line was shown as raw monospace text.
+- Tables fit the window: columns keep their content width when the table fits; otherwise the widest columns narrow first and cells wrap by word or CJK character, never starting a line with closing punctuation. A table whose columns cannot fit even at about six characters each scrolls horizontally on its own while the text stays put. Without wrapping, tables keep their content width and scroll with the page.
+- Character selection in source mode: drag with an I-beam cursor, double-click a word, Shift+click to extend, and drag past the top or bottom edge to scroll. Ctrl+A selects the loaded page, Esc clears, Ctrl+C or "复制选中文本" copies the exact source (tabs kept, CJK and emoji intact, CRLF between lines, no extra break inside a split long line). Without a selection, Copy takes the visible source.
+- Preview copy writes table rows as tab-separated cells, once per row however many lines it wraps to.
+- Native table/selection regression (table-smoke, light/dark): fitting, wrapping in a narrow window, the wide table scrolling alone, unwrapped widths, TSV copy, drag/double-click/Shift+click/select-all/Esc and drag auto-scroll, read through a test seam instead of the clipboard.
+
+### Changed
+- `|` lines without a delimiter row are ordinary paragraphs (as in GFM) instead of monospace text.
+- New windows follow display scaling. The default size is now 1080×820 logical pixels at the monitor's scale (1620×1230 physical at 150%) instead of a fixed 1080×820 physical pixels, which left only 720×547 logical pixels and the narrow outline at 150%. The size is capped to the monitor work area, never below the 640×480 minimum, and a cascade position that would overflow moves back inside the work area. Moving between monitors already followed DPI through the size Windows suggests.
+
+### Tests
+- Unit tests for table splitting, delimiter rows, column fitting, cell line breaking (CJK, punctuation, surrogate pairs), table detection and its limits, pages that start inside a table, caret/display mapping, exact source copy and word selection; every skin keeps the source highlight at least 1.4:1 against code rows.
+- window-smoke checks the default frame against the monitor's scale and work area instead of widening the window first; a unit test covers 100/125/150/200%, overflowing positions, small work areas and monitors with negative coordinates.
+
 ## 0.1.6 — 2026-10-13
 
 ### Added
