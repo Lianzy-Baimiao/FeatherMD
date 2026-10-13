@@ -1,5 +1,13 @@
 # Progress / continuation notes
 
+## v0.1.6 publication record — 2026-10-13
+
+- 作者/最后修改人：lianzy。用户明确要求“提交推送发布”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.6
+- Tag/source: 646b79b8c6178bc0a921e6c82d7a7ba96b2b8961 (annotated tag v0.1.6). GitHub Actions run 38333886061 (main) passed on Windows and Ubuntu, including the new update smokes; the Windows runner (96 DPI) showed the real More menu (more_menu_label_checked=true), window-smoke did not need to widen (widened_default_window=false), navigation headings 357/419, wrapped 274/299. Tag run 38334232952 also passed: https://github.com/Lianzy-Baimiao/FeatherMD/actions/runs/38333886061
+- Assets: FeatherMD.exe 821248 bytes, FeatherMD-0.1.6-windows-x64.zip 935663 bytes, SHA256SUMS.txt 180 bytes (SHA-256 bdf90cfe94613be37772e214a5c28b9b40646752876a9d83637929d060e0a45c). All three were downloaded again; they are byte-identical to the local distribution and match the GitHub asset digests. EXE/ZIP hashes are recorded in the v0.1.6 candidate entry below.
+- Release-note preview URL v0.1.6/docs/settings-update.png returns HTTP 200 (39,640 bytes, same as the tagged blob). releases/latest reports v0.1.6. v0.1.5 tag (ffbdaac) and its asset digests are unchanged.
+- 实网检查（下载的发布 EXE、便携 INI、真实 GitHub API、系统代理设置）：更多 → 检查更新显示“已是最新版本”，详情“FeatherMD 羽读 v0.1.6 · 检查更新　发布于 2026-10-13”，不显示“前往下载页…”与徽标；从命令到结果 788 ms（单次本机样本）；自动检查关闭时没有自动检查；INI 记录 update_checked 与 update_latest=v0.1.6，update_check 仍为 false。
+
 ## 2026-10-13 — v0.1.6 release candidate: update checks via GitHub Releases
 
 - 作者/最后修改人：lianzy。用户需求：接入打开检查更新，默认关闭，支持手动检查更新；更新源为 GitHub Releases。

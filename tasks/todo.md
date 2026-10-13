@@ -4,7 +4,11 @@
 最后修改人：lianzy
 日期：2026-10-12
 
-## 当前任务：检查更新（v0.1.6，本地）
+## 待用户决定
+
+- [ ] 默认窗口大小不随 DPI 缩放（自首个版本起如此，150% 下仅 720×547 逻辑像素）：是否按显示缩放调整默认窗口。
+
+## 已完成：检查更新（v0.1.6）
 
 - [x] 更新源：GitHub Releases latest API（HTTPS，WinHTTP 系统组件，随系统代理）；只读取公开版本信息，不下载、不安装、不上传。
 - [x] 打开时自动检查：默认关闭；开启后启动约 3 秒在后台检查，每 24 小时最多一次，失败静默。
@@ -14,8 +18,7 @@
 - [x] 文档：README / AGENTS / ARCHITECTURE / CHANGELOG / PROGRESS；“无自动联网”改为“默认不联网”。全部回归、实网手动检查一次。
 - [x] 本地打包交付：按提交树 --locked 重新构建 dist/FeatherMD.exe（802 KiB）与 0.1.6 ZIP，构建/交付/包内哈希一致，交付 EXE 全部 14 项原生回归通过（150% 缩放，144 DPI）。
 - [x] 测试脚本不再假设显示缩放 ≤ 125%：window-smoke 在默认窗口不足 800 逻辑像素时先加宽；navigation 翻页上限只作防挂起。v0.1.5 EXE 在 150% 下同样失败，不是本版回归。
-- [ ] 用户已确认：推送 GitHub，CI（Windows / Ubuntu）通过后发布 v0.1.6，重新下载 EXE、ZIP、SHA256SUMS 核对哈希。
-- [ ] 后续：默认窗口大小不随 DPI 缩放（150% 下仅 720×547 逻辑像素），待用户决定是否调整。
+- [x] 推送 GitHub，CI（run 38333886061，Windows / Ubuntu）通过后发布 [v0.1.6](https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.6)，重新下载的 EXE、ZIP、SHA256SUMS 哈希一致；发布 EXE 实网检查显示“已是最新版本”。
 
 ## 已完成：右键编辑、皮肤与透明度、更矮标题栏（v0.1.5）
 
