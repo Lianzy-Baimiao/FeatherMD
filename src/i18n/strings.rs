@@ -67,7 +67,7 @@ pub(super) static TABLE: &[[&str; 4]] = &[
     ["最大化 / 还原", "最大化 / 還原", "Maximize / Restore", "最大化 / 元に戻す"],
     ["关闭", "關閉", "Close", "閉じる"],
     ["外观", "外觀", "Appearance", "外観"],
-    ["跟随系统将自动切换明暗", "跟隨系統會自動切換明暗", "System follows Windows light or dark", "システムに合わせると明暗が自動で切り替わります"],
+    ["跟随系统将自动切换明暗", "跟隨系統會自動切換明暗", "System follows Windows light or dark", "システムは明暗を自動で切り替えます"],
     ["跟随系统", "跟隨系統", "System", "システム"],
     ["浅色", "淺色", "Light", "ライト"],
     ["深色", "深色", "Dark", "ダーク"],
