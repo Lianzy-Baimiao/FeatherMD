@@ -12,6 +12,7 @@
 - [x] 关于窗口更新：两列快捷键（新增 Ctrl+E、Ctrl+,、Ctrl+T、Esc）与一键复制、表格、按字符选择、分页预览说明；版本居中。
 - [x] README 繁體中文 / English / 日本語 版本与语言切换，各自的阅读、关于与语言设置截图；翻译版示例文档。
 - [x] 新增 i18n-smoke（四种语言全部视图无截断、实时切换无句柄增长）、table-smoke 复制按钮段；所有冒烟固定 language=zh-CN；修正 window-smoke 欢迎页前的 INI 重置从未执行的问题。
+- [x] 推送 GitHub；首次 CI 在 96 DPI 发现日文外观提示被截断，缩短后 CI（run 38398636465，Windows / Ubuntu）通过，发布 [v0.1.8](https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.8)；重新下载的 EXE、ZIP、SHA256SUMS 哈希一致；实网检查：v0.1.7 发现 v0.1.8，v0.1.8 显示已是最新版本。
 - [ ] 后续可选：正文默认字体按界面语言选择（日语用户当前需在“阅读”页自选日文字体）；预览模式按字符选择。
 
 ## 已完成：表格、源码按字符选择与默认窗口缩放（v0.1.7）

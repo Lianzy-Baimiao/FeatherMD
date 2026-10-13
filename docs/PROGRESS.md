@@ -1,5 +1,13 @@
 # Progress / continuation notes
 
+## v0.1.8 publication record — 2026-10-13
+
+- 作者/最后修改人：lianzy。用户在需求中预先要求“改完了自动提交推送发布”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.8
+- Tag/source: 78e0e5ed85cbf36f8da02dbf726da7965dbfb1ce (annotated tag v0.1.8, title “FeatherMD 羽读 v0.1.8 · 一键复制与多语言”). GitHub Actions run 38398636465 (main) passed on Windows and Ubuntu: all 17 native smokes at 96 DPI with a 1024×720 work area and an en-US locale (default_window "1024x720 in 1024x720"; navigation headings 384/456, wrapped 313/355; table copy GDI 28→28; i18n 105 views, "System" resolved to en, 8 live switches GDI 32→32, USER 22→22). Tag run 38399567039 also passed. The first push b9e984d (run 38396104689) failed only i18n-smoke on the Japanese picker note, fixed in 78e0e5e; see the candidate entry below.
+- Assets: FeatherMD.exe 935936 bytes, FeatherMD-0.1.8-windows-x64.zip 1646973 bytes, SHA256SUMS.txt 180 bytes (SHA-256 4b5272640fda299d41ee257281cfad726fe445f9af06b71fe531147907855321). All three were downloaded again; they are byte-identical to the local distribution and match the GitHub asset digests. Before tagging, all 38 non-EXE ZIP entries were byte-identical to the committed blobs and the EXE was newer than every compile input. EXE/ZIP hashes are in the candidate entry below.
+- Release-note preview URLs v0.1.8/docs/copy-button.png (23,412 bytes) and reading-light.en.png (64,705 bytes) return HTTP 200, same sizes as the tagged blobs. releases/latest reports v0.1.8. v0.1.7 tag (6682e23) and its asset digests are unchanged.
+- 实网检查（下载的 EXE、各自的临时便携 INI、真实 GitHub API、系统代理设置）：已发布的 v0.1.7 显示“发现新版本 v0.1.8”，详情“FeatherMD 羽读 v0.1.8 · 一键复制与多语言　发布于 2026-10-13”，显示“前往下载页…”与更多按钮徽标，1354 ms；v0.1.8 显示“已是最新版本”，无下载按钮与徽标，1698 ms（均为单次本机样本）。两者自动检查关闭时都没有自动检查，INI 记录 update_latest=v0.1.8，update_check 仍为 false；临时 INI 已删除。
+
 ## 2026-10-13 — v0.1.8 candidate: one-click copy, interface languages, multilingual README, About refresh
 
 - 作者/最后修改人：lianzy。用户需求：①代码块等方块（代码、引用、表格）右上角鼠标移入时显示一键复制按钮；②程序支持多语言；③README 支持多语言；④更新过时的关于窗口；⑤改完自动提交推送发布（本轮已预先授权）。
