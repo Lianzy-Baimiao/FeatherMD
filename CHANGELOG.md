@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.8 — 2026-10-13
+
+### Added
+- One-click copy for code blocks, quotes and tables. Hovering one in the preview shows a Copy button in its top-right corner: code is copied as its exact source without the fence lines (indented code loses one level of indentation), quotes as shown, tables as tab-separated rows. The button keeps to the top of a long block's visible part, sits beside a table narrower than the text instead of over its header, and shows a check mark for 1.5 s. A block running past the loaded page copies its loaded part and says so.
+- Interface languages: 简体中文, 繁體中文, English and 日本語. By default the interface follows the Windows display language (Taiwan, Hong Kong and Macao use Traditional Chinese; languages without a translation use English). Settings has a new "Language" page, also reachable from More → "界面语言 / Language…"; Save switches menus, buttons, messages and dialogs at once, without a restart. Each language uses an interface font with its regional glyph forms (Microsoft YaHei UI, Microsoft JhengHei UI, Yu Gothic UI). Stored as `language=system|zh-CN|zh-TW|en|ja`.
+- README in Traditional Chinese, English and Japanese (README.zh-TW.md, README.en.md, README.ja.md) with a language switcher, each with its own reading view, About window and language page, and translated demo documents (docs/demo.*.md). All four are in the release ZIP.
+- Native i18n regression (i18n-smoke): every view — welcome, header tooltips, appearance picker, menus, all Settings pages, About collapsed and expanded, a document with its copy button, Find and Go to — in each language, with no text cut off; "System" resolves to this machine's display language; eight live switches keep GDI and USER handle counts flat.
+
+### Changed
+- About is up to date: the expanded panel now lists shortcuts in two columns (adding Ctrl+E, Ctrl+, , Ctrl+T, Esc) plus notes on one-click copy, table layout, character selection and the paged preview; the "Back to reading" button is wider with centred text, and the version sits centred in its pill.
+- The welcome "Open document" button widens when a translation needs it (it stays 208 logical px in Chinese).
+- docs/demo.md mentions the 12 skins, the interface languages and the copy button, and says "offline by default" instead of "fully offline".
+
+### Fixed
+- window-smoke: the INI reset before the welcome checks was on the same line as `StopReader`, so PowerShell passed it as an ignored argument and the welcome captures inherited the previous run's settings.
+
+### Tests
+- Unit tests for box grouping (fences, mismatched fence markers, empty fences, indented code, quotes, tables, boxes cut off by the page edge), exact copy with dedent and split long lines, translation-table integrity (placeholders, mnemonics, shortcut suffixes, no simplified characters in Traditional Chinese or Japanese), a source scan that every Chinese interface literal is translated, Windows LANGID mapping and the language setting round trip.
+- table-smoke covers the copy buttons: placement, sticky top, the narrow-table position, every box kind's copied text, the check mark clearing, source mode without buttons and GDI stability. Every smoke now pins `language=zh-CN`, since CI runners use an English system locale.
+
 ## 0.1.7 — 2026-10-13
 
 ### Added

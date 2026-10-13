@@ -1,3 +1,4 @@
+use crate::i18n::Lang;
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -131,6 +132,8 @@ pub struct Settings {
     pub update_checked: u64,
     /// Latest published tag seen by that check, so a notice survives restarts.
     pub update_latest: String,
+    /// Interface language; `None` follows the Windows display language.
+    pub language: Option<Lang>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -147,6 +150,7 @@ impl Default for Settings {
             update_check: false,
             update_checked: 0,
             update_latest: String::new(),
+            language: None,
         }
     }
 }
@@ -228,6 +232,7 @@ impl Settings {
                             s.update_latest = tag.to_string();
                         }
                     }
+                    "language" => s.language = Lang::parse(value),
                     _ => {}
                 }
             }
@@ -236,7 +241,7 @@ impl Settings {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "# FeatherMD settings\nfont_family={}\nfont_size={}\ntheme={}\nopacity={}\neditor={}\nwrap={}\nraw={}\nwide={}\noutline={}\nupdate_check={}\nupdate_checked={}\nupdate_latest={}\n",
+            "# FeatherMD settings\nfont_family={}\nfont_size={}\ntheme={}\nopacity={}\neditor={}\nwrap={}\nraw={}\nwide={}\noutline={}\nupdate_check={}\nupdate_checked={}\nupdate_latest={}\nlanguage={}\n",
             Self::validate_font_family(&self.font_family).unwrap_or("Microsoft YaHei UI"),
             self.font_size,
             self.theme.key(),
@@ -252,7 +257,8 @@ impl Settings {
                 self.update_latest.as_str()
             } else {
                 ""
-            }
+            },
+            self.language.map_or("system", Lang::code)
         )
     }
     pub fn save(&self, path: &Path) -> io::Result<()> {

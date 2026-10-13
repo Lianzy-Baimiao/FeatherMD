@@ -262,7 +262,7 @@ function CheckHeaderSwitches {
 }
 
 try {
- [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`n", [Text.UTF8Encoding]::new($false))
+ [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`nlanguage=zh-CN`n", [Text.UTF8Encoding]::new($false))
  $createdIni = $true
  $env:FEATHERMD_TEST_SNAPSHOT = Join-Path $Output 'viewport.bmp'
  # Read physical coordinates without changing the target's DPI or desktop focus.
@@ -382,7 +382,8 @@ try {
  [void][WindowSmoke]::SendMessageW($window, 0x100, [IntPtr]0x24, [IntPtr]::Zero)
  Idle
  if ((Query 46) -ne 0) { throw 'Keyboard navigation did not release the clicked outline highlight' }
- StopReader [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`n", [Text.UTF8Encoding]::new($false))
+ StopReader
+ [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`nlanguage=zh-CN`n", [Text.UTF8Encoding]::new($false))
  StartReader
  if ((Query 10) -ne 0 -or (Query 2) -ne 0) { throw 'Welcome window unexpectedly loaded a document' }
  if ((Query 35) -ne 0) { throw 'Welcome still reserves an empty sidebar' }

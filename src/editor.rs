@@ -1,7 +1,7 @@
 //! External editing. FeatherMD stays read-only: "Edit" hands the current
 //! document to the user's chosen application as one quoted argument.
 //! Author / company / last editor: lianzy.
-use feathermd::settings::Editor;
+use feathermd::{i18n::tr, settings::Editor};
 use std::{
     io,
     os::windows::ffi::OsStrExt,
@@ -132,8 +132,8 @@ pub fn detect() -> Vec<(String, String)> {
 /// Short user-facing name for the configured editor.
 pub fn name(editor: &Editor) -> String {
     match editor {
-        Editor::System => "系统默认".into(),
-        Editor::Notepad => "记事本".into(),
+        Editor::System => tr("系统默认").into(),
+        Editor::Notepad => tr("记事本").into(),
         Editor::Program(path) => {
             let file = Path::new(path)
                 .file_name()
@@ -178,7 +178,7 @@ pub fn launch(editor: &Editor, owner: HWND, document: &Path) -> Result<Launched,
     if !document.is_file() {
         return Err(LaunchError::Failed(io::Error::new(
             io::ErrorKind::NotFound,
-            "文档已不存在或已被移动",
+            tr("文档已不存在或已被移动"),
         )));
     }
     let directory = document.parent().map(Path::to_path_buf);
@@ -187,7 +187,7 @@ pub fn launch(editor: &Editor, owner: HWND, document: &Path) -> Result<Launched,
     if text.contains('"') {
         return Err(LaunchError::Failed(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "文档路径包含无效字符",
+            tr("文档路径包含无效字符"),
         )));
     }
     let argument = format!("\"{text}\"");

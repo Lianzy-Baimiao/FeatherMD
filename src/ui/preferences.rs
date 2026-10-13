@@ -1,4 +1,5 @@
-//! Settings: appearance (skins, window opacity), reading font and external editor.
+//! Settings: appearance (skins, window opacity), reading font, external editor,
+//! update checks and interface language.
 //! Draft state never escapes until Save; skin/opacity drafts preview live on the
 //! reader through PREVIEW_APPEARANCE and are reverted by the owner on Cancel.
 use super::*;
@@ -21,7 +22,7 @@ const FAMILY: usize = 1101;
 const SIZE: usize = 1102;
 const DEFAULTS: usize = 1103;
 const ERROR: usize = 1104;
-const NAV: [usize; 4] = [1110, 1111, 1112, 1113];
+const NAV: [usize; 5] = [1110, 1111, 1112, 1113, 1114];
 const CARD: usize = 1120;
 const OPACITY: usize = 1140;
 const OPACITY_VALUE: usize = 1141;
@@ -34,6 +35,15 @@ const UPDATE_OPEN: usize = 1162;
 const UPDATE_STATUS: usize = 1163;
 const UPDATE_DETAIL: usize = 1164;
 const UPDATE_LAST: usize = 1165;
+const LANGUAGE_LIST: usize = 1170;
+/// Language list order; `None` follows the Windows display language.
+const LANGUAGES: [Option<Lang>; 5] = [
+    None,
+    Some(Lang::ZhCn),
+    Some(Lang::ZhTw),
+    Some(Lang::En),
+    Some(Lang::Ja),
+];
 /// Polls a manual update check; the check itself runs off the UI thread.
 const UPDATE_POLL: usize = 7;
 const WIDTH: i32 = 720;
@@ -41,11 +51,12 @@ const HEIGHT: i32 = 552;
 const NAV_WIDTH: i32 = 184;
 /// Content column origin.
 const X0: i32 = 212;
-const PAGES: [(&str, usize); 4] = [
-    ("外观(&A)", smooth::PALETTE),
-    ("阅读(&R)", smooth::BOOK),
-    ("编辑(&E)", smooth::PENCIL),
-    ("更新(&U)", smooth::UPDATE),
+const PAGES: [(&str, usize); 5] = [
+    (key!("外观(&A)"), smooth::PALETTE),
+    (key!("阅读(&R)"), smooth::BOOK),
+    (key!("编辑(&E)"), smooth::PENCIL),
+    (key!("更新(&U)"), smooth::UPDATE),
+    (key!("语言(&L)"), smooth::GLOBE),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -183,7 +194,7 @@ impl Prefs {
         hwnd
     }
     unsafe fn init(&mut self) {
-        SetWindowTextW(self.hwnd, w("设置").as_ptr());
+        SetWindowTextW(self.hwnd, w(tr("设置")).as_ptr());
         let dc = GetDC(self.hwnd);
         let mut names = std::collections::BTreeSet::new();
         let mut lf: LOGFONTW = zeroed();
@@ -196,8 +207,8 @@ impl Prefs {
         self.families = names.into_iter().collect();
         // Fixed metadata probes only; see editor::detect.
         self.editors = vec![
-            ("系统默认".into(), Editor::System),
-            ("记事本".into(), Editor::Notepad),
+            (tr("系统默认").into(), Editor::System),
+            (tr("记事本").into(), Editor::Notepad),
         ];
         for (name, path) in crate::editor::detect() {
             self.editors.push((name, Editor::Program(path)));
@@ -209,16 +220,16 @@ impl Prefs {
 
         // Navigation column.
         self.label(
-            "设置",
+            tr("设置"),
             1200,
             (None, [24, 22, 140, 30]),
             Look(18, true, Tone::Nav),
         );
         for (i, (name, _)) in PAGES.into_iter().enumerate() {
-            self.button(name, NAV[i], (None, [14, 72 + i as i32 * 42, 156, 36]));
+            self.button(tr(name), NAV[i], (None, [14, 72 + i as i32 * 42, 156, 36]));
         }
         self.label(
-            "FeatherMD · 本地保存",
+            tr("FeatherMD · 本地保存"),
             1201,
             (None, [24, HEIGHT - 40, 150, 20]),
             Look(11, false, Tone::NavMuted),
@@ -226,9 +237,9 @@ impl Prefs {
 
         // Appearance.
         let page = Some(0);
-        self.label("皮肤", 1210, (page, [X0, 24, 300, 30]), TITLE);
+        self.label(tr("皮肤"), 1210, (page, [X0, 24, 300, 30]), TITLE);
         self.label(
-            "书本、古籍与常用配色，选择后立即预览。",
+            tr("书本、古籍与常用配色，选择后立即预览。"),
             1211,
             (page, [X0, 58, 470, 22]),
             NOTE,
@@ -250,7 +261,7 @@ impl Prefs {
             );
             SetWindowSubclass(card, Some(button_proc), 1, 0);
         }
-        self.label("窗口不透明度", 1212, (page, [X0, 392, 200, 22]), BODY);
+        self.label(tr("窗口不透明度"), 1212, (page, [X0, 392, 200, 22]), BODY);
         self.add(
             "STATIC",
             "",
@@ -261,7 +272,7 @@ impl Prefs {
         );
         let slider = self.add(
             "msctls_trackbar32",
-            "窗口不透明度",
+            tr("窗口不透明度"),
             OPACITY,
             WS_TABSTOP | TBS_NOTICKS,
             (page, [X0 - 6, 418, 488, 32]),
@@ -272,7 +283,7 @@ impl Prefs {
         SendMessageW(slider, TBM_SETLINESIZE, 0, 1);
         SendMessageW(slider, TBM_SETPAGESIZE, 0, 2);
         self.label(
-            "30%–100%，数值越低越透明；只作用于阅读窗口，设置窗口保持不透明。",
+            tr("30%–100%，数值越低越透明；只作用于阅读窗口，设置窗口保持不透明。"),
             1213,
             (page, [X0, 452, 480, 20]),
             Look(12, false, Tone::Muted),
@@ -280,14 +291,14 @@ impl Prefs {
 
         // Reading (ids kept from the former font dialog).
         let page = Some(1);
-        self.label("阅读字体", 1220, (page, [X0, 24, 400, 30]), TITLE);
+        self.label(tr("阅读字体"), 1220, (page, [X0, 24, 400, 30]), TITLE);
         self.label(
-            "让每一页，都更合你的阅读习惯。",
+            tr("让每一页，都更合你的阅读习惯。"),
             1221,
             (page, [X0, 58, 470, 22]),
             NOTE,
         );
-        self.label("字体(&F)", 1202, (page, [X0, 98, 320, 22]), BODY);
+        self.label(tr("字体(&F)"), 1202, (page, [X0, 98, 320, 22]), BODY);
         let combo = self.add(
             "COMBOBOX",
             "",
@@ -304,7 +315,12 @@ impl Prefs {
         for family in &self.families {
             SendMessageW(combo, CB_ADDSTRING, 0, w(family).as_ptr() as isize);
         }
-        self.label("默认字号(&S)", 1203, (page, [X0 + 360, 98, 120, 22]), BODY);
+        self.label(
+            tr("默认字号(&S)"),
+            1203,
+            (page, [X0 + 360, 98, 120, 22]),
+            BODY,
+        );
         let edit = self.add(
             "EDIT",
             "",
@@ -317,13 +333,13 @@ impl Prefs {
         self.label("px", 1204, (page, [X0 + 444, 131, 30, 24]), NOTE);
         self.label("", ERROR, (page, [X0, 168, 480, 22]), NOTE);
         self.label(
-            "仅正文与标题使用此字体，代码仍保持等宽。",
+            tr("仅正文与标题使用此字体，代码仍保持等宽。"),
             1206,
             (page, [X0, 352, 480, 22]),
             NOTE,
         );
         self.label(
-            "字号范围 12–36 px · 保存后自动记住",
+            tr("字号范围 12–36 px · 保存后自动记住"),
             1207,
             (page, [X0, 378, 480, 22]),
             NOTE,
@@ -331,14 +347,14 @@ impl Prefs {
 
         // External editor.
         let page = Some(2);
-        self.label("默认编辑应用", 1230, (page, [X0, 24, 400, 30]), TITLE);
+        self.label(tr("默认编辑应用"), 1230, (page, [X0, 24, 400, 30]), TITLE);
         self.label(
-            "FeatherMD 只读；编辑时把当前文档交给你选择的应用。",
+            tr("FeatherMD 只读；编辑时把当前文档交给你选择的应用。"),
             1231,
             (page, [X0, 58, 480, 22]),
             NOTE,
         );
-        self.label("编辑应用(&D)", 1232, (page, [X0, 98, 320, 22]), BODY);
+        self.label(tr("编辑应用(&D)"), 1232, (page, [X0, 98, 320, 22]), BODY);
         let editors = self.add(
             "COMBOBOX",
             "",
@@ -355,7 +371,7 @@ impl Prefs {
         for (name, _) in &self.editors {
             SendMessageW(editors, CB_ADDSTRING, 0, w(name).as_ptr() as isize);
         }
-        self.button("浏览(&B)…", BROWSE, (page, [X0 + 372, 126, 108, 30]));
+        self.button(tr("浏览(&B)…"), BROWSE, (page, [X0 + 372, 126, 108, 30]));
         self.add(
             "STATIC",
             "",
@@ -365,15 +381,15 @@ impl Prefs {
             Look(12, false, Tone::Muted),
         );
         self.label(
-            "使用方式",
+            tr("使用方式"),
             1233,
             (page, [X0 + 20, 238, 440, 24]),
             Look(14, true, Tone::Info),
         );
         for (i, text) in [
-            "正文右键 → 编辑，或按 Ctrl+E，用所选应用打开当前文档。",
-            "保存后回到 FeatherMD 按 F5 重新载入，阅读位置保持不变。",
-            "不会修改 Windows 的默认打开方式或文件关联。",
+            tr("正文右键 → 编辑，或按 Ctrl+E，用所选应用打开当前文档。"),
+            tr("保存后回到 FeatherMD 按 F5 重新载入，阅读位置保持不变。"),
+            tr("不会修改 Windows 的默认打开方式或文件关联。"),
         ]
         .into_iter()
         .enumerate()
@@ -388,14 +404,14 @@ impl Prefs {
 
         // Updates.
         let page = Some(3);
-        self.label("检查更新", 1240, (page, [X0, 24, 400, 30]), TITLE);
+        self.label(tr("检查更新"), 1240, (page, [X0, 24, 400, 30]), TITLE);
         self.label(
-            "更新源：GitHub Releases（Lianzy-Baimiao/FeatherMD）。",
+            tr("更新源：GitHub Releases（Lianzy-Baimiao/FeatherMD）。"),
             1241,
             (page, [X0, 58, 480, 22]),
             NOTE,
         );
-        self.label("当前版本", 1242, (page, [X0, 98, 120, 22]), BODY);
+        self.label(tr("当前版本"), 1242, (page, [X0, 98, 120, 22]), BODY);
         self.label(
             concat!("v", env!("CARGO_PKG_VERSION")),
             1243,
@@ -404,7 +420,7 @@ impl Prefs {
         );
         let auto = self.add(
             "BUTTON",
-            "打开时自动检查更新(&S)",
+            tr("打开时自动检查更新(&S)"),
             AUTO_CHECK,
             WS_TABSTOP | BS_AUTOCHECKBOX as u32,
             (page, [X0, 134, 360, 26]),
@@ -421,13 +437,17 @@ impl Prefs {
             0,
         );
         self.label(
-            "默认关闭。开启后启动几秒在后台检查，每天最多一次，失败时不打扰。",
+            tr("默认关闭。开启后启动几秒在后台检查，每天最多一次，失败时不打扰。"),
             1244,
             (page, [X0 + 28, 162, 452, 20]),
             Look(12, false, Tone::Muted),
         );
-        self.button("立即检查(&C)", CHECK_NOW, (page, [X0, 198, 120, 32]));
-        let open = self.button("前往下载页…", UPDATE_OPEN, (page, [X0 + 132, 198, 130, 32]));
+        self.button(tr("立即检查(&C)"), CHECK_NOW, (page, [X0, 198, 120, 32]));
+        let open = self.button(
+            tr("前往下载页…"),
+            UPDATE_OPEN,
+            (page, [X0 + 132, 198, 130, 32]),
+        );
         ShowWindow(open, SW_HIDE);
         self.label(
             "",
@@ -443,15 +463,15 @@ impl Prefs {
             Look(12, false, Tone::Muted),
         );
         self.label(
-            "隐私与安全",
+            tr("隐私与安全"),
             1245,
             (page, [X0 + 20, 338, 440, 24]),
             Look(14, true, Tone::Info),
         );
         for (i, text) in [
-            "只向 api.github.com 请求公开的最新版本信息，不上传文档或设置。",
-            "不会自动下载或安装；前往下载页前会再次确认。",
-            "关闭自动检查且不点“立即检查”时，FeatherMD 不会联网。",
+            tr("只向 api.github.com 请求公开的最新版本信息，不上传文档或设置。"),
+            tr("不会自动下载或安装；前往下载页前会再次确认。"),
+            tr("关闭自动检查且不点“立即检查”时，FeatherMD 不会联网。"),
         ]
         .into_iter()
         .enumerate()
@@ -464,14 +484,71 @@ impl Prefs {
             );
         }
 
+        // Interface language.
+        let page = Some(4);
+        self.label(tr("界面语言"), 1250, (page, [X0, 24, 400, 30]), TITLE);
+        self.label(
+            tr("FeatherMD 的菜单、按钮和提示使用的语言。"),
+            1251,
+            (page, [X0, 58, 480, 22]),
+            NOTE,
+        );
+        self.label(tr("语言(&G)"), 1252, (page, [X0, 98, 320, 22]), BODY);
+        let languages = self.add(
+            "COMBOBOX",
+            "",
+            LANGUAGE_LIST,
+            WS_TABSTOP
+                | WS_VSCROLL
+                | CBS_DROPDOWNLIST as u32
+                | CBS_OWNERDRAWFIXED as u32
+                | CBS_HASSTRINGS as u32,
+            (page, [X0, 126, 360, 200]),
+            Look(14, false, Tone::Field),
+        );
+        SetWindowSubclass(languages, Some(combo_proc), 1, 0);
+        for choice in LANGUAGES {
+            SendMessageW(
+                languages,
+                CB_ADDSTRING,
+                0,
+                w(&language_name(choice)).as_ptr() as isize,
+            );
+        }
+        self.label(
+            tr("说明"),
+            1253,
+            (page, [X0 + 20, 198, 440, 24]),
+            Look(14, true, Tone::Info),
+        );
+        for (i, text) in [
+            tr("保存后立即切换，无需重新启动。"),
+            tr("跟随系统时使用 Windows 显示语言；没有对应翻译时显示英文。"),
+            tr("文档内容与阅读字体不受影响。"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.label(
+                text,
+                1254 + i,
+                (page, [X0 + 20, 230 + i as i32 * 28, 440, 22]),
+                Look(13, false, Tone::InfoMuted),
+            );
+        }
+
         // Shared actions.
-        self.button("恢复默认", DEFAULTS, (None, [X0, 500, 106, 32]));
+        self.button(tr("恢复默认"), DEFAULTS, (None, [X0, 500, 106, 32]));
         self.button(
-            "取消",
+            tr("取消"),
             IDCANCEL as usize,
             (None, [WIDTH - 220, 500, 86, 32]),
         );
-        self.button("保存", IDOK as usize, (None, [WIDTH - 122, 500, 94, 32]));
+        self.button(
+            tr("保存"),
+            IDOK as usize,
+            (None, [WIDTH - 122, 500, 94, 32]),
+        );
         self.set_draft();
         self.layout(true);
         self.update();
@@ -493,33 +570,33 @@ impl Prefs {
         let current = feathermd::update::current();
         let latest = feathermd::update::Version::parse(&self.draft.update_latest);
         let (status, detail, tone) = if self.checking.is_some() {
-            ("正在检查更新…".to_string(), String::new(), Tone::Muted)
+            (tr("正在检查更新…").to_string(), String::new(), Tone::Muted)
         } else if let Some(release) = &self.found {
             let mut detail = release.title.clone();
             if !release.published.is_empty() {
-                detail = format!("{detail}　发布于 {}", release.published);
+                detail = trf("{}　发布于 {}", &[&detail, &release.published]);
             }
             match release.version.cmp(&current) {
                 std::cmp::Ordering::Greater => (
-                    format!("发现新版本 {}", release.tag),
+                    trf("发现新版本 {}", &[&release.tag]),
                     detail.trim().to_string(),
                     Tone::Accent,
                 ),
                 std::cmp::Ordering::Equal => (
-                    "已是最新版本".to_string(),
+                    tr("已是最新版本").to_string(),
                     detail.trim().to_string(),
                     Tone::Text,
                 ),
                 std::cmp::Ordering::Less => (
-                    "当前版本比 GitHub 最新发布更新".to_string(),
-                    format!("最新发布 {}", release.tag),
+                    tr("当前版本比 GitHub 最新发布更新").to_string(),
+                    trf("最新发布 {}", &[&release.tag]),
                     Tone::Text,
                 ),
             }
         } else if let Some(latest) = latest.filter(|latest| *latest > current) {
             (
-                format!("发现新版本 v{latest}"),
-                "点“立即检查”刷新信息".to_string(),
+                trf("发现新版本 {}", &[&format!("v{latest}")]),
+                tr("点“立即检查”刷新信息").to_string(),
                 Tone::Accent,
             )
         } else {
@@ -528,9 +605,12 @@ impl Prefs {
         self.update_tone = tone;
         SetDlgItemTextW(self.hwnd, UPDATE_STATUS as i32, w(&status).as_ptr());
         SetDlgItemTextW(self.hwnd, UPDATE_DETAIL as i32, w(&detail).as_ptr());
-        let last = format!(
+        let last = trf(
             "上次成功检查：{}",
-            feathermd::update::ago(self.draft.update_checked, feathermd::update::now())
+            &[&feathermd::update::ago(
+                self.draft.update_checked,
+                feathermd::update::now(),
+            )],
         );
         SetDlgItemTextW(self.hwnd, UPDATE_LAST as i32, w(&last).as_ptr());
         EnableWindow(
@@ -572,7 +652,7 @@ impl Prefs {
             Err(error) => {
                 self.show_update();
                 self.update_tone = Tone::Muted;
-                SetDlgItemTextW(self.hwnd, UPDATE_STATUS as i32, w("检查失败").as_ptr());
+                SetDlgItemTextW(self.hwnd, UPDATE_STATUS as i32, w(tr("检查失败")).as_ptr());
                 SetDlgItemTextW(self.hwnd, UPDATE_DETAIL as i32, w(error).as_ptr());
             }
         }
@@ -629,7 +709,7 @@ impl Prefs {
                 && (download || GetDlgCtrlID(control.hwnd) != UPDATE_OPEN as i32);
             ShowWindow(control.hwnd, if visible { SW_SHOWNA } else { SW_HIDE });
         }
-        for id in [FAMILY, EDITOR_LIST] {
+        for id in [FAMILY, EDITOR_LIST, LANGUAGE_LIST] {
             for item in [0, usize::MAX] {
                 SendDlgItemMessageW(
                     self.hwnd,
@@ -685,6 +765,7 @@ impl Prefs {
                 0 => (CARD + self.draft.theme.index()) as i32,
                 1 => FAMILY as i32,
                 2 => EDITOR_LIST as i32,
+                4 => LANGUAGE_LIST as i32,
                 // "Check now" is disabled while a check runs.
                 _ if self.checking.is_some() => AUTO_CHECK as i32,
                 _ => CHECK_NOW as i32,
@@ -738,13 +819,19 @@ impl Prefs {
             self.hwnd,
             OPACITY_VALUE as i32,
             w(&if self.draft.opacity >= 100 {
-                "100% 不透明".to_string()
+                tr("100% 不透明").to_string()
             } else {
                 format!("{}%", self.draft.opacity)
             })
             .as_ptr(),
         );
         InvalidateRect(GetDlgItem(self.hwnd, OPACITY as i32), null(), 1);
+    }
+    unsafe fn pick_language(&mut self) {
+        let index = SendDlgItemMessageW(self.hwnd, LANGUAGE_LIST as i32, CB_GETCURSEL, 0, 0);
+        if let Some(choice) = usize::try_from(index).ok().and_then(|i| LANGUAGES.get(i)) {
+            self.draft.language = *choice;
+        }
     }
     unsafe fn pick_editor(&mut self) {
         let index = SendDlgItemMessageW(self.hwnd, EDITOR_LIST as i32, CB_GETCURSEL, 0, 0) as usize;
@@ -756,7 +843,7 @@ impl Prefs {
     unsafe fn show_editor(&self) {
         let text = match &self.draft.editor {
             Editor::System => {
-                "使用 Windows 为 Markdown 登记的“编辑”方式；没有登记时改用记事本。".to_string()
+                tr("使用 Windows 为 Markdown 登记的“编辑”方式；没有登记时改用记事本。").to_string()
             }
             Editor::Notepad => crate::editor::notepad().display().to_string(),
             Editor::Program(path) => path.clone(),
@@ -781,6 +868,11 @@ impl Prefs {
             .position(|(_, e)| *e == self.draft.editor)
             .unwrap_or(0);
         SendDlgItemMessageW(self.hwnd, EDITOR_LIST as i32, CB_SETCURSEL, editor, 0);
+        let language = LANGUAGES
+            .iter()
+            .position(|choice| *choice == self.draft.language)
+            .unwrap_or(0);
+        SendDlgItemMessageW(self.hwnd, LANGUAGE_LIST as i32, CB_SETCURSEL, language, 0);
         SendDlgItemMessageW(
             self.hwnd,
             OPACITY as i32,
@@ -811,9 +903,13 @@ impl Prefs {
                 self.set_draft();
                 self.show_editor();
             }
-            _ => {
+            3 => {
                 self.draft.update_check = defaults.update_check;
                 SendDlgItemMessageW(self.hwnd, AUTO_CHECK as i32, BM_SETCHECK, 0, 0);
+            }
+            _ => {
+                self.draft.language = defaults.language;
+                self.set_draft();
             }
         }
     }
@@ -830,9 +926,9 @@ impl Prefs {
             self.hwnd,
             ERROR as i32,
             w(if self.valid {
-                "实时预览"
+                tr("实时预览")
             } else {
-                "请输入 12–36 之间的字号"
+                tr("请输入 12–36 之间的字号")
             })
             .as_ptr(),
         );
@@ -867,7 +963,9 @@ impl Prefs {
         SetBkMode(dc, TRANSPARENT as i32);
         SetTextColor(dc, color);
         let mut rect = rect;
-        DrawTextW(dc, w(text).as_ptr(), -1, &mut rect, flags);
+        let text = w(text);
+        snapshot::clip(self.hwnd, dc, &text, rect, flags);
+        DrawTextW(dc, text.as_ptr(), -1, &mut rect, flags);
     }
     unsafe fn background(&mut self, dc: HDC) {
         let saved = SaveDC(dc);
@@ -893,7 +991,7 @@ impl Prefs {
             1 => {
                 chrome::chrome_round(dc, self.rect(X0, 198, 480, 136), p.panel, self.s(14));
                 for (text, y, bold) in [
-                    ("字里行间，慢慢读。", 214, true),
+                    (tr("字里行间，慢慢读。"), 214, true),
                     ("FeatherMD · A little room to read.", 270, false),
                 ] {
                     let font = self.preview.get(FontKey {
@@ -918,6 +1016,7 @@ impl Prefs {
             }
             2 => chrome::chrome_round(dc, self.rect(X0, 222, 480, 140), p.code, self.s(12)),
             3 => chrome::chrome_round(dc, self.rect(X0, 326, 480, 128), p.code, self.s(12)),
+            4 => chrome::chrome_round(dc, self.rect(X0, 182, 480, 132), p.code, self.s(12)),
             _ => {}
         }
         RestoreDC(dc, saved);
@@ -971,7 +1070,7 @@ impl Prefs {
             };
         self.text(
             dc,
-            PAGES[index].0,
+            tr(PAGES[index].0),
             RECT {
                 left: r.left + self.s(44),
                 ..r
@@ -1227,6 +1326,11 @@ impl Prefs {
         if id == FAMILY {
             return self.families.get(index).map(|f| (f.clone(), None));
         }
+        if id == LANGUAGE_LIST {
+            return LANGUAGES
+                .get(index)
+                .map(|choice| (language_name(*choice), None));
+        }
         self.editors.get(index).map(|(name, editor)| {
             (
                 name.clone(),
@@ -1424,6 +1528,13 @@ impl Prefs {
     }
 }
 
+/// Language names stay in their own language so each reader can find theirs.
+fn language_name(choice: Option<Lang>) -> String {
+    match choice {
+        Some(lang) => lang.native().to_string(),
+        None => trf("跟随系统（{}）", &[&Lang::system().native()]),
+    }
+}
 /// Owner-drawn controls show the focus cue only after keyboard use.
 unsafe fn focus_ring(dc: HDC, item: &DRAWITEMSTRUCT, inset: i32) {
     if item.itemState & ODS_FOCUS != 0 && item.itemState & ODS_NOFOCUSRECT == 0 {
@@ -1538,8 +1649,8 @@ unsafe fn browse(ptr: *const RefCell<Prefs>) {
         return;
     };
     let mut file = vec![0u16; 32768];
-    let filter = w("应用程序 (*.exe)\0*.exe\0");
-    let title = w("选择编辑应用");
+    let filter = w(tr("应用程序 (*.exe)\0*.exe\0"));
+    let title = w(tr("选择编辑应用"));
     let initial: Option<Vec<u16>> =
         std::env::var_os("ProgramFiles").map(|dir| dir.encode_wide().chain(Some(0)).collect());
     let mut dialog: OPENFILENAMEW = zeroed();
@@ -1572,8 +1683,11 @@ unsafe fn browse(ptr: *const RefCell<Prefs>) {
     let Some(path) = chosen else {
         MessageBoxW(
             hwnd,
-            w("请选择本机磁盘上的 .exe 编辑应用（不能选择 FeatherMD 本身）。").as_ptr(),
-            w("选择编辑应用").as_ptr(),
+            w(tr(
+                "请选择本机磁盘上的 .exe 编辑应用（不能选择 FeatherMD 本身）。",
+            ))
+            .as_ptr(),
+            w(tr("选择编辑应用")).as_ptr(),
             MB_OK | MB_ICONWARNING,
         );
         return;
@@ -1625,6 +1739,7 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         return 0;
     }
     if msg == WM_APP + 42 && wp == 4 {
+        snapshot::clear_clips(hwnd);
         let captured = snapshot::capture(hwnd, |dc| {
             let mut state = (*ptr).borrow_mut();
             state.background(dc);
@@ -1651,7 +1766,7 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
                 let id = GetDlgCtrlID(child) as usize;
                 SendMessageW(
                     child,
-                    if id == FAMILY || id == EDITOR_LIST {
+                    if id == FAMILY || id == EDITOR_LIST || id == LANGUAGE_LIST {
                         WM_PRINTCLIENT
                     } else {
                         WM_PRINT
@@ -1663,6 +1778,11 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
             }
         });
         SetWindowLongPtrW(hwnd, DWLP_MSGRESULT as i32, captured as isize);
+        return 1;
+    }
+    if msg == WM_APP + 42 && wp == 5 {
+        // Diagnostics: text of the last capture that does not fit (labels.txt).
+        SetWindowLongPtrW(hwnd, DWLP_MSGRESULT as i32, snapshot::report(hwnd));
         return 1;
     }
     if msg == WM_COMMAND && wp & 0xffff == BROWSE {
@@ -1700,6 +1820,7 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
                 state.update();
                 if state.valid {
                     state.pick_editor();
+                    state.pick_language();
                     state.result = Some(state.draft.clone());
                     drop(state);
                     EndDialog(hwnd, IDOK as isize);
@@ -1719,6 +1840,8 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
                 state.update();
             } else if id == EDITOR_LIST && code == CBN_SELCHANGE as usize {
                 state.pick_editor();
+            } else if id == LANGUAGE_LIST && code == CBN_SELCHANGE as usize {
+                state.pick_language();
             } else if id == CHECK_NOW {
                 state.start_check();
             } else if id == AUTO_CHECK {
@@ -1769,7 +1892,7 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         WM_DRAWITEM => {
             let item = &*(lp as *const DRAWITEMSTRUCT);
             let id = item.CtlID as usize;
-            if id == FAMILY || id == EDITOR_LIST {
+            if id == FAMILY || id == EDITOR_LIST || id == LANGUAGE_LIST {
                 state.list_item(item);
             } else if (CARD..CARD + Theme::ALL.len()).contains(&id) {
                 state.card(item);
@@ -1834,7 +1957,8 @@ struct EmptyDialog {
     class: u16,
     title: u16,
 }
-/// Modal Settings opened on `page` (0 appearance, 1 reading, 2 editor, 3 updates);
+/// Modal Settings opened on `page` (0 appearance, 1 reading, 2 editor, 3 updates,
+/// 4 language);
 /// `check_now` starts a manual update check. Returns the saved draft, or None
 /// when cancelled. Check results are sent to the owner as UPDATE_RESULT either way.
 pub(super) unsafe fn show(
@@ -1890,7 +2014,7 @@ pub(super) unsafe fn show(
     if result == -1 {
         MessageBoxW(
             owner,
-            w("无法创建设置窗口。").as_ptr(),
+            w(tr("无法创建设置窗口。")).as_ptr(),
             w("FeatherMD").as_ptr(),
             MB_OK | MB_ICONERROR,
         );

@@ -65,7 +65,7 @@ function WaitWindow([string]$class, [string]$title) {
 }
 function Idle { for ($i = 0; $i -lt 500 -and ((Query 11) -ne 0 -or (Query 2) -eq 0); $i++) { Start-Sleep -Milliseconds 10 }; if ((Query 11) -ne 0) { throw 'Reader did not settle' } }
 function StartReader([string]$settings) {
- [IO.File]::WriteAllText($ini, $settings, [Text.UTF8Encoding]::new($false)); $script:createdIni = $true
+ [IO.File]::WriteAllText($ini, $settings + "`nlanguage=zh-CN`n", [Text.UTF8Encoding]::new($false)); $script:createdIni = $true
  $script:process = Start-Process -FilePath $Exe -ArgumentList @('"' + $document + '"') -WindowStyle Hidden -PassThru
  $script:window = WaitWindow 'FeatherMD.Native.Reader' $null
  Idle

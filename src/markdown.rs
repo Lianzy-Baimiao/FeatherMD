@@ -233,6 +233,85 @@ pub fn blocks(lines: &[SourceLine], raw: bool) -> Vec<Block> {
     }
     out
 }
+/// What a boxed run of blocks holds, which decides what its copy button copies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoxKind {
+    /// Fenced code: the lines between the fences, without them.
+    Fenced,
+    /// Indented code: its lines with one level of indentation removed.
+    Indented,
+    Quote,
+    Table,
+}
+/// Consecutive blocks of a preview page drawn as one box (code, quote or table).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BoxRange {
+    pub kind: BoxKind,
+    /// Inclusive block indices of the whole box, fences included.
+    pub first: usize,
+    pub last: usize,
+    /// Inclusive block indices to copy; None when there is nothing to copy (an
+    /// empty fence).
+    pub content: Option<(usize, usize)>,
+    /// The box runs past the loaded page, so a copy holds only its loaded part.
+    pub partial: bool,
+}
+/// Boxes of preview blocks from `blocks`. `before` and `after` say whether the file
+/// has bytes outside the page, so a box touching that edge may be cut off.
+pub fn boxes(blocks: &[Block], before: bool, after: bool) -> Vec<BoxRange> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < blocks.len() {
+        let block = &blocks[i];
+        let (kind, last) = match block.kind {
+            // Fence blocks alternate opening and closing; everything between them is
+            // Code, so the box ends at the next Fence block or at the page end.
+            Kind::Fence => {
+                let close = blocks[i + 1..].iter().position(|b| b.kind == Kind::Fence);
+                (
+                    BoxKind::Fenced,
+                    close.map_or(blocks.len() - 1, |n| i + 1 + n),
+                )
+            }
+            Kind::Code => (BoxKind::Indented, run(blocks, i, |b| b.kind == Kind::Code)),
+            Kind::Quote => (BoxKind::Quote, run(blocks, i, |b| b.kind == Kind::Quote)),
+            Kind::Table => {
+                let group = block.table.as_ref().map(|t| t.group);
+                (
+                    BoxKind::Table,
+                    run(blocks, i, |b| b.table.as_ref().map(|t| t.group) == group),
+                )
+            }
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        let closed = kind == BoxKind::Fenced && last > i && blocks[last].kind == Kind::Fence;
+        let content = match kind {
+            BoxKind::Fenced => {
+                let end = if closed { last - 1 } else { last };
+                (i < end).then_some((i + 1, end))
+            }
+            _ => Some((i, last)),
+        };
+        out.push(BoxRange {
+            kind,
+            first: i,
+            last,
+            content,
+            // An opening fence on the page shows where its box starts.
+            partial: (i == 0 && before && kind != BoxKind::Fenced)
+                || (last == blocks.len() - 1 && after && !closed),
+        });
+        i = last + 1;
+    }
+    out
+}
+/// Last index of the run of blocks from `from` that satisfy `same`.
+fn run(blocks: &[Block], from: usize, same: impl Fn(&Block) -> bool) -> usize {
+    from + blocks[from..].iter().take_while(|b| same(b)).count() - 1
+}
 fn line_block(line: &SourceLine, raw: bool, fence: &mut Fence, continued: &mut bool) -> Block {
     let text = line.text.as_str();
     let mut kind = Kind::Paragraph;
@@ -371,7 +450,7 @@ pub fn inline(text: &str) -> Vec<Span> {
             }
             Event::Start(Tag::Image { .. }) => {
                 out.push(Span {
-                    text: "[图片: ".into(),
+                    text: crate::i18n::tr("[图片: ").into(),
                     ..style.clone()
                 });
             }

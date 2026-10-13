@@ -1,9 +1,11 @@
 # FeatherMD · 羽读
 
+**简体中文** · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md)
+
 [![许可 MIT](https://img.shields.io/badge/许可-MIT-blue?style=flat-square)](LICENSE)
 [![赞赏 爱发电](https://img.shields.io/badge/赞赏-爱发电-946ce6?style=flat-square)](https://ifdian.net/a/lianzy)
 
-**轻一点，读更多。** 一个用 Rust 编写的 Windows 原生 Markdown 查看器。
+**轻一点，读更多。** 一个用 Rust 编写的 Windows 原生 Markdown 查看器。界面支持简体中文、繁體中文、English 和日本語。
 
 [下载单文件 EXE](https://github.com/Lianzy-Baimiao/FeatherMD/releases/latest) · [性能与验证](docs/PERFORMANCE.md) · [实现说明](docs/ARCHITECTURE.md)
 
@@ -14,6 +16,8 @@
 **外观只占一个按钮**：太阳、月亮、显示器或调色盘表示当前皮肤，点击展开浅色 / 深色 / 跟随系统，第四行“更多皮肤…”进入设置。也可按 **Ctrl+T**，用方向键或 Tab 选择、Enter 确认、Esc 取消。
 
 **正文右键 → 编辑**（Ctrl+E）：用你选择的编辑应用打开当前文档；FeatherMD 本身保持只读，保存后按 F5 重新载入并停在原位置。
+
+**一键复制**：鼠标移到代码块、引用或表格上，右上角出现“复制”按钮；代码复制原文（不含围栏），表格复制为制表符分隔的单元格。
 
 目录开关仍位于目录区域：展开时在“目录”标题右侧，隐藏后在内容区左边缘。未打开文档时不再显示空目录栏。
 
@@ -36,7 +40,7 @@
 
 打开一份 Markdown，不应该先启动一个浏览器。
 
-FeatherMD 使用 Win32 + GDI/GDI+，没有 Electron、WebView、JavaScript 或遥测，默认不联网；只有开启自动检查或手动“检查更新”时才访问 GitHub Releases。v0.1.7 的 Windows x64 EXE 约 **835 KiB**，无需安装 .NET、VC++ 运行库或其他第三方运行时。
+FeatherMD 使用 Win32 + GDI/GDI+，没有 Electron、WebView、JavaScript 或遥测，默认不联网；只有开启自动检查或手动“检查更新”时才访问 GitHub Releases。v0.1.8 的 Windows x64 EXE 约 **914 KiB**（含四种界面语言），无需安装 .NET、VC++ 运行库或其他第三方运行时。
 
 **大文件不是先全部载入再显示：** 每次只读取附近 128 KiB，后台读取与搜索，前台只绘制可见行。文件总长度不决定首屏需要分配的内存。
 
@@ -48,6 +52,7 @@ FeatherMD 使用 Win32 + GDI/GDI+，没有 Electron、WebView、JavaScript 或�
 4. 顶部眼睛/代码图标切换预览/源码，外观按钮选择皮肤；省略号“更多 → 设置…”（Ctrl+,）调整皮肤、透明度、字体字号与默认编辑应用，自动换行与阅读宽度也在“更多”中。
 5. **更多 → 关于 FeatherMD**（F1）查看版本、快捷键和阅读说明，或前往 GitHub 项目主页、爱发电支持作者。外部链接会先确认，再交给默认浏览器打开。
 6. **更多 → 检查更新…** 手动检查新版本；也可在设置的“更新”页开启打开时自动检查（默认关闭）。
+7. **更多 → 界面语言 / Language…** 切换界面语言，保存后立即生效。
 
 支持 Windows 10（1607+）/ Windows 11 **x64**。当前实测环境为 Windows 11 x64；其他版本尚未逐个实机验证。无安装器，无管理员权限要求。尚未购买代码签名证书，Windows SmartScreen 可能提醒未知发布者；请核对来源和 SHA-256，不要关闭系统防护。
 
@@ -84,6 +89,26 @@ FeatherMD 只读。需要修改时，在正文 **右键 → 编辑**，或按 **
 
 ![FeatherMD 默认编辑应用设置（书本皮肤）](docs/settings-editor.png)
 
+### 一键复制代码块、引用与表格
+
+在预览中把鼠标移到代码块、引用或表格上，右上角会出现**复制**按钮，点一下即可复制整块内容：
+
+- **代码块**：复制文件里的原文，不含 ```` ``` ```` 围栏行；缩进代码去掉一级缩进；制表符保留，行间为 CRLF。
+- **引用**：复制显示出来的文字，同一行自动换行的部分不会多出换行。
+- **表格**：每行复制为制表符分隔的单元格，可直接粘贴到表格软件。
+
+很长的代码块向下滚动时，按钮停在可见部分的顶端，不必滚回开头。表格比正文窄时，按钮放在表格右侧，不遮挡表头。复制后按钮显示约 1.5 秒的对勾，状态栏说明复制了什么；块超出当前缓存分页（约 128 KiB）时只复制已载入的部分，状态栏同样会说明。源码模式没有复制按钮，请按字符选择后复制。
+
+![FeatherMD 代码块右上角的复制按钮](docs/copy-button.png)
+
+### 界面语言
+
+界面支持**简体中文、繁體中文、English、日本語**。默认跟随 Windows 显示语言：台湾、香港和澳门使用繁體中文，其他中文地区使用简体中文，日语使用日本語，没有对应翻译的语言显示英文。
+
+在 **更多 → 界面语言 / Language…**（即设置的“语言”页）选择语言，保存后菜单、按钮、提示和对话框立即切换，无需重新启动。每种语言使用对应地区字形的界面字体（微软雅黑 UI、微軟正黑體 UI、Yu Gothic UI）；文档内容和阅读字体不受影响。本说明也有 [繁體中文](README.zh-TW.md)、[English](README.en.md) 和 [日本語](README.ja.md) 版本。
+
+![FeatherMD 界面语言设置](docs/settings-language.png)
+
 ### 表格
 
 GitHub 风格的管道表格（表头行 + `| --- | :-: | --: |` 分隔行）显示为带表头底色和边框的表格，单元格内支持粗体、行内代码和链接，分隔行里的冒号决定左对齐、居中或右对齐。
@@ -100,7 +125,7 @@ GitHub 风格的管道表格（表头行 + `| --- | :-: | --: |` 分隔行）显
 
 复制的是文件里的**原文**：制表符保持为制表符，中文与 emoji 不会被截断，行与行之间为 CRLF，超长单行拆开显示的片段之间不会多出换行。没有选区时复制当前可见的原文。选区跨出当前缓存分页（约 128 KiB）时只复制已载入的部分，状态栏会说明。
 
-预览模式仍按整行选择；表格行复制为制表符分隔的单元格，可直接粘贴到表格软件。
+预览模式仍按整行选择；表格行复制为制表符分隔的单元格，可直接粘贴到表格软件。复制单个代码块、引用或表格时，用它右上角的复制按钮更方便。
 
 ![FeatherMD 源码模式按字符选择](docs/source-selection.png)
 
@@ -135,7 +160,7 @@ GitHub 风格的管道表格（表头行 + `| --- | :-: | --: |` 分隔行）显
 
 ### 关于与项目入口
 
-**更多 → 关于 FeatherMD**：与阅读器配色一致的原生窗口，包含版本、GitHub 项目主页和爱发电入口。快捷键说明可展开；支持 Tab、Enter、Esc。所有皮肤均沿用当前阅读偏好。
+**更多 → 关于 FeatherMD**（F1）：与阅读器配色一致的原生窗口，包含版本、GitHub 项目主页和爱发电入口。展开“快捷键与阅读说明”可查看两列快捷键（包括 Ctrl+E 编辑、Ctrl+, 设置、Ctrl+T 外观、Esc 取消选择），以及一键复制、表格排版、源码按字符选择和分页预览的说明；支持 Tab、Enter、Esc。窗口沿用当前皮肤和界面语言。
 
 <details>
 <summary>查看关于窗口：浅色与深色</summary>
@@ -199,6 +224,8 @@ Windows 10/11 要求用户在系统界面确认默认应用，普通桌面程序
 | 重新载入（保持阅读位置） | F5 |
 | 选择当前缓存分页 | Ctrl+A |
 | 复制选中内容（源码按字符，预览按行）；未选择时复制可见内容 | Ctrl+C |
+| 复制整个代码块、引用或表格 | 鼠标移到块上 → 右上角“复制” |
+| 界面语言 | 更多 → 界面语言 / Language… |
 | 取消选区 | Esc |
 | 恢复默认阅读设置 | Ctrl+0 |
 | 检查更新 | 更多 → 检查更新… |
@@ -208,13 +235,13 @@ Windows 10/11 要求用户在系统界面确认默认应用，普通桌面程序
 
 ### 设置文件
 
-默认写入 %APPDATA%\FeatherMD\settings.ini，每次修改自动保存。文档本身始终只读。皮肤、透明度与编辑应用分别保存为 `theme`、`opacity`、`editor`；自动检查开关为 `update_check`，上次成功检查的时间与所见最新版本为 `update_checked`、`update_latest`。无效值回到默认，带 BOM 的 UTF-8 文件也能读取。
+默认写入 %APPDATA%\FeatherMD\settings.ini，每次修改自动保存。文档本身始终只读。皮肤、透明度与编辑应用分别保存为 `theme`、`opacity`、`editor`；自动检查开关为 `update_check`，上次成功检查的时间与所见最新版本为 `update_checked`、`update_latest`。界面语言为 `language`（`system`、`zh-CN`、`zh-TW`、`en`、`ja`，默认 `system`）。无效值回到默认，带 BOM 的 UTF-8 文件也能读取。
 
 需要可携带设置时，在 EXE 旁创建一个空的 **FeatherMD.ini**，以后设置随这个文件保存。只想单文件运行则不需要它。最近文件和文档正文不会写入设置。
 
 ## 阅读支持与明确边界
 
-- 支持 UTF-8 / UTF-8 BOM、中英文、系统字体可显示的 Unicode。
+- 文档支持 UTF-8 / UTF-8 BOM 与系统字体可显示的 Unicode（不限语言）；界面文字支持简体中文、繁體中文、English、日本語。
 - 标题、粗体、斜体、删除线、行内代码、代码围栏、引用、列表、任务清单、分隔线、网页链接、GitHub 风格表格（按窗口宽度自动排版）。
 - 图片显示替代文本，不解码图片、不访问网络。
 - 原始 HTML 显示为文字，不执行。仅 http/https 链接可经确认后打开。
@@ -260,8 +287,10 @@ cargo +stable-x86_64-pc-windows-msvc build --release
 ./scripts/scrollbar-smoke.ps1
 ./scripts/window-smoke.ps1
 ./scripts/settings-smoke.ps1
-# 表格排版、横向滚动与源码按字符选择（复制内容经测试接口读取，不改动剪贴板）
+# 表格排版、横向滚动、一键复制与源码按字符选择（复制内容经测试接口读取，不改动剪贴板）
 ./scripts/table-smoke.ps1
+# 四种界面语言的所有视图：文字不得被截断，保存后立即切换
+./scripts/i18n-smoke.ps1
 # 编辑与更新测试使用替身编辑器和本机回环的替身 GitHub 接口，不访问网络
 cargo +stable-x86_64-pc-windows-msvc build --release --example editor_probe --example update_server
 ./scripts/editor-smoke.ps1

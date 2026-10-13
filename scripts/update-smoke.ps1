@@ -139,7 +139,7 @@ function MoreMenuUpdateLabel {
  return $match[0]
 }
 function StartReader([string]$settings) {
- [IO.File]::WriteAllText($ini, $settings, [Text.UTF8Encoding]::new($false)); $script:createdIni = $true
+ [IO.File]::WriteAllText($ini, $settings + "`nlanguage=zh-CN`n", [Text.UTF8Encoding]::new($false)); $script:createdIni = $true
  $script:process = Start-Process -FilePath $Exe -WindowStyle Hidden -PassThru
  $script:window = WaitWindow 'FeatherMD.Native.Reader' $null
  for ($j = 0; $j -lt 200 -and (Query 0) -le 0; $j++) { Start-Sleep -Milliseconds 10 }

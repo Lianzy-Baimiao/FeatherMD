@@ -1,6 +1,7 @@
 //! Update checks against GitHub Releases: version comparison, bounded JSON
 //! field extraction and scheduling. Pure logic; the Windows reader performs the
 //! single HTTPS request. Nothing here downloads, installs or runs anything.
+use crate::i18n::{self, Lang, tr, trf};
 use std::{cmp::Ordering, fmt};
 
 pub const REPOSITORY: &str = "Lianzy-Baimiao/FeatherMD";
@@ -150,17 +151,17 @@ impl Release {
 /// top level of a GitHub "latest release" response. Nested values are skipped.
 pub fn parse_latest(json: &[u8]) -> Result<Release, String> {
     if json.len() > MAX_RESPONSE {
-        return Err("更新信息过大".into());
+        return Err(tr("更新信息过大").into());
     }
-    let fields = fields(json).ok_or("更新信息格式无效")?;
+    let fields = fields(json).ok_or(tr("更新信息格式无效"))?;
     if fields.draft || fields.prerelease {
-        return Err("最新发布不是正式版本".into());
+        return Err(tr("最新发布不是正式版本").into());
     }
-    let tag = fields.tag.ok_or("最新发布缺少版本号")?;
+    let tag = fields.tag.ok_or(tr("最新发布缺少版本号"))?;
     if !valid_tag(&tag) {
-        return Err("最新发布的版本号无效".into());
+        return Err(tr("最新发布的版本号无效").into());
     }
-    let version = Version::parse(&tag).ok_or_else(|| format!("无法识别的版本号：{tag}"))?;
+    let version = Version::parse(&tag).ok_or_else(|| trf("无法识别的版本号：{}", &[&tag]))?;
     let title = fields
         .name
         .map_or_else(String::new, |name| clean(&name, 120));
@@ -210,16 +211,37 @@ pub fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// "上次检查" wording for a Unix timestamp.
+/// "上次检查" wording for a Unix timestamp, in the current interface language.
 pub fn ago(last: u64, now: u64) -> String {
+    ago_in(i18n::current(), last, now)
+}
+
+pub fn ago_in(lang: Lang, last: u64, now: u64) -> String {
     if last == 0 {
-        return "尚未检查".into();
+        return i18n::tr_in(lang, "尚未检查").into();
     }
-    match now.saturating_sub(last) {
-        0..60 => "刚刚".into(),
-        elapsed @ 60..3600 => format!("{} 分钟前", elapsed / 60),
-        elapsed @ 3600..86400 => format!("{} 小时前", elapsed / 3600),
-        elapsed => format!("{} 天前", elapsed / 86400),
+    let (count, one, many) = match now.saturating_sub(last) {
+        0..60 => return i18n::tr_in(lang, "刚刚").into(),
+        elapsed @ 60..3600 => (
+            elapsed / 60,
+            crate::key!("1 分钟前"),
+            crate::key!("{} 分钟前"),
+        ),
+        elapsed @ 3600..86400 => (
+            elapsed / 3600,
+            crate::key!("1 小时前"),
+            crate::key!("{} 小时前"),
+        ),
+        elapsed => (
+            elapsed / 86400,
+            crate::key!("1 天前"),
+            crate::key!("{} 天前"),
+        ),
+    };
+    if count == 1 {
+        i18n::tr_in(lang, one).into()
+    } else {
+        i18n::trf_in(lang, many, &[&count])
     }
 }
 

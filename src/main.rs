@@ -14,7 +14,7 @@ fn main() {
     {
         let path = std::env::args_os().nth(1).map(std::path::PathBuf::from);
         if let Err(error) = ui::run(path) {
-            let text: Vec<u16> = format!("FeatherMD 启动失败：{error}")
+            let text: Vec<u16> = feathermd::i18n::trf("FeatherMD 启动失败：{}", &[&error])
                 .encode_utf16()
                 .chain(Some(0))
                 .collect();

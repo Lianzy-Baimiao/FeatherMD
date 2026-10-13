@@ -8,9 +8,12 @@ const GITHUB_BUTTON: usize = 1001;
 const SUPPORT_BUTTON: usize = 1002;
 const DETAILS: usize = 1003;
 const SS_LEFTNOWORDWRAP: u32 = 0x000c;
+/// SS_CENTER | SS_CENTERIMAGE: one line centred both ways.
+const SS_CENTER_MIDDLE: u32 = 0x0201;
 const WIDTH: i32 = 520;
 const HEIGHT: i32 = 480;
-const DETAILS_HEIGHT: i32 = 116;
+/// Extra height of the expanded shortcuts and notes panel.
+const DETAILS_HEIGHT: i32 = 240;
 
 fn destination(button: usize) -> Option<&'static str> {
     match button {
@@ -23,8 +26,8 @@ fn destination(button: usize) -> Option<&'static str> {
 pub(super) unsafe fn open_link(owner: HWND, url: &str) {
     if MessageBoxW(
         owner,
-        w(&format!("使用默认浏览器打开此链接？\n\n{url}")).as_ptr(),
-        w("打开外部链接").as_ptr(),
+        w(&trf("使用默认浏览器打开此链接？\n\n{}", &[&url])).as_ptr(),
+        w(tr("打开外部链接")).as_ptr(),
         MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2,
     ) != IDOK
     {
@@ -42,13 +45,15 @@ pub(super) unsafe fn open_link(owner: HWND, url: &str) {
     {
         MessageBoxW(
             owner,
-            w(&format!("无法打开默认浏览器，请手动访问：\n\n{url}")).as_ptr(),
-            w("打开链接失败").as_ptr(),
+            w(&trf("无法打开默认浏览器，请手动访问：\n\n{}", &[&url])).as_ptr(),
+            w(tr("打开链接失败")).as_ptr(),
             MB_OK | MB_ICONERROR,
         );
     }
 }
 
+/// Id, text, logical rect, font size, bold, muted.
+type Label = (usize, &'static str, [i32; 4], i32, bool, bool);
 struct Control {
     hwnd: HWND,
     id: usize,
@@ -94,13 +99,13 @@ impl About {
     }
     unsafe fn create(&mut self) -> bool {
         // Native STATIC/BUTTON controls expose names, roles, focus and activation to UIA.
-        let labels = [
-            (2000, "关于", [28, 19, 120, 22], 12, false, true),
+        let mut labels: Vec<Label> = vec![
+            (2000, tr("关于"), [28, 19, 160, 22], 12, false, true),
             (2001, "FeatherMD", [108, 73, 260, 40], 29, true, false),
             (
                 2002,
-                "羽读 / Markdown 阅读器",
-                [110, 117, 320, 24],
+                tr("羽读 / Markdown 阅读器"),
+                [110, 117, 270, 24],
                 13,
                 false,
                 true,
@@ -115,7 +120,7 @@ impl About {
             ),
             (
                 2004,
-                "轻一点，读更多。",
+                tr("轻一点，读更多。"),
                 [32, 164, 448, 32],
                 22,
                 true,
@@ -123,7 +128,7 @@ impl About {
             ),
             (
                 2005,
-                "原生 Windows   ·   轻量便携   ·   默认不联网",
+                tr("原生 Windows   ·   轻量便携   ·   默认不联网"),
                 [32, 204, 456, 24],
                 13,
                 false,
@@ -131,7 +136,7 @@ impl About {
             ),
             (
                 2006,
-                "由 lianzy 制作  ·  MIT 开源许可",
+                tr("由 lianzy 制作  ·  MIT 开源许可"),
                 [32, 344, 350, 22],
                 12,
                 false,
@@ -139,51 +144,84 @@ impl About {
             ),
             (
                 2007,
-                "项目永久免费，赞赏完全自愿。",
-                [32, 437, 330, 20],
-                11,
-                false,
-                true,
-            ),
-            (
-                2010,
-                "Ctrl+O 打开   Ctrl+F 搜索   F3 下一个   F5 重载",
-                [44, 409, 432, 23],
-                12,
-                false,
-                false,
-            ),
-            (
-                2011,
-                "Ctrl+B   目录     Ctrl+R   源码     Ctrl+滚轮   缩放",
-                [44, 437, 432, 23],
-                12,
-                false,
-                false,
-            ),
-            (
-                2012,
-                "Ctrl+G   跳转     Ctrl+C   复制     Ctrl+A   选当前页",
-                [44, 465, 432, 23],
-                12,
-                false,
-                false,
-            ),
-            (
-                2013,
-                "有界分页预览；跨页语法可能不完整，源码模式可核对。",
-                [44, 494, 432, 22],
+                tr("项目永久免费，赞赏完全自愿。"),
+                [32, 437, 320, 20],
                 11,
                 false,
                 true,
             ),
         ];
+        // Expanded details: two columns of key and action, then reading notes.
+        let columns = [
+            [
+                ("Ctrl+O", tr("打开文档")),
+                ("Ctrl+F", tr("查找")),
+                ("F3", tr("查找下一个")),
+                ("Ctrl+G", tr("跳转到百分比")),
+                ("F5", tr("重新载入")),
+                ("Ctrl+C", tr("复制")),
+                ("Ctrl+A", tr("全选当前分页")),
+            ],
+            [
+                ("Ctrl+R", tr("预览 / 源码")),
+                ("Ctrl+B", tr("显示目录")),
+                ("Ctrl+T", tr("外观")),
+                ("Ctrl+,", tr("设置")),
+                ("Ctrl+E", tr("用编辑应用打开")),
+                (tr("Ctrl+滚轮"), tr("缩放字号")),
+                ("Esc", tr("取消选择")),
+            ],
+        ];
+        for (column, rows) in columns.into_iter().enumerate() {
+            let [key_x, key_width, action_x, action_width] = if column == 0 {
+                [48, 60, 112, 136]
+            } else {
+                [260, 96, 358, 118]
+            };
+            for (row, (key, action)) in rows.into_iter().enumerate() {
+                let y = 414 + row as i32 * 22;
+                let id = 2010 + column * 7 + row;
+                labels.push((id, key, [key_x, y, key_width, 22], 12, true, false));
+                labels.push((
+                    id + 20,
+                    action,
+                    [action_x, y, action_width, 22],
+                    12,
+                    false,
+                    false,
+                ));
+            }
+        }
+        for (i, note) in [
+            tr("代码块、引用和表格：鼠标移到右上角可一键复制；表格随窗口宽度自动排版。"),
+            tr("源码模式按字符选择，双击选中词语。"),
+            tr("预览按有界分页显示；跨页语法可能不完整，可在源码模式核对。"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            labels.push((
+                2050 + i,
+                note,
+                [48, 576 + i as i32 * 20, 428, 20],
+                11,
+                false,
+                true,
+            ));
+        }
         for (id, text, rect, size, bold, muted) in labels {
             let hwnd = CreateWindowExW(
                 0,
                 w("STATIC").as_ptr(),
                 w(text).as_ptr(),
-                WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP,
+                WS_CHILD
+                    | WS_VISIBLE
+                    // The version sits centred in its pill.
+                    | if id == 2003 {
+                        SS_CENTER_MIDDLE
+                    } else {
+                        SS_LEFTNOWORDWRAP
+                    },
                 0,
                 0,
                 0,
@@ -198,7 +236,7 @@ impl About {
             }
             self.controls.push(Control {
                 hwnd,
-                id: id as usize,
+                id,
                 rect,
                 size,
                 bold,
@@ -210,17 +248,17 @@ impl About {
         for (id, text, rect) in [
             (
                 GITHUB_BUTTON,
-                "GitHub · 项目主页 · 源码、反馈与更新",
+                tr("GitHub · 项目主页 · 源码、反馈与更新"),
                 [32, 252, 222, 76],
             ),
             (
                 SUPPORT_BUTTON,
-                "爱发电 · 支持作者 · 自愿赞赏",
+                tr("爱发电 · 支持作者 · 自愿赞赏"),
                 [266, 252, 222, 76],
             ),
-            (DETAILS, "快捷键与阅读说明", [24, 374, 210, 28]),
-            (IDCANCEL as usize, "返回阅读", [380, 426, 108, 34]),
-            (IDCLOSE as usize, "关闭关于窗口", [464, 12, 36, 32]),
+            (DETAILS, tr("快捷键与阅读说明"), [24, 374, 280, 28]),
+            (IDCANCEL as usize, tr("返回阅读"), [360, 426, 128, 34]),
+            (IDCLOSE as usize, tr("关闭关于窗口"), [464, 12, 36, 32]),
         ] {
             let hwnd = CreateWindowExW(
                 0,
@@ -338,19 +376,25 @@ impl About {
             RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE,
         );
     }
-    unsafe fn text(&mut self, dc: HDC, text: &str, rect: RECT, size: i32, color: u32, bold: bool) {
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn text(
+        &mut self,
+        dc: HDC,
+        text: &str,
+        rect: RECT,
+        size: i32,
+        color: u32,
+        bold: bool,
+        align: u32,
+    ) {
         let old = SelectObject(dc, self.fonts.get(Self::key(size, bold)));
         SetTextColor(dc, color);
         SetBkMode(dc, TRANSPARENT as i32);
         let mut rect = rect;
         let text = w(text);
-        DrawTextW(
-            dc,
-            text.as_ptr(),
-            (text.len() - 1) as i32,
-            &mut rect,
-            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
-        );
+        let flags = align | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
+        snapshot::clip(self.hwnd, dc, &text, rect, flags);
+        DrawTextW(dc, text.as_ptr(), (text.len() - 1) as i32, &mut rect, flags);
         SelectObject(dc, old);
     }
     unsafe fn background(&self, dc: HDC) {
@@ -364,7 +408,7 @@ impl About {
         chrome_round(dc, self.rect(32, 78, 56, 56), p.selection, self.s(14));
         chrome_round(dc, self.rect(389, 82, 90, 32), p.panel, self.s(10));
         if self.expanded {
-            chrome_round(dc, self.rect(32, 404, 456, 118), p.panel, self.s(8));
+            chrome_round(dc, self.rect(32, 404, 456, 242), p.panel, self.s(8));
         }
         smooth::icon(
             dc,
@@ -420,11 +464,11 @@ impl About {
         }
         if card {
             let (title, note, accent) = if id == GITHUB_BUTTON {
-                ("GitHub", "源码 · 反馈 · 版本更新", p.accent)
+                ("GitHub", tr("源码 · 反馈 · 版本更新"), p.accent)
             } else {
                 (
-                    "爱发电",
-                    "请作者喝杯咖啡",
+                    tr("爱发电"),
+                    tr("请作者喝杯咖啡"),
                     if self.theme.resolve(self.system_dark).is_dark() {
                         rgb(190, 169, 235)
                     } else {
@@ -432,8 +476,25 @@ impl About {
                     },
                 )
             };
-            self.text(dc, title, self.rect(18, 12, 170, 27), 17, accent, true);
-            self.text(dc, note, self.rect(18, 43, 192, 22), 12, p.muted, false);
+            let left = DT_LEFT;
+            self.text(
+                dc,
+                title,
+                self.rect(18, 12, 170, 27),
+                17,
+                accent,
+                true,
+                left,
+            );
+            self.text(
+                dc,
+                note,
+                self.rect(18, 43, 192, 22),
+                12,
+                p.muted,
+                false,
+                left,
+            );
             smooth::icon(
                 dc,
                 RECT {
@@ -449,20 +510,22 @@ impl About {
         } else if id == IDCLOSE as usize {
             smooth::icon(dc, r, EXIT, p.muted, self.fonts.dpi as f32 / 96.0);
         } else if id == DETAILS {
+            let label = if self.expanded {
+                format!("−   {}", tr("收起快捷键与说明"))
+            } else {
+                format!("+   {}", tr("快捷键与阅读说明"))
+            };
             self.text(
                 dc,
-                if self.expanded {
-                    "−   收起快捷键与说明"
-                } else {
-                    "+   快捷键与阅读说明"
-                },
-                self.rect(8, 0, 200, 28),
+                &label,
+                self.rect(8, 0, 270, 28),
                 12,
                 p.muted,
                 false,
+                DT_LEFT,
             );
         } else {
-            self.text(dc, "返回阅读", self.rect(26, 0, 80, 34), 13, p.accent, true);
+            self.text(dc, tr("返回阅读"), r, 13, p.accent, true, DT_CENTER);
         }
         if focus && !card {
             let mut ring = r;
@@ -526,7 +589,7 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         let cell = &*(lp as *const RefCell<About>);
         let mut about = cell.borrow_mut();
         about.hwnd = hwnd;
-        SetWindowTextW(hwnd, w("关于 FeatherMD").as_ptr());
+        SetWindowTextW(hwnd, w(tr("关于 FeatherMD")).as_ptr());
         if !about.create() {
             drop(about);
             EndDialog(hwnd, -1);
@@ -579,7 +642,13 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     if ptr.is_null() {
         return 0;
     }
+    if msg == WM_APP + 42 && wp == 5 {
+        // Diagnostics: text of the last capture that does not fit (labels.txt).
+        SetWindowLongPtrW(hwnd, DWLP_MSGRESULT as i32, snapshot::report(hwnd));
+        return 1;
+    }
     if msg == WM_APP + 42 && wp == 4 {
+        snapshot::clear_clips(hwnd);
         let captured = snapshot::capture(hwnd, |dc| {
             let about = (*ptr).borrow();
             about.background(dc);
@@ -621,9 +690,9 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             SetWindowTextW(
                 GetDlgItem(hwnd, DETAILS as i32),
                 w(if about.expanded {
-                    "收起快捷键与说明"
+                    tr("收起快捷键与说明")
                 } else {
-                    "快捷键与阅读说明"
+                    tr("快捷键与阅读说明")
                 })
                 .as_ptr(),
             );
@@ -741,8 +810,16 @@ pub(super) unsafe fn show(owner: HWND, theme: Theme) {
         &state as *const RefCell<About> as isize,
     ) == -1
     {
-        MessageBoxW(owner,w(&format!("FeatherMD 羽读 {}\n\nGitHub：{GITHUB}\n爱发电：{SUPPORT}\n\n关于窗口无法创建，请手动访问以上链接。",env!("CARGO_PKG_VERSION"))).as_ptr(),
-            w("关于 FeatherMD").as_ptr(),MB_OK|MB_ICONINFORMATION);
+        let text = trf(
+            "FeatherMD 羽读 {}\n\nGitHub：{}\n爱发电：{}\n\n关于窗口无法创建，请手动访问以上链接。",
+            &[&env!("CARGO_PKG_VERSION"), &GITHUB, &SUPPORT],
+        );
+        MessageBoxW(
+            owner,
+            w(&text).as_ptr(),
+            w(tr("关于 FeatherMD")).as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
     }
 }
 
@@ -763,10 +840,17 @@ mod tests {
         ] {
             assert_eq!(destination(id), None);
         }
-        let readme = include_str!("../../README.md");
-        for url in [GITHUB, SUPPORT] {
-            assert!(url.starts_with("https://"));
-            assert!(readme.contains(url));
+        // Every README translation links to the same project and support pages.
+        for readme in [
+            include_str!("../../README.md"),
+            include_str!("../../README.zh-TW.md"),
+            include_str!("../../README.en.md"),
+            include_str!("../../README.ja.md"),
+        ] {
+            for url in [GITHUB, SUPPORT] {
+                assert!(url.starts_with("https://"));
+                assert!(readme.contains(url));
+            }
         }
         assert_eq!(std::mem::offset_of!(EmptyDialog, menu), 18);
     }

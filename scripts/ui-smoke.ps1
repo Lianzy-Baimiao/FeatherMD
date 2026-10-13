@@ -27,7 +27,7 @@ $Document=(Resolve-Path -LiteralPath $Document).Path
 # Portable test settings keep the user's AppData settings untouched.
 $ini=Join-Path (Split-Path $Exe) 'FeatherMD.ini'
 if(Test-Path -LiteralPath $ini){throw 'Refusing to overwrite existing portable settings'}
-Set-Content -LiteralPath $ini -Value "theme=light`nfont_size=18" -Encoding utf8
+Set-Content -LiteralPath $ini -Value "theme=light`nfont_size=18`nlanguage=zh-CN" -Encoding utf8
 $env:FEATHERMD_TEST_SNAPSHOT=Join-Path (Resolve-Path -LiteralPath $Output).Path "snapshot.bmp"
 $process=$null
 try {

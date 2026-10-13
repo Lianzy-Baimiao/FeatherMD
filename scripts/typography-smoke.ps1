@@ -112,6 +112,7 @@ try {
  [IO.File]::WriteAllText($ini,"theme=$Theme
 font_family=Microsoft YaHei UI
 font_size=18
+language=zh-CN
 ",[Text.UTF8Encoding]::new($false));$createdIni=$true
  $doc=(Resolve-Path "$PSScriptRoot\..\docs\demo.md").Path
  $process=Start-Process -FilePath $Exe -ArgumentList @('"'+$doc+'"') -WindowStyle Hidden -PassThru

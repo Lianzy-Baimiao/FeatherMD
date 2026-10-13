@@ -10,6 +10,8 @@ pub(super) const PALETTE: usize = 10004;
 pub(super) const BOOK: usize = 10005;
 pub(super) const PENCIL: usize = 10006;
 pub(super) const UPDATE: usize = 10007;
+pub(super) const GLOBE: usize = 10008;
+pub(super) const COPY: usize = 10009;
 
 pub(super) struct Session(usize);
 impl Session {
@@ -24,7 +26,7 @@ impl Session {
         if status == gp::Ok {
             Ok(Self(token))
         } else {
-            Err(format!("无法初始化图形绘制：{status}"))
+            Err(feathermd::i18n::trf("无法初始化图形绘制：{}", &[&status]))
         }
     }
 }
@@ -240,7 +242,7 @@ pub(super) unsafe fn icon(dc: HDC, r: RECT, id: usize, color: u32, scale: f32) {
     // Rectangular glyphs snap every coordinate; curved ones only snap their centre.
     let crisp = matches!(
         id,
-        MINIMIZE | MAXIMIZE | RESTORE | OUTLINE | THEME_SYSTEM | ZOOM_IN | ZOOM_OUT | OPEN
+        MINIMIZE | MAXIMIZE | RESTORE | OUTLINE | THEME_SYSTEM | ZOOM_IN | ZOOM_OUT | OPEN | COPY
     );
     let center = (
         grid((r.left + r.right) as f32 / 2.0, weight),
@@ -381,6 +383,17 @@ pub(super) unsafe fn icon(dc: HDC, r: RECT, id: usize, color: u32, scale: f32) {
                 (-7.5, 7.5),
             ]);
             c.line(&[(2.0, -5.0), (5.0, -2.0)]);
+        }
+        GLOBE => {
+            // Outline, one meridian and the equator.
+            c.ellipse(-8.0, -8.0, 16.0, 16.0, false);
+            c.ellipse(-3.5, -8.0, 7.0, 16.0, false);
+            c.line(&[(-8.0, 0.0), (8.0, 0.0)]);
+        }
+        COPY => {
+            // Front sheet with the corner of the one behind it.
+            c.rounded([-3.0, -3.0, 10.0, 11.0], 1.6, false);
+            c.line(&[(-7.0, 4.0), (-7.0, -7.0), (3.0, -7.0)]);
         }
         FEATHER => {
             c.bezier([(-6.0, 7.0), (-10.0, -4.0), (0.0, -10.0), (9.0, -9.0)]);

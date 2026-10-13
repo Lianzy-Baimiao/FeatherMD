@@ -99,7 +99,7 @@ function StartReader {
 }
 try {
  $env:FEATHERMD_TEST_SNAPSHOT = $snapshot
- [IO.File]::WriteAllText($ini, "theme=$Theme`nfont_size=18`n", [Text.UTF8Encoding]::new($false)); $createdIni = $true
+ [IO.File]::WriteAllText($ini, "theme=$Theme`nfont_size=18`nlanguage=zh-CN`n", [Text.UTF8Encoding]::new($false)); $createdIni = $true
  $doc = (Resolve-Path "$PSScriptRoot\..\docs\demo.md").Path
  StartReader
  $page = @{ light = '252,252,250'; dark = '25,29,34'; sepia = '247,239,221' }[$Theme]

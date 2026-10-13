@@ -84,7 +84,7 @@ function WaitClosed([IntPtr]$h) {
 }
 try {
  $env:FEATHERMD_TEST_SNAPSHOT = $snapshot
- [IO.File]::WriteAllText($ini, "theme=$Theme`n", [Text.UTF8Encoding]::new($false)); $createdIni = $true
+ [IO.File]::WriteAllText($ini, "theme=$Theme`nlanguage=zh-CN`n", [Text.UTF8Encoding]::new($false)); $createdIni = $true
  $process = Start-Process -FilePath $Exe -WindowStyle Hidden -PassThru
  $window = WaitWindow 'FeatherMD.Native.Reader' $null
  Post $window 0x111 401

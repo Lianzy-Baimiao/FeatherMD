@@ -8,7 +8,8 @@ mod snapshot;
 use crate::layout::{FontKey, Fonts, Layout, Row};
 use feathermd::{
     document::{Document, Page, SearchResult, human_size},
-    markdown,
+    i18n::{self, Lang, tr, trf},
+    key, markdown,
     scrollbar::ScrollTrack,
     settings::{Editor, Settings, Theme},
     text::{self, Caret},
@@ -83,6 +84,7 @@ const TYPOGRAPHY: usize = 414;
 const PREFERENCES: usize = 415;
 const EDITOR_SETTINGS: usize = 416;
 const CHECK_UPDATES: usize = 417;
+const LANGUAGE: usize = 418;
 const HEADER_HEIGHT: i32 = 34;
 const OUTLINE_ROWS_TOP: i32 = HEADER_HEIGHT + 56;
 /// Default and minimum window sizes in logical (96 DPI) pixels.
@@ -130,6 +132,24 @@ fn line_of(
 ) -> Option<&feathermd::document::SourceLine> {
     let i = lines.partition_point(|l| l.start < start);
     lines.get(i).filter(|l| l.start == start)
+}
+/// Copyable boxes of a preview page, mapped from blocks to the layout rows built from
+/// them. Every block has at least one row and rows keep their block's start byte.
+fn copy_boxes(blocks: &[markdown::Block], rows: &[Row], page: &Page) -> Vec<CopyBox> {
+    let first = |block: usize| rows.partition_point(|r| r.start < blocks[block].start);
+    let last = |block: usize| {
+        rows.partition_point(|r| r.start <= blocks[block].start)
+            .saturating_sub(1)
+    };
+    markdown::boxes(blocks, page.partial_context, page.end < page.size)
+        .into_iter()
+        .map(|b| CopyBox {
+            kind: b.kind,
+            rows: (first(b.first), last(b.last)),
+            content: b.content.map(|(a, z)| (first(a), last(z))),
+            partial: b.partial,
+        })
+        .collect()
 }
 /// Displayed units `[from, to)` of `row` inside a source selection, and whether the
 /// selection continues past the row's line break.
@@ -358,18 +378,18 @@ impl Palette {
 }
 fn skin_name(theme: Theme) -> &'static str {
     match theme {
-        Theme::System => "跟随系统",
-        Theme::Light => "浅色",
-        Theme::Dark => "深色",
-        Theme::Sepia => "护眼",
-        Theme::Book => "书本",
-        Theme::Ancient => "古籍",
-        Theme::Green => "豆沙绿",
-        Theme::Sky => "天青",
-        Theme::Pink => "樱粉",
-        Theme::Gray => "雾灰",
-        Theme::Midnight => "夜蓝",
-        Theme::Black => "纯黑",
+        Theme::System => tr("跟随系统"),
+        Theme::Light => tr("浅色"),
+        Theme::Dark => tr("深色"),
+        Theme::Sepia => tr("护眼"),
+        Theme::Book => tr("书本"),
+        Theme::Ancient => tr("古籍"),
+        Theme::Green => tr("豆沙绿"),
+        Theme::Sky => tr("天青"),
+        Theme::Pink => tr("樱粉"),
+        Theme::Gray => tr("雾灰"),
+        Theme::Midnight => tr("夜蓝"),
+        Theme::Black => tr("纯黑"),
     }
 }
 #[derive(Clone, PartialEq, Eq)]
@@ -378,7 +398,20 @@ enum Hit {
     Link(String),
     Row(usize),
     Heading(usize),
+    /// Copy button of the box with this index in `App::boxes`.
+    CopyBlock(usize),
 }
+/// A code block, quote or table of the preview page, in layout rows.
+struct CopyBox {
+    kind: markdown::BoxKind,
+    /// Inclusive layout rows of the whole box.
+    rows: (usize, usize),
+    /// Inclusive layout rows to copy; None when the box is empty.
+    content: Option<(usize, usize)>,
+    partial: bool,
+}
+/// How long a copy button shows its check mark.
+const COPIED_FOR: Duration = Duration::from_millis(1500);
 struct HitBox {
     rect: RECT,
     action: Hit,
@@ -462,11 +495,17 @@ struct App {
     update_check: Option<crate::updater::Pending>,
     /// Automatic checks started in this session (diagnostics).
     update_checks: usize,
+    /// Copyable boxes of the preview page, in row order.
+    boxes: Vec<CopyBox>,
+    /// The box whose copy button was just used, by its first row's source byte.
+    copied: Option<(u64, Instant)>,
 }
 impl App {
     fn new() -> Self {
         let settings_path = Settings::path();
         let settings = Settings::load(&settings_path);
+        // Before any font or string below is created.
+        i18n::set(Lang::resolve(settings.language));
         Self {
             hwnd: null_mut(),
             edit: null_mut(),
@@ -511,7 +550,7 @@ impl App {
             outline_selected: None,
             outline_pending: None,
             horizontal: 0,
-            status: "只读 · 离线阅读".into(),
+            status: tr("只读 · 离线阅读").into(),
             edit_mode: None,
             query: String::new(),
             found: None,
@@ -520,6 +559,8 @@ impl App {
             reload_anchor: None,
             update_check: None,
             update_checks: 0,
+            boxes: Vec::new(),
+            copied: None,
         }
     }
     /// A newer published release recorded by the last successful check.
@@ -542,7 +583,7 @@ impl App {
         self.settings.update_latest = release.tag.clone();
         self.save_preferences();
         if !manual && self.update_available().is_some() {
-            self.status = format!("发现新版本 {} · 更多 → 检查更新", release.tag);
+            self.status = trf("发现新版本 {} · 更多 → 检查更新", &[&release.tag]);
         }
         self.invalidate();
     }
@@ -726,6 +767,8 @@ impl App {
         self.document = None;
         self.page = None;
         self.layout = None;
+        self.boxes.clear();
+        self.copied = None;
         self.top = 0;
         self.anchor = 0;
         self.horizontal = 0;
@@ -739,7 +782,7 @@ impl App {
             .to_string_lossy()
             .into_owned();
         self.found = None;
-        self.status = "正在读取首屏…".into();
+        self.status = tr("正在读取首屏…").into();
         SetWindowTextW(
             self.hwnd,
             w(&format!(
@@ -758,7 +801,7 @@ impl App {
             self.io_ticket += 1;
             self.loading = true;
             self.anchor = anchor;
-            self.status = "正在读取分页…".into();
+            self.status = tr("正在读取分页…").into();
             let _ = self
                 .workers
                 .io
@@ -772,14 +815,15 @@ impl App {
             let blocks = markdown::blocks(&page.lines, self.settings.raw);
             let dc = GetDC(self.hwnd);
             let width = self.body_width();
-            self.layout = Some(Layout::build(
-                dc,
-                &blocks,
-                &self.settings,
-                &mut self.reading_fonts,
-                width,
-            ));
+            let layout = Layout::build(dc, &blocks, &self.settings, &mut self.reading_fonts, width);
             ReleaseDC(self.hwnd, dc);
+            // Source mode shows every line as code; only the preview has boxes.
+            self.boxes = if self.settings.raw {
+                Vec::new()
+            } else {
+                copy_boxes(&blocks, &layout.rows, page)
+            };
+            self.layout = Some(layout);
             self.position(anchor, 0);
             self.selection = None;
             self.scrollbar();
@@ -801,7 +845,7 @@ impl App {
                             self.document = Some(doc);
                             self.page = Some(page);
                             self.anchor = 0;
-                            self.status = "就绪".into();
+                            self.status = tr("就绪").into();
                             self.relayout(0);
                             self.start_outline();
                             // F5 after an external edit keeps the reader near the same place.
@@ -814,14 +858,14 @@ impl App {
                                     self.pending_scroll = Some((wrapped_row, 0));
                                 } else {
                                     self.position(anchor, wrapped_row);
-                                    self.status = "已重新载入".into();
+                                    self.status = tr("已重新载入").into();
                                 }
                             }
                         }
                         Err(e) => {
                             self.reload_anchor = None;
-                            self.status = format!("打开失败：{e}");
-                            self.error(&format!("无法打开文件。\n\n{e}"));
+                            self.status = trf("打开失败：{}", &[&e]);
+                            self.error(&trf("无法打开文件。\n\n{}", &[&e]));
                         }
                     }
                 }
@@ -832,7 +876,7 @@ impl App {
                     match result {
                         Ok(page) => {
                             self.page = Some(page);
-                            self.status = "就绪".into();
+                            self.status = tr("就绪").into();
                             self.relayout(anchor);
                             if let Some((wrapped_row, delta)) = pending {
                                 self.position(anchor, wrapped_row);
@@ -843,7 +887,7 @@ impl App {
                             }
                         }
                         Err(e) => {
-                            self.status = format!("读取失败：{e}");
+                            self.status = trf("读取失败：{}", &[&e]);
                         }
                     }
                 }
@@ -854,14 +898,14 @@ impl App {
                     match result {
                         Ok(SearchResult::Found(offset)) => {
                             self.found = Some(offset);
-                            self.status = format!("找到匹配 · 字节位置 {offset}");
+                            self.status = trf("找到匹配 · 字节位置 {}", &[&offset]);
                             self.jump(offset);
                         }
                         Ok(SearchResult::NotFound) => {
-                            self.status = "未找到匹配（区分大小写）".into();
+                            self.status = tr("未找到匹配（区分大小写）").into();
                         }
                         Ok(SearchResult::Cancelled) => {}
-                        Err(e) => self.status = format!("搜索失败：{e}"),
+                        Err(e) => self.status = trf("搜索失败：{}", &[&e]),
                     }
                 }
                 Reply::Outline(id, result) if id == self.outline_ticket => {
@@ -1207,7 +1251,7 @@ impl App {
     }
     unsafe fn save_preferences(&mut self) {
         if let Err(e) = self.settings.save(&self.settings_path) {
-            self.status = format!("设置未能保存：{e}");
+            self.status = trf("设置未能保存：{}", &[&e]);
         }
         self.update_checks();
     }
@@ -1236,10 +1280,15 @@ impl App {
         self.settings.opacity = draft.opacity;
         self.settings.editor = draft.editor;
         self.settings.update_check = draft.update_check;
+        let language = draft.language != self.settings.language;
+        self.settings.language = draft.language;
         self.preview = None;
         self.system_dark = system_uses_dark_theme();
         self.apply_opacity();
-        if reflow {
+        if language {
+            self.apply_language();
+        }
+        if reflow || language {
             self.persist();
         } else {
             // Skin, opacity and editor never change layout or the wrapped-row position.
@@ -1247,6 +1296,28 @@ impl App {
             self.invalidate();
         }
         InvalidateRect(self.edit, null(), 1);
+    }
+    /// Switch interface strings, the UI font and the menus to the saved language.
+    unsafe fn apply_language(&mut self) {
+        i18n::set(Lang::resolve(self.settings.language));
+        // The search box keeps using the old font until it is given the new one.
+        let dpi = self.fonts.dpi;
+        let old = std::mem::replace(&mut self.fonts, Fonts::new(dpi));
+        let font = self.fonts.get(FontKey {
+            size: 16,
+            bold: false,
+            italic: false,
+            mono: false,
+            strike: false,
+        });
+        SendMessageW(self.edit, WM_SETFONT, font as usize, 1);
+        drop(old);
+        DestroyMenu(self.menu);
+        (self.menu, self.settings_menu) = menus();
+        if self.document_name.is_empty() {
+            SetWindowTextW(self.hwnd, w(tr("FeatherMD 羽读")).as_ptr());
+        }
+        self.status = tr("就绪").into();
     }
     unsafe fn update_checks(&self) {
         for (id, checked) in [
@@ -1273,7 +1344,9 @@ impl App {
     unsafe fn dialog(&mut self) {
         let mut file = vec![0u16; 32768];
         let mut ofn: OPENFILENAMEW = zeroed();
-        let filter = w("Markdown / Text\0*.md;*.markdown;*.mdown;*.mkd;*.txt\0所有文件\0*.*\0");
+        let filter = w(tr(
+            "Markdown / Text\0*.md;*.markdown;*.mdown;*.mkd;*.txt\0所有文件\0*.*\0",
+        ));
         ofn.lStructSize = size_of::<OPENFILENAMEW>() as u32;
         ofn.hwndOwner = self.hwnd;
         ofn.lpstrFilter = filter.as_ptr();
@@ -1309,7 +1382,7 @@ impl App {
                 include_str!("../THIRD_PARTY_NOTICES.md")
             );
             match std::fs::write(path, text) {
-                Ok(()) => self.status = "已导出内置许可证".into(),
+                Ok(()) => self.status = tr("已导出内置许可证").into(),
                 Err(e) => self.error(&e.to_string()),
             }
         }
@@ -1343,7 +1416,7 @@ impl App {
         self.edit_mode = None;
         ShowWindow(self.edit, SW_HIDE);
         SetFocus(self.hwnd);
-        self.status = "就绪".into();
+        self.status = tr("就绪").into();
         self.clamp_top();
         self.invalidate();
     }
@@ -1360,7 +1433,7 @@ impl App {
                     self.jump(((size as f64 * value / 100.0) as u64).min(size.saturating_sub(1)));
                 }
                 _ => {
-                    self.status = "请输入 0～100 之间的百分比".into();
+                    self.status = tr("请输入 0～100 之间的百分比").into();
                     self.invalidate();
                 }
             }
@@ -1385,7 +1458,7 @@ impl App {
                 from,
                 ticket: self.search_ticket,
             });
-            self.status = "正在后台搜索…（Esc 取消，区分大小写）".into();
+            self.status = tr("正在后台搜索…（Esc 取消，区分大小写）").into();
             self.invalidate();
         }
     }
@@ -1526,16 +1599,16 @@ impl App {
             if let Some((a, b)) = self.text_selection.filter(|(a, b)| a != b) {
                 let (text, clipped) = text::selected(lines, a, b);
                 let status = if clipped {
-                    "已复制选中文本中已载入的部分"
+                    tr("已复制选中文本中已载入的部分")
                 } else {
-                    "已复制选中文本"
+                    tr("已复制选中文本")
                 };
                 return Some((text, status));
             }
             // Nothing selected: the exact source of the rows on screen.
             let from = self.row_caret(layout.rows.get(self.top)?, false)?;
             let to = self.row_caret(layout.rows.get(last_visible)?, true)?;
-            return Some((text::selected(lines, from, to).0, "已复制可见内容"));
+            return Some((text::selected(lines, from, to).0, tr("已复制可见内容")));
         }
         let range = self.selection.unwrap_or((self.top, last_visible));
         let (a, b) = (range.0.min(range.1), range.0.max(range.1));
@@ -1557,34 +1630,120 @@ impl App {
             }
             text.push_str("\r\n");
         }
-        Some((text, "已复制选中行（未选择时复制可见内容）"))
+        Some((text, tr("已复制选中行（未选择时复制可见内容）")))
     }
     unsafe fn copy(&mut self) {
         let Some((text, status)) = self.copy_text() else {
             return;
         };
-        let data = w(&text);
-        if OpenClipboard(self.hwnd) == 0 {
-            self.status = "剪贴板暂不可用，请重试".into();
+        if self.set_clipboard(&text) {
+            self.status = status.into();
+        }
+        self.invalidate();
+    }
+    /// What the copy button of box `index` copies: code as its exact source (no
+    /// fences; indented code loses one indent), quotes as shown, tables as
+    /// tab-separated rows.
+    fn box_text(&self, index: usize) -> Option<String> {
+        let b = self.boxes.get(index)?;
+        let (a, z) = b.content?;
+        let rows = &self.layout.as_ref()?.rows;
+        let (first, last) = (rows.get(a)?, rows.get(z)?);
+        if matches!(
+            b.kind,
+            markdown::BoxKind::Fenced | markdown::BoxKind::Indented
+        ) {
+            return Some(text::source(
+                &self.page.as_ref()?.lines,
+                first.start,
+                last.start,
+                b.kind == markdown::BoxKind::Indented,
+            ));
+        }
+        // Wrapped rows of one line join without a break; rows of a table row repeat
+        // its copy text and are written once.
+        let mut out = String::new();
+        let mut line = None;
+        for row in &rows[a..=z] {
+            let next = line != Some(row.start);
+            if next && line.is_some() {
+                out.push_str("\r\n");
+            }
+            line = Some(row.start);
+            match &row.table {
+                Some(table) if next => out.push_str(&table.copy),
+                Some(_) => {}
+                None => {
+                    for run in &row.runs {
+                        out.push_str(&String::from_utf16_lossy(&run.text));
+                    }
+                }
+            }
+        }
+        Some(out)
+    }
+    unsafe fn copy_box(&mut self, index: usize) {
+        let (Some(text), Some(b)) = (self.box_text(index), self.boxes.get(index)) else {
+            return;
+        };
+        let (kind, partial, row) = (b.kind, b.partial, b.rows.0);
+        if !self.set_clipboard(&text) {
+            self.invalidate();
             return;
         }
+        self.status = match (kind, partial) {
+            (markdown::BoxKind::Table, false) => tr("已复制表格"),
+            (markdown::BoxKind::Table, true) => tr("已复制表格中已载入的部分"),
+            (markdown::BoxKind::Quote, false) => tr("已复制引用"),
+            (markdown::BoxKind::Quote, true) => tr("已复制引用中已载入的部分"),
+            (_, false) => tr("已复制代码块"),
+            (_, true) => tr("已复制代码块中已载入的部分"),
+        }
+        .into();
+        let start = self
+            .layout
+            .as_ref()
+            .and_then(|l| l.rows.get(row))
+            .map(|r| r.start);
+        self.copied = start.map(|s| (s, Instant::now()));
+        self.invalidate();
+    }
+    /// Put `text` on the clipboard. With FEATHERMD_TEST_SNAPSHOT set it is written to
+    /// copy.txt beside the snapshot instead, so tests never touch the user's clipboard.
+    unsafe fn set_clipboard(&mut self, text: &str) -> bool {
+        if let Some(path) = std::env::var_os("FEATHERMD_TEST_SNAPSHOT") {
+            return std::fs::write(PathBuf::from(path).with_file_name("copy.txt"), text).is_ok();
+        }
+        let data = w(text);
+        if OpenClipboard(self.hwnd) == 0 {
+            self.status = tr("剪贴板暂不可用，请重试").into();
+            return false;
+        }
+        let mut done = false;
         let memory = GlobalAlloc(GMEM_MOVEABLE, data.len() * 2);
         if !memory.is_null() {
             let dest = GlobalLock(memory);
             if !dest.is_null() {
                 std::ptr::copy_nonoverlapping(data.as_ptr(), dest.cast(), data.len());
                 GlobalUnlock(memory);
-                if EmptyClipboard() != 0 && !SetClipboardData(13, memory).is_null() {
-                    self.status = status.into();
-                } else {
-                    GlobalFree(memory);
-                }
-            } else {
+                done = EmptyClipboard() != 0 && !SetClipboardData(13, memory).is_null();
+            }
+            if !done {
                 GlobalFree(memory);
             }
         }
         CloseClipboard();
-        self.invalidate();
+        done
+    }
+    /// The copy button of box `index` shows its check mark.
+    fn just_copied(&self, index: usize) -> bool {
+        let start = self
+            .boxes
+            .get(index)
+            .and_then(|b| self.layout.as_ref()?.rows.get(b.rows.0))
+            .map(|r| r.start);
+        self.copied
+            .is_some_and(|(s, at)| Some(s) == start && at.elapsed() < COPIED_FOR)
     }
     fn visible_rows(&self) -> usize {
         self.viewport()
@@ -1594,11 +1753,11 @@ impl App {
     unsafe fn register_open_with(&mut self) -> bool {
         match std::env::current_exe().and_then(|path| crate::association::register(&path)) {
             Ok(()) => {
-                self.status = "已加入 Markdown 文件的右键打开方式".into();
+                self.status = tr("已加入 Markdown 文件的右键打开方式").into();
                 true
             }
             Err(error) => {
-                self.error(&format!("无法加入打开方式：{error}"));
+                self.error(&trf("无法加入打开方式：{}", &[&error]));
                 false
             }
         }
@@ -1622,23 +1781,23 @@ impl App {
                 SW_SHOWNORMAL,
             ) as isize;
             if result > 32 {
-                self.status = "请在 Windows 默认应用中将 .md 设为 FeatherMD".into();
+                self.status = tr("请在 Windows 默认应用中将 .md 设为 FeatherMD").into();
                 return;
             }
         }
-        self.error("已加入打开方式，但无法打开 Windows 默认应用设置。\n请右键 .md 文件 → 打开方式 → 选择其他应用 → FeatherMD → 始终使用。");
+        self.error(tr("已加入打开方式，但无法打开 Windows 默认应用设置。\n请右键 .md 文件 → 打开方式 → 选择其他应用 → FeatherMD → 始终使用。"));
     }
     fn edit_label(&self) -> String {
         match &self.settings.editor {
-            Editor::System => "编辑（系统默认）\tCtrl+E".into(),
-            Editor::Notepad => "用记事本编辑\tCtrl+E".into(),
-            editor => format!("用 {} 编辑\tCtrl+E", crate::editor::name(editor)),
+            Editor::System => tr("编辑（系统默认）\tCtrl+E").into(),
+            Editor::Notepad => tr("用记事本编辑\tCtrl+E").into(),
+            editor => trf("用 {} 编辑\tCtrl+E", &[&crate::editor::name(editor)]),
         }
     }
     /// Hand the open document to the chosen editor. The reader itself stays read-only.
     unsafe fn edit_document(&mut self) {
         let Some(path) = self.document.as_ref().map(|d| d.path.clone()) else {
-            self.status = "请先打开文档".into();
+            self.status = tr("请先打开文档").into();
             return;
         };
         let editor = self.settings.editor.clone();
@@ -1646,22 +1805,23 @@ impl App {
             Ok(launched) => {
                 let name = match (&editor, launched) {
                     (_, crate::editor::Launched::NotepadFallback) => {
-                        "记事本（系统未登记编辑方式）".to_string()
+                        tr("记事本（系统未登记编辑方式）").to_string()
                     }
-                    (Editor::System, _) => "系统默认编辑器".to_string(),
+                    (Editor::System, _) => tr("系统默认编辑器").to_string(),
                     (editor, _) => crate::editor::name(editor),
                 };
-                self.status = format!("已用 {name} 打开 · 保存后按 F5 重新载入");
+                self.status = trf("已用 {} 打开 · 保存后按 F5 重新载入", &[&name]);
             }
             Err(crate::editor::LaunchError::MissingProgram(program)) => {
-                self.status = "找不到默认编辑应用".into();
+                self.status = tr("找不到默认编辑应用").into();
                 if MessageBoxW(
                     self.hwnd,
-                    w(&format!(
-                        "找不到默认编辑应用：\n{program}\n\n现在重新选择编辑应用吗？"
+                    w(&trf(
+                        "找不到默认编辑应用：\n{}\n\n现在重新选择编辑应用吗？",
+                        &[&program],
                     ))
                     .as_ptr(),
-                    w("编辑").as_ptr(),
+                    w(tr("编辑")).as_ptr(),
                     MB_YESNO | MB_ICONWARNING,
                 ) == IDYES
                 {
@@ -1669,8 +1829,8 @@ impl App {
                 }
             }
             Err(crate::editor::LaunchError::Failed(error)) => {
-                self.status = "无法启动编辑应用".into();
-                self.error(&format!("无法打开编辑应用。\n\n{error}"));
+                self.status = tr("无法启动编辑应用").into();
+                self.error(&trf("无法打开编辑应用。\n\n{}", &[&error]));
             }
         }
         self.invalidate();
@@ -1686,7 +1846,7 @@ impl App {
             EDIT_DOCUMENT,
             w(&self.edit_label()).as_ptr(),
         );
-        add(menu, EDITOR_SETTINGS, "选择编辑应用…");
+        add(menu, EDITOR_SETTINGS, tr("选择编辑应用…"));
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
         AppendMenuW(
             menu,
@@ -1694,11 +1854,11 @@ impl App {
             COPY,
             w(
                 if self.settings.raw && self.text_selection.is_some_and(|(a, b)| a != b) {
-                    "复制选中文本\tCtrl+C"
+                    tr("复制选中文本\tCtrl+C")
                 } else if !self.settings.raw && self.selection.is_some() {
-                    "复制选中行\tCtrl+C"
+                    tr("复制选中行\tCtrl+C")
                 } else {
-                    "复制可见内容\tCtrl+C"
+                    tr("复制可见内容\tCtrl+C")
                 },
             )
             .as_ptr(),
@@ -1707,11 +1867,16 @@ impl App {
             menu,
             state(self.layout.is_some()),
             SELECT_ALL,
-            w("全选当前分页\tCtrl+A").as_ptr(),
+            w(tr("全选当前分页\tCtrl+A")).as_ptr(),
         );
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
-        AppendMenuW(menu, state(document), FIND, w("查找…\tCtrl+F").as_ptr());
-        AppendMenuW(menu, state(document), RELOAD, w("重新载入\tF5").as_ptr());
+        AppendMenuW(menu, state(document), FIND, w(tr("查找…\tCtrl+F")).as_ptr());
+        AppendMenuW(
+            menu,
+            state(document),
+            RELOAD,
+            w(tr("重新载入\tF5")).as_ptr(),
+        );
         if document {
             SetMenuDefaultItem(menu, EDIT_DOCUMENT as u32, 0);
         }
@@ -1773,6 +1938,9 @@ impl App {
             EDITOR_SETTINGS => {
                 PostMessageW(self.hwnd, OPEN_PREFERENCES, 2, 0);
             }
+            LANGUAGE => {
+                PostMessageW(self.hwnd, OPEN_PREFERENCES, 4, 0);
+            }
             CHECK_UPDATES => {
                 // Opens the update page and checks right away.
                 PostMessageW(self.hwnd, OPEN_PREFERENCES, 3, 1);
@@ -1793,7 +1961,7 @@ impl App {
                                 index: last.text.len(),
                             },
                         ));
-                        self.status = "已全选当前分页".into();
+                        self.status = tr("已全选当前分页").into();
                     }
                 } else if let Some(l) = &self.layout {
                     self.selection = Some((0, l.rows.len().saturating_sub(1)));
@@ -1905,8 +2073,8 @@ impl App {
             SETTINGS => {
                 // The update entry names a newer release when one is known.
                 let label = match self.update_available() {
-                    Some(tag) => format!("发现新版本 {tag}…"),
-                    None => "检查更新…".to_string(),
+                    Some(tag) => trf("发现新版本 {}…", &[&tag]),
+                    None => tr("检查更新…").to_string(),
                 };
                 ModifyMenuW(
                     self.settings_menu,
@@ -1940,13 +2108,16 @@ impl App {
             UNREGISTER => {
                 if MessageBoxW(
                     self.hwnd,
-                    w("移除 FeatherMD 的打开方式注册？不会删除文件或其他应用的关联。").as_ptr(),
-                    w("移除注册").as_ptr(),
+                    w(tr(
+                        "移除 FeatherMD 的打开方式注册？不会删除文件或其他应用的关联。",
+                    ))
+                    .as_ptr(),
+                    w(tr("移除注册")).as_ptr(),
                     MB_OKCANCEL | MB_ICONQUESTION,
                 ) == IDOK
                 {
                     match crate::association::unregister() {
-                        Ok(()) => self.status = "已移除打开方式注册".into(),
+                        Ok(()) => self.status = tr("已移除打开方式注册").into(),
                         Err(e) => self.error(&e.to_string()),
                     }
                 }
@@ -2084,6 +2255,7 @@ impl App {
         SetBkMode(dc, TRANSPARENT as i32);
         let mut r = rect;
         let text: Vec<u16> = text.encode_utf16().collect();
+        snapshot::clip(self.hwnd, dc, &text, rect, flags);
         DrawTextW(dc, text.as_ptr(), text.len() as i32, &mut r, flags);
         SelectObject(dc, old);
     }
@@ -2102,6 +2274,7 @@ impl App {
         };
         Self::fill(dc, &all, p.bg);
         self.hits.clear();
+        snapshot::clear_clips(self.hwnd);
         SetBkMode(dc, TRANSPARENT as i32);
         self.paint_header(dc, p);
         self.paint_outline(dc, p);
@@ -2110,7 +2283,7 @@ impl App {
         } else if self.page.as_ref().is_some_and(|p| p.size == 0) {
             self.label(
                 dc,
-                "这是一份空白文档。",
+                tr("这是一份空白文档。"),
                 RECT {
                     left: self.left(),
                     top: self.content_top() + self.s(45),
@@ -2311,6 +2484,7 @@ impl App {
                 }
                 RestoreDC(dc, saved);
             }
+            self.paint_copy_button(dc, p);
         }
         self.paint_footer(dc, p);
         self.paint_scrollbars(dc, p);
@@ -2381,7 +2555,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             if let Some(settings) = settings {
                 // No App borrow may cross the modal loop; drafts arrive as
                 // PREVIEW_APPEARANCE, finished update checks as UPDATE_RESULT.
-                let saved = preferences::show(hwnd, &settings, wp.min(3), lp == 1);
+                let saved = preferences::show(hwnd, &settings, wp.min(4), lp == 1);
                 if let Ok(mut app) = (*ptr).try_borrow_mut() {
                     match saved {
                         Some(draft) => app.apply_preferences(draft),
@@ -2576,6 +2750,45 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             },
             // Source selection present and non-empty.
             63 => app.text_selection.is_some_and(|(a, b)| a != b) as isize,
+            // Copy boxes: count; per box LPARAM its kind (0 fenced, 1 indented,
+            // 2 quote, 3 table), first and last layout row.
+            67 => app.boxes.len() as isize,
+            68..=70 => app.boxes.get(lp as usize).map_or(-1, |b| match wp {
+                68 => b.kind as isize,
+                69 => b.rows.0 as isize,
+                _ => b.rows.1 as isize,
+            }),
+            // The copy button painted last: left, top, right, bottom, its box and
+            // whether it shows the check mark; -1 when no button is shown.
+            71..=76 => app
+                .hits
+                .iter()
+                .find_map(|h| match h.action {
+                    Hit::CopyBlock(index) => Some((h.rect, index)),
+                    _ => None,
+                })
+                .map_or(-1, |(r, index)| match wp {
+                    71 => r.left as isize,
+                    72 => r.top as isize,
+                    73 => r.right as isize,
+                    74 => r.bottom as isize,
+                    75 => index as isize,
+                    _ => app.just_copied(index) as isize,
+                }),
+            // Interface language index (zh-CN, zh-TW, en, ja); labels of the last
+            // paint that did not fit (listed in labels.txt; -1 outside tests); the
+            // menu labels written to menus.txt, one per line, and their count.
+            77 => i18n::current().index() as isize,
+            78 => snapshot::report(hwnd),
+            79 => match std::env::var_os("FEATHERMD_TEST_SNAPSHOT") {
+                Some(path) => {
+                    let mut labels = Vec::new();
+                    menu_labels(app.menu, &mut labels);
+                    let path = PathBuf::from(path).with_file_name("menus.txt");
+                    std::fs::write(path, labels.join("\r\n")).map_or(-1, |_| labels.len() as isize)
+                }
+                None => -1,
+            },
             37 => app
                 .outline
                 .as_ref()
@@ -2634,6 +2847,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_TIMER => {
             app.receive();
             app.drag_scroll();
+            // The copy button's check mark returns to "Copy".
+            if app.copied.is_some_and(|(_, at)| at.elapsed() >= COPIED_FOR) {
+                app.copied = None;
+                app.invalidate();
+            }
             if !app.tooltip_visible
                 && app.header_tip().is_some()
                 && app
@@ -2869,7 +3087,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             app.pressed = app.hit(x, y);
             if matches!(
                 app.pressed,
-                Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_))
+                Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_) | Hit::CopyBlock(_))
             ) {
                 SetCapture(hwnd);
                 app.invalidate();
@@ -2995,6 +3213,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     return 0;
                 }
                 match hit {
+                    Some(Hit::CopyBlock(index)) => app.copy_box(index),
                     Some(Hit::Heading(index)) => app.select_heading(index),
                     Some(Hit::Command(0)) => app.hide_edit(),
                     Some(Hit::Command(NEXT)) if app.edit_mode.is_some() => app.submit(),
@@ -3003,8 +3222,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         if markdown::safe_web_link(&url) {
                             if MessageBoxW(
                                 hwnd,
-                                w(&format!("使用默认浏览器打开此链接？\n\n{url}")).as_ptr(),
-                                w("打开外部链接").as_ptr(),
+                                w(&trf("使用默认浏览器打开此链接？\n\n{}", &[&url])).as_ptr(),
+                                w(tr("打开外部链接")).as_ptr(),
                                 MB_OKCANCEL | MB_ICONQUESTION,
                             ) == IDOK
                             {
@@ -3018,7 +3237,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                                 );
                             }
                         } else {
-                            app.status = "仅允许 http / https 链接；本地链接和脚本不会执行".into();
+                            app.status =
+                                tr("仅允许 http / https 链接；本地链接和脚本不会执行").into();
                             app.invalidate();
                         }
                     }
@@ -3050,7 +3270,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let clickable = app.mouse.is_some_and(|(x, y)| {
                 matches!(
                     app.hit(x, y),
-                    Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_))
+                    Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_) | Hit::CopyBlock(_))
                 )
             });
             // Source text is selectable by character.
@@ -3106,58 +3326,83 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 unsafe fn add(menu: HMENU, id: usize, text: &str) {
     AppendMenuW(menu, MF_STRING, id, w(text).as_ptr());
 }
+/// Diagnostics: every item label of `menu` and its submenus, depth first.
+unsafe fn menu_labels(menu: HMENU, out: &mut Vec<String>) {
+    for position in 0..GetMenuItemCount(menu).max(0) as u32 {
+        let mut text = [0u16; 256];
+        let len = GetMenuStringW(menu, position, text.as_mut_ptr(), 256, MF_BYPOSITION);
+        if len > 0 {
+            out.push(String::from_utf16_lossy(&text[..len as usize]));
+        }
+        let sub = GetSubMenu(menu, position as i32);
+        if !sub.is_null() {
+            menu_labels(sub, out);
+        }
+    }
+}
 unsafe fn menus() -> (HMENU, HMENU) {
     let menu = CreateMenu();
     let file = CreatePopupMenu();
     for (id, text) in [
-        (OPEN, "打开…\tCtrl+O"),
-        (FIND, "查找…\tCtrl+F"),
-        (GOTO, "跳转到百分比…\tCtrl+G"),
-        (RELOAD, "重新载入\tF5"),
-        (COPY, "复制选中行 / 可见内容\tCtrl+C"),
-        (EXIT, "退出"),
+        (OPEN, tr("打开…\tCtrl+O")),
+        (FIND, tr("查找…\tCtrl+F")),
+        (GOTO, tr("跳转到百分比…\tCtrl+G")),
+        (RELOAD, tr("重新载入\tF5")),
+        (COPY, tr("复制选中行 / 可见内容\tCtrl+C")),
+        (EXIT, tr("退出")),
     ] {
         add(file, id, text);
     }
-    AppendMenuW(menu, MF_POPUP, file as usize, w("文件(&F)").as_ptr());
+    AppendMenuW(menu, MF_POPUP, file as usize, w(tr("文件(&F)")).as_ptr());
     let settings = CreatePopupMenu();
-    add(settings, PREFERENCES, "设置…\tCtrl+,");
-    add(settings, EDIT_DOCUMENT, "用默认编辑应用打开\tCtrl+E");
+    add(settings, PREFERENCES, tr("设置…\tCtrl+,"));
+    // Bilingual, so a reader who cannot read the current language still finds it.
+    add(settings, LANGUAGE, tr("界面语言 / Language…"));
+    add(settings, EDIT_DOCUMENT, tr("用默认编辑应用打开\tCtrl+E"));
     AppendMenuW(settings, MF_SEPARATOR, 0, null());
     for (id, text) in [
-        (GOTO, "跳转到百分比…\tCtrl+G"),
-        (OUTLINE, "显示目录\tCtrl+B"),
-        (TYPOGRAPHY, "字体与默认字号…"),
-        (ZOOM_IN, "放大字号\tCtrl++"),
-        (ZOOM_OUT, "缩小字号\tCtrl+-"),
-        (WRAP, "自动换行"),
-        (WIDE, "宽屏阅读"),
-        (RESET, "恢复默认阅读设置"),
-        (RELOAD, "重新载入\tF5"),
-        (COPY, "复制选中行 / 可见内容\tCtrl+C"),
-        (CHECK_UPDATES, "检查更新…"),
-        (ABOUT, "关于 FeatherMD…\tF1"),
-        (LICENSES, "导出内置许可证…"),
+        (GOTO, tr("跳转到百分比…\tCtrl+G")),
+        (OUTLINE, tr("显示目录\tCtrl+B")),
+        (TYPOGRAPHY, tr("字体与默认字号…")),
+        (ZOOM_IN, tr("放大字号\tCtrl++")),
+        (ZOOM_OUT, tr("缩小字号\tCtrl+-")),
+        (WRAP, tr("自动换行")),
+        (WIDE, tr("宽屏阅读")),
+        (RESET, tr("恢复默认阅读设置")),
+        (RELOAD, tr("重新载入\tF5")),
+        (COPY, tr("复制选中行 / 可见内容\tCtrl+C")),
+        (CHECK_UPDATES, tr("检查更新…")),
+        (ABOUT, tr("关于 FeatherMD…\tF1")),
+        (LICENSES, tr("导出内置许可证…")),
     ] {
         add(settings, id, text);
     }
     AppendMenuW(settings, MF_SEPARATOR, 0, null());
     let associations = CreatePopupMenu();
-    add(associations, REGISTER, "加入 Markdown 右键打开方式");
-    add(associations, DEFAULT_APP, "设为 .md 默认应用（系统确认）…");
+    add(associations, REGISTER, tr("加入 Markdown 右键打开方式"));
+    add(
+        associations,
+        DEFAULT_APP,
+        tr("设为 .md 默认应用（系统确认）…"),
+    );
     AppendMenuW(associations, MF_SEPARATOR, 0, null());
-    add(associations, UNREGISTER, "移除打开方式注册…");
+    add(associations, UNREGISTER, tr("移除打开方式注册…"));
     AppendMenuW(
         settings,
         MF_POPUP,
         associations as usize,
-        w("文件关联").as_ptr(),
+        w(tr("文件关联")).as_ptr(),
     );
-    AppendMenuW(menu, MF_POPUP, settings as usize, w("设置(&S)").as_ptr());
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        settings as usize,
+        w(tr("设置(&S)")).as_ptr(),
+    );
     let help = CreatePopupMenu();
-    add(help, ABOUT, "关于 FeatherMD…\tF1");
-    add(help, LICENSES, "导出内置许可证…");
-    AppendMenuW(menu, MF_POPUP, help as usize, w("帮助(&H)").as_ptr());
+    add(help, ABOUT, tr("关于 FeatherMD…\tF1"));
+    add(help, LICENSES, tr("导出内置许可证…"));
+    AppendMenuW(menu, MF_POPUP, help as usize, w(tr("帮助(&H)")).as_ptr());
     (menu, settings)
 }
 pub fn run(path: Option<PathBuf>) -> Result<(), String> {
@@ -3191,7 +3436,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
-            w("FeatherMD 羽读").as_ptr(),
+            w(tr("FeatherMD 羽读")).as_ptr(),
             (WS_OVERLAPPEDWINDOW & !WS_CAPTION) | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -3344,7 +3589,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        DestroyMenu(menu);
+        DestroyMenu(app.borrow().menu);
         if com >= 0 {
             CoUninitialize();
         }

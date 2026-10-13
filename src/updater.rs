@@ -2,6 +2,7 @@
 //! GitHub "latest release" record through the system WinHTTP component.
 //! Nothing is downloaded, installed or uploaded; documents and settings never
 //! leave the machine. Author / company / last editor: lianzy.
+use feathermd::i18n::{tr, trf};
 use feathermd::update::{self, LATEST_API, MAX_RESPONSE, Release};
 use std::{
     sync::mpsc,
@@ -31,9 +32,9 @@ impl Pending {
     pub fn poll(&self) -> Option<Outcome> {
         match self.rx.try_recv() {
             Ok(outcome) => Some(outcome),
-            Err(mpsc::TryRecvError::Disconnected) => Some(Err("更新检查意外中止".into())),
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err(tr("更新检查意外中止").into())),
             Err(mpsc::TryRecvError::Empty) if Instant::now() >= self.deadline => {
-                Some(Err("连接超时，请检查网络或代理".into()))
+                Some(Err(tr("连接超时，请检查网络或代理").into()))
             }
             Err(mpsc::TryRecvError::Empty) => None,
         }
@@ -57,7 +58,7 @@ fn start_at(url: String, deadline: Duration) -> Pending {
             let _ = worker.send(get(&url, deadline).and_then(|body| update::parse_latest(&body)));
         });
     if started.is_err() {
-        let _ = tx.send(Err("无法启动更新检查".into()));
+        let _ = tx.send(Err(tr("无法启动更新检查").into()));
     }
     Pending {
         rx,
@@ -122,10 +123,10 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 fn get(url: &str, timeout: Duration) -> Result<Vec<u8>, String> {
-    let target = split(url).ok_or("更新地址无效")?;
+    let target = split(url).ok_or(tr("更新地址无效"))?;
     // Plain HTTP is only for the loopback test server; GitHub is always HTTPS.
     if !target.secure && !loopback(url) {
-        return Err("更新地址无效".into());
+        return Err(tr("更新地址无效").into());
     }
     let agent = wide(USER_AGENT);
     let session = unsafe {
@@ -219,10 +220,10 @@ fn get(url: &str, timeout: Duration) -> Result<Vec<u8>, String> {
     }
     match status {
         200 => {}
-        403 | 429 => return Err("GitHub 暂时限制了访问频率，请稍后再试".into()),
-        404 => return Err("没有找到正式发布".into()),
-        407 => return Err("代理服务器需要身份验证".into()),
-        code => return Err(format!("GitHub 返回 HTTP {code}")),
+        403 | 429 => return Err(tr("GitHub 暂时限制了访问频率，请稍后再试").into()),
+        404 => return Err(tr("没有找到正式发布").into()),
+        407 => return Err(tr("代理服务器需要身份验证").into()),
+        code => return Err(trf("GitHub 返回 HTTP {}", &[&code])),
     }
     let mut body = Vec::new();
     loop {
@@ -234,7 +235,7 @@ fn get(url: &str, timeout: Duration) -> Result<Vec<u8>, String> {
             return Ok(body);
         }
         if body.len() + available as usize > MAX_RESPONSE {
-            return Err("更新信息过大".into());
+            return Err(tr("更新信息过大").into());
         }
         let start = body.len();
         body.resize(start + available as usize, 0);
@@ -257,14 +258,14 @@ fn get(url: &str, timeout: Duration) -> Result<Vec<u8>, String> {
 fn failure() -> String {
     let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
     match code {
-        ERROR_WINHTTP_TIMEOUT => "连接超时，请检查网络或代理".into(),
-        ERROR_WINHTTP_NAME_NOT_RESOLVED => "无法解析 GitHub 地址，请检查网络".into(),
+        ERROR_WINHTTP_TIMEOUT => tr("连接超时，请检查网络或代理").into(),
+        ERROR_WINHTTP_NAME_NOT_RESOLVED => tr("无法解析 GitHub 地址，请检查网络").into(),
         ERROR_WINHTTP_CANNOT_CONNECT | ERROR_WINHTTP_CONNECTION_ERROR => {
-            "无法连接到 GitHub，请检查网络或代理".into()
+            tr("无法连接到 GitHub，请检查网络或代理").into()
         }
-        ERROR_WINHTTP_SECURE_FAILURE => "安全连接验证失败，已停止检查".into(),
-        ERROR_WINHTTP_INVALID_SERVER_RESPONSE => "服务器响应无效".into(),
-        code => format!("网络错误（{code}）"),
+        ERROR_WINHTTP_SECURE_FAILURE => tr("安全连接验证失败，已停止检查").into(),
+        ERROR_WINHTTP_INVALID_SERVER_RESPONSE => tr("服务器响应无效").into(),
+        code => trf("网络错误（{}）", &[&code]),
     }
 }
 

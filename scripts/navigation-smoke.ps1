@@ -34,7 +34,8 @@ $lines=if($Shape -eq 'headings') {
 $ini=Join-Path (Split-Path $Exe) 'FeatherMD.ini'
 if(Test-Path -LiteralPath $ini){throw 'Refusing to overwrite existing portable settings'}
 Set-Content -LiteralPath $ini -Value "theme=light
-font_size=18" -Encoding utf8
+font_size=18
+language=zh-CN" -Encoding utf8
 $oldSnapshot=$env:FEATHERMD_TEST_SNAPSHOT
 $env:FEATHERMD_TEST_SNAPSHOT=Join-Path $Output 'viewport.bmp'
 $process=$null

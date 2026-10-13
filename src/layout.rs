@@ -26,7 +26,7 @@ pub struct Fonts {
 }
 impl Fonts {
     pub fn new(dpi: u32) -> Self {
-        Self::with_family(dpi, "Microsoft YaHei UI")
+        Self::with_family(dpi, feathermd::i18n::current().ui_font())
     }
     pub fn with_family(dpi: u32, family: &str) -> Self {
         Self {

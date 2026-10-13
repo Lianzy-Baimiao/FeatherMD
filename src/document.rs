@@ -82,7 +82,7 @@ impl Document {
         if !meta.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "请选择普通文件",
+                crate::i18n::tr("请选择普通文件"),
             ));
         }
         let mut bom = [0u8; 4];
@@ -90,13 +90,15 @@ impl Document {
         if n >= 2 && (bom.starts_with(&[0xff, 0xfe]) || bom.starts_with(&[0xfe, 0xff])) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "此文件是 UTF-16/UTF-32，请先另存为 UTF-8 再打开（不会修改原文件）",
+                crate::i18n::tr(
+                    "此文件是 UTF-16/UTF-32，请先另存为 UTF-8 再打开（不会修改原文件）",
+                ),
             ));
         }
         if n == 4 && bom == [0, 0, 0xfe, 0xff] {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "此文件是 UTF-32，请先另存为 UTF-8",
+                crate::i18n::tr("此文件是 UTF-32，请先另存为 UTF-8"),
             ));
         }
         Ok(Self {
@@ -202,7 +204,7 @@ impl Document {
         if query.is_empty() || query.len() > MAX_QUERY_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "搜索词长度应为 1～16384 字节",
+                crate::i18n::tr("搜索词长度应为 1～16384 字节"),
             ));
         }
         let size = self.file.metadata()?.len();

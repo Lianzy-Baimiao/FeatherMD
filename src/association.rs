@@ -1,5 +1,6 @@
 //! Per-user registration only. Never write extension defaults or UserChoice.
 //! Author / company / last editor: lianzy.
+use feathermd::i18n::{tr, trf};
 use std::{io, os::windows::ffi::OsStrExt, path::Path};
 use windows_sys::Win32::{System::Registry::*, UI::Shell::*};
 
@@ -8,18 +9,30 @@ const PROGID_PATH: &str = "Software\\Classes\\FeatherMD.Document";
 const CAPABILITIES: &str = "Software\\FeatherMD\\Capabilities";
 const REGISTERED_APPLICATIONS: &str = "Software\\RegisteredApplications";
 const EXTENSIONS: [&str; 4] = [".md", ".markdown", ".mdown", ".mkd"];
-const DESCRIPTION: &str = "轻量原生 Markdown 查看器";
+const DESCRIPTION: &str = feathermd::key!("轻量原生 Markdown 查看器");
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
 
-fn registry_error(code: u32, operation: &str, path: &str, name: &str) -> io::Error {
+#[derive(Clone, Copy)]
+enum Operation {
+    Create,
+    Open,
+    Write,
+    Delete,
+}
+
+fn registry_error(code: u32, operation: Operation, path: &str, name: &str) -> io::Error {
     let source = io::Error::from_raw_os_error(code as i32);
-    io::Error::new(
-        source.kind(),
-        format!("{operation}注册表项 {path}\\{name} 失败：{source}"),
-    )
+    // Whole sentences per operation, so each language can order its own words.
+    let template = match operation {
+        Operation::Create => feathermd::key!("创建注册表项 {}\\{} 失败：{}"),
+        Operation::Open => feathermd::key!("打开注册表项 {}\\{} 失败：{}"),
+        Operation::Write => feathermd::key!("写入注册表项 {}\\{} 失败：{}"),
+        Operation::Delete => feathermd::key!("删除注册表项 {}\\{} 失败：{}"),
+    };
+    io::Error::new(source.kind(), trf(template, &[&path, &name, &source]))
 }
 
 fn is_missing(code: u32) -> bool {
@@ -56,7 +69,7 @@ impl Registry {
             )
         };
         if code != 0 {
-            return Err(registry_error(code, "创建", path, ""));
+            return Err(registry_error(code, Operation::Create, path, ""));
         }
         Ok(Key(key))
     }
@@ -68,7 +81,7 @@ impl Registry {
             return Ok(None);
         }
         if code != 0 {
-            return Err(registry_error(code, "打开", path, ""));
+            return Err(registry_error(code, Operation::Open, path, ""));
         }
         Ok(Some(Key(key)))
     }
@@ -90,7 +103,7 @@ impl Registry {
             )
         };
         if code != 0 {
-            return Err(registry_error(code, "写入", path, name));
+            return Err(registry_error(code, Operation::Write, path, name));
         }
         Ok(())
     }
@@ -103,7 +116,7 @@ impl Registry {
     fn delete_tree(&self, path: &str) -> io::Result<()> {
         let code = unsafe { RegDeleteTreeW(self.root, wide(path).as_ptr()) };
         if code != 0 && !is_missing(code) {
-            return Err(registry_error(code, "删除", path, ""));
+            return Err(registry_error(code, Operation::Delete, path, ""));
         }
         Ok(())
     }
@@ -114,7 +127,7 @@ impl Registry {
         };
         let code = unsafe { RegDeleteValueW(key.0, wide(name).as_ptr()) };
         if code != 0 && !is_missing(code) {
-            return Err(registry_error(code, "删除", path, name));
+            return Err(registry_error(code, Operation::Delete, path, name));
         }
         Ok(())
     }
@@ -122,15 +135,15 @@ impl Registry {
     fn register(&self, exe: &Path) -> io::Result<()> {
         let exe = exe.as_os_str().encode_wide().collect::<Vec<_>>();
         let exe = String::from_utf16(&exe)
-            .map_err(|_| io::Error::other("可执行文件路径包含无法注册的 Unicode 字符"))?;
+            .map_err(|_| io::Error::other(tr("可执行文件路径包含无法注册的 Unicode 字符")))?;
         if exe.contains(['\0', '"']) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "可执行文件路径包含无效的空字符或引号",
+                tr("可执行文件路径包含无效的空字符或引号"),
             ));
         }
         let icon = format!("\"{exe}\",0");
-        self.text(PROGID_PATH, "", "Markdown 文档 (FeatherMD)")?;
+        self.text(PROGID_PATH, "", tr("Markdown 文档 (FeatherMD)"))?;
         self.text(&format!("{PROGID_PATH}\\DefaultIcon"), "", &icon)?;
         self.text(
             &format!("{PROGID_PATH}\\shell\\open\\command"),
@@ -143,7 +156,7 @@ impl Registry {
             CAPABILITIES.to_owned(),
         ] {
             self.text(&path, "ApplicationName", "FeatherMD")?;
-            self.text(&path, "ApplicationDescription", DESCRIPTION)?;
+            self.text(&path, "ApplicationDescription", tr(DESCRIPTION))?;
             self.text(&path, "ApplicationIcon", &icon)?;
         }
         for ext in EXTENSIONS {

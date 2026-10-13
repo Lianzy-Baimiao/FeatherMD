@@ -129,7 +129,7 @@ function Drag([double]$fraction, [bool]$horizontal = $false, [bool]$doubleClick 
 try {
  # Match physical coordinates returned by the reader on scaled displays.
  $oldDpiContext = [ScrollbarSmoke]::SetThreadDpiAwarenessContext([IntPtr](-4))
- [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`nraw=false`nwide=false`n", [Text.UTF8Encoding]::new($false))
+ [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`nraw=false`nwide=false`nlanguage=zh-CN`n", [Text.UTF8Encoding]::new($false))
  $createdIni = $true
  $env:FEATHERMD_TEST_SNAPSHOT = Join-Path $Output 'viewport.bmp'
  # Only send native window messages. Never activate the window or inject desktop input.
@@ -226,7 +226,7 @@ try {
  Mouse 0x202 ($g.Right - 2) $y
 
  StopReader
- [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`n", [Text.UTF8Encoding]::new($false))
+ [IO.File]::WriteAllText($ini, "theme=light`nfont_size=18`nwrap=true`nlanguage=zh-CN`n", [Text.UTF8Encoding]::new($false))
  $shortDocument = Join-Path $Output 'short.md'
  [IO.File]::WriteAllText($shortDocument, 'Short document by lianzy.', [Text.UTF8Encoding]::new($false))
  StartReader $shortDocument

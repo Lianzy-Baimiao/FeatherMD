@@ -1,5 +1,21 @@
 # Progress / continuation notes
 
+## 2026-10-13 — v0.1.8 candidate: one-click copy, interface languages, multilingual README, About refresh
+
+- 作者/最后修改人：lianzy。用户需求：①代码块等方块（代码、引用、表格）右上角鼠标移入时显示一键复制按钮；②程序支持多语言；③README 支持多语言；④更新过时的关于窗口；⑤改完自动提交推送发布（本轮已预先授权）。
+- 会话说明：上一会话完成了 i18n 核心、界面文字转换、语言页与关于窗口重排，随后因上游接口错误（403 / 无输出）中断；改动保留在工作区。本会话先复核构建与当时的 70 项测试，再完成其余部分。此前尚未在转换后的界面上运行任何原生回归。
+- 一键复制：`markdown::boxes`（纯逻辑）把预览分页的块分组为围栏代码、缩进代码、引用和表格；围栏块交替开闭，所以一个框延伸到下一个围栏块或分页末尾，空围栏没有可复制内容；触及分页边缘的框标为部分。`text::source` 按字节范围复制已载入行（物理行之间 CRLF，超长行片段之间不加换行，可去掉一级缩进）。重排时按起始字节映射到布局行；绘制时用已有的行命中框找到指针所在的框，按钮在框可见部分的右上角（长块不必滚回开头），比正文窄的表格放在表格右侧，按实测文字定宽，以“复制 / 已复制”中较宽者决定位置。复制后对勾 1.5 s；源码模式没有按钮。测试快照路径存在时，按钮与 Ctrl+C 都写 copy.txt，不碰剪贴板。
+- 多语言：简体中文为查找键，`src/i18n/strings.rs` 每行 [zh-CN, zh-TW, en, ja]；缺失时显示原文。设置 `language=system|zh-CN|zh-TW|en|ja`，system 按 GetUserDefaultUILanguage（台港澳 → 繁中，其他中文 → 简中，日语 → 日文，其余 → 英文）。保存后替换界面字体缓存（搜索框先换字体再释放旧缓存）、重建菜单、重绘，无需重启。各语言界面字体：Microsoft YaHei UI / Microsoft JhengHei UI / Yu Gothic UI；阅读字体不变。
+- 截断检查：测试快照路径存在时，`snapshot::clip` 在阅读器、关于与设置每次绘制文字前用 DT_CALCRECT 测量并记录会被截断的文字（省略号文字除外），`snapshot::report` 再加上放不下的 STATIC 子控件，写入 labels.txt。首轮实测发现英文欢迎页按钮“Open document”被截成“Open docume”、外观弹层英文提示被截断：按钮改为按实测文字加宽（中文仍为 208 逻辑像素），提示缩短。
+- 翻译复核：古籍 Ancient → Antique；日文“前往下载页…”原译“ダウンロード…”读起来像会直接下载，改为“配布ページへ…”；繁中引用统一为“引文”。繁中、英文、日文翻译由 AI 助手起草，未经母语者审校。
+- 关于窗口：展开面板改为两列快捷键（新增 Ctrl+E、Ctrl+,、Ctrl+T、Esc）与四条说明（一键复制、表格排版、按字符选择、分页预览）；“返回阅读”加宽并居中，版本号在胶囊内居中。展开后逻辑高度 720，小工作区沿用原有的按比例缩小。
+- README：新增 README.zh-TW.md / README.en.md / README.ja.md 与语言切换行，各自使用本语言的阅读界面、关于窗口与语言设置截图（其余截图为简体中文界面，文中说明）；翻译版示例文档 docs/demo.*.md；ZIP 含四份 README。about.rs 单元测试检查四份 README 都含项目与赞赏链接。
+- 测试：新增 tests/copy.rs（3 项）与 tests/i18n.rs（5 项：翻译表占位符/助记符/快捷键/换行一致、繁中与日文不含简体字、源码扫描所有中文界面字面量都经翻译表、LANGID 映射、设置往返）；table-smoke 增加复制按钮段；新增 i18n-smoke（四种语言 × 欢迎页、9 个标题栏提示、外观弹层、菜单、5 个设置页、关于收起/展开、文档与复制按钮、查找、跳转、示例文档；system；8 次实时切换）。所有冒烟 INI 固定 language=zh-CN（CI 为英文系统）。修正 window-smoke：欢迎页前的 INI 重置与 `StopReader` 写在同一行，PowerShell 把它当成被忽略的参数，从未执行。
+- 证据（125% / 120 DPI，MSVC release，FileVersion 0.1.8，--locked）：fmt --check、clippy -D warnings、cargo test --locked（73 项）通过；构建、交付与 ZIP 内 EXE 哈希一致；交付 EXE 上 17 项原生回归全部 PASS：ui（首屏 85.2 ms 单次样本，GDI 35→35）、navigation headings 333/411、wrapped 242/280（与 v0.1.7 记录相同）、scrollbar、window（1350×1025 in 3840×2120，51 项命中）、typography 浅/深（35→35）、about 浅/深（22→22）、settings 浅/深（35→35）、editor、update 浅/深（各 14 次回环请求，33→33）、table 浅/深（正文宽 960，放得下的表右缘 960，宽表 1633；复制按钮重复 4 轮 GDI 28→28）、i18n（105 个视图无截断，8 次实时切换 GDI 31→31、USER 30→29，本机显示语言 0x0804 → zh-CN）。docs 截图与交付 EXE 的截图逐字节一致。
+- 性能（与已发布 v0.1.7 交替，见 PERFORMANCE §7）：满页表格重排 86.3/88.2 vs 86.6/86.1 ms，普通段落 63.7/61.6 vs 61.9/59.3 ms，约 1100 个代码块 25.6/24.2 vs 27.5/24.7 ms；首屏 12 次中位数 84.6 vs 84.9 ms。无可测出的差别。dumpbin：仍只有 Windows 系统 DLL。
+- Delivery: dist/FeatherMD.exe 935,936 字节（914 KiB），SHA-256 96aa2b44695fc9f553313c7e2eae8a9d20fa038a516f99197da2ea5f895a8e60；dist/FeatherMD-0.1.8-windows-x64.zip 1,646,931 字节，SHA-256 c01eb24ac08d308296e58ab2e65c24a843163b06b2c4ca3831569f134d822eba（39 项，含四份 README 与各自截图）。已发布的 v0.1.7 EXE 另存于 target/tmp/rel017 供对比。用户 %APPDATA% 设置文件未被测试改动（修改时间仍为 05:01）。
+- 限制：只在本机 125% 下实测；隐藏窗口 + 合成消息，未覆盖真实指针与系统剪贴板。截断检查只覆盖 FeatherMD 自己绘制的文字与 STATIC 控件，不含系统消息框、文件对话框与弹出菜单。system 语言只验证了本机（简体中文）。日文用户的正文默认字体仍是 Microsoft YaHei UI，需要在“阅读”页自选日文字体。预览仍按行选择；列表里的代码块按缩进代码处理（原有行为）。
+
 ## v0.1.7 publication record — 2026-10-13
 
 - 作者/最后修改人：lianzy。用户明确要求“提交推送发布”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.7

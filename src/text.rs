@@ -101,6 +101,46 @@ pub fn selected(lines: &[SourceLine], a: Caret, b: Caret) -> (String, bool) {
     (out, clipped)
 }
 
+/// Source of the loaded lines that start within file bytes `from..=to`, with CRLF
+/// between physical lines and none inside a long line split into segments.
+/// `dedent` removes one level of code indentation (four columns; a tab reaches the
+/// next stop) from the start of each physical line.
+pub fn source(lines: &[SourceLine], from: u64, to: u64, dedent: bool) -> String {
+    let begin = lines.partition_point(|l| l.start < from);
+    let mut out = String::new();
+    for (offset, line) in lines[begin..].iter().enumerate() {
+        if line.start > to {
+            break;
+        }
+        let at = begin + offset;
+        let starts_line = at == 0 || !lines[at - 1].continued;
+        if offset > 0 && starts_line {
+            out.push_str("\r\n");
+        }
+        out.push_str(if dedent && starts_line {
+            outdent(&line.text)
+        } else {
+            &line.text
+        });
+    }
+    out
+}
+
+fn outdent(text: &str) -> &str {
+    let mut column = 0;
+    for (i, c) in text.char_indices() {
+        if column >= 4 {
+            return &text[i..];
+        }
+        match c {
+            ' ' => column += 1,
+            '\t' => column += 4 - column % 4,
+            _ => return &text[i..],
+        }
+    }
+    ""
+}
+
 #[derive(PartialEq, Eq)]
 enum Class {
     Space,

@@ -10,10 +10,10 @@ const ACTIONS_WIDTH: i32 = 236;
 
 /// Header appearance picker: three basic choices plus the full skin gallery.
 pub(super) const PICKER: [(usize, &str); 4] = [
-    (THEME_LIGHT, "浅色"),
-    (THEME_DARK, "深色"),
-    (THEME_SYSTEM, "跟随系统"),
-    (THEME_MORE, "更多皮肤…"),
+    (THEME_LIGHT, key!("浅色")),
+    (THEME_DARK, key!("深色")),
+    (THEME_SYSTEM, key!("跟随系统")),
+    (THEME_MORE, key!("更多皮肤…")),
 ];
 pub(super) fn picker_index(theme: Theme) -> usize {
     match theme {
@@ -176,22 +176,22 @@ impl App {
         }
         Some(
             match self.hover? {
-                PREVIEW => "预览 · 阅读排版",
-                SOURCE => "源码 · Ctrl+R",
-                OPEN => "打开文档 · Ctrl+O",
-                FIND => "查找 · Ctrl+F",
+                PREVIEW => tr("预览 · 阅读排版"),
+                SOURCE => tr("源码 · Ctrl+R"),
+                OPEN => tr("打开文档 · Ctrl+O"),
+                FIND => tr("查找 · Ctrl+F"),
                 SETTINGS => {
                     return Some(match self.update_available() {
-                        Some(tag) => format!("更多选项 · 发现新版本 {tag}"),
-                        None => "更多选项".to_string(),
+                        Some(tag) => trf("更多选项 · 发现新版本 {}", &[&tag]),
+                        None => tr("更多选项").to_string(),
                     });
                 }
                 THEME_PICKER => {
-                    return Some(format!("外观：{} · Ctrl+T", skin_name(self.settings.theme)));
+                    return Some(trf("外观：{} · Ctrl+T", &[&skin_name(self.settings.theme)]));
                 }
-                MINIMIZE => "最小化",
-                MAXIMIZE => "最大化 / 还原",
-                EXIT => "关闭",
+                MINIMIZE => tr("最小化"),
+                MAXIMIZE => tr("最大化 / 还原"),
+                EXIT => tr("关闭"),
                 _ => return None,
             }
             .to_string(),
@@ -226,7 +226,7 @@ impl App {
             });
             self.label(
                 dc,
-                "外观",
+                tr("外观"),
                 chrome_rect(
                     r.left + self.s(16),
                     r.top + self.s(7),
@@ -278,7 +278,7 @@ impl App {
                 );
                 self.label(
                     dc,
-                    text,
+                    tr(text),
                     chrome_rect(
                         row.left + self.s(47),
                         row.top,
@@ -328,7 +328,7 @@ impl App {
             }
             self.label(
                 dc,
-                "跟随系统将自动切换明暗",
+                tr("跟随系统将自动切换明暗"),
                 chrome_rect(
                     r.left + self.s(16),
                     r.bottom - self.s(29),
@@ -566,9 +566,9 @@ impl App {
             self.chrome_button(
                 dc,
                 if self.edit_mode == Some(GOTO) {
-                    "跳转 %"
+                    tr("跳转 %")
                 } else {
-                    "下一个"
+                    tr("下一个")
                 },
                 chrome_rect(
                     self.width - self.s(146),
@@ -628,7 +628,7 @@ impl App {
         );
         self.label(
             dc,
-            "目录",
+            tr("目录"),
             chrome_rect(
                 self.s(18),
                 self.s(HEADER_HEIGHT + 14),
@@ -719,20 +719,22 @@ impl App {
         RestoreDC(dc, saved);
 
         let status = if let Some(error) = &self.outline_error {
-            format!("目录读取失败：{error}")
+            trf("目录读取失败：{}", &[error])
         } else if limited {
-            "目录已达显示上限".to_string()
+            tr("目录已达显示上限").to_string()
         } else if self.outline_loading {
-            "正在提取标题…".to_string()
+            tr("正在提取标题…").to_string()
         } else if total == 0 {
             if self.document.is_none() {
-                "打开文档后显示目录"
+                tr("打开文档后显示目录")
             } else {
-                "文档暂无标题"
+                tr("文档暂无标题")
             }
             .to_string()
+        } else if total == 1 {
+            tr("1 个标题").to_string()
         } else {
-            format!("{total} 个标题")
+            trf("{} 个标题", &[&total])
         };
         let status_top = if total == 0 {
             self.s(OUTLINE_ROWS_TOP + 8)
@@ -811,7 +813,7 @@ impl App {
         );
         self.label(
             dc,
-            "把注意力，留给文字。",
+            tr("把注意力，留给文字。"),
             chrome_rect(
                 center - self.s(260),
                 top + self.s(113),
@@ -825,7 +827,7 @@ impl App {
         );
         self.label(
             dc,
-            "一个轻量、离线的 Markdown 阅读空间",
+            tr("一个轻量、离线的 Markdown 阅读空间"),
             chrome_rect(
                 center - self.s(240),
                 top + self.s(168),
@@ -837,10 +839,16 @@ impl App {
             p.muted,
             DT_CENTER | DT_SINGLELINE | DT_VCENTER,
         );
+        // 208 logical px, wider when a translation needs it (both labels, so the
+        // button keeps its size while a document opens).
+        let text = self
+            .text_width(dc, tr("打开文档"), 13, true)
+            .max(self.text_width(dc, tr("正在打开…"), 13, true));
+        let half = (self.s(52 + 67 + 4) + text).max(self.s(208)) / 2;
         let action = chrome_rect(
-            center - self.s(104),
+            center - half,
             top + self.s(222),
-            center + self.s(104),
+            center + half,
             top + self.s(268),
         );
         self.chrome_button(dc, "", action, OPEN, ChromeTone::Primary, p);
@@ -859,9 +867,9 @@ impl App {
         self.label(
             dc,
             if self.loading {
-                "正在打开…"
+                tr("正在打开…")
             } else {
-                "打开文档"
+                tr("打开文档")
             },
             chrome_rect(
                 action.left + self.s(52),
@@ -890,7 +898,7 @@ impl App {
         );
         self.label(
             dc,
-            "或拖入 .md / .markdown / .txt 文件",
+            tr("或拖入 .md / .markdown / .txt 文件"),
             chrome_rect(
                 center - self.s(230),
                 top + self.s(286),
@@ -912,10 +920,10 @@ impl App {
             p.panel,
         );
         Self::fill(dc, &chrome_rect(1, top, self.width - 1, top + 1), p.edge);
-        let mut metadata = "只读  ·  离线".to_string();
-        let mut status = if self.status == "就绪"
-            || self.status == "只读 · 离线阅读"
-            || self.status.starts_with("离线阅读")
+        let mut metadata = tr("只读  ·  离线").to_string();
+        let mut status = if self.status == tr("就绪")
+            || self.status == tr("只读 · 离线阅读")
+            || self.status.starts_with(tr("离线阅读"))
         {
             String::new()
         } else {
@@ -929,10 +937,10 @@ impl App {
             );
             let mut warnings = Vec::new();
             if page.invalid_utf8 {
-                warnings.push("已替换无效字符");
+                warnings.push(tr("已替换无效字符"));
             }
             if page.partial_context && !self.settings.raw {
-                warnings.push("语法上下文不完整");
+                warnings.push(tr("语法上下文不完整"));
             }
             if !warnings.is_empty() {
                 if !status.is_empty() {
@@ -1123,5 +1131,165 @@ impl App {
                 );
             }
         }
+    }
+
+    /// The box at the pointer's height, the visible part of its rows (the reading
+    /// column, or a narrower table's own width) and the column's right edge. None
+    /// while the pointer is busy elsewhere.
+    pub(super) fn copy_target(&self) -> Option<(usize, RECT, i32)> {
+        let (x, y) = self.mouse?;
+        if self.boxes.is_empty()
+            || self.settings.raw
+            || self.selecting
+            || self.drag.is_some()
+            || self.theme_menu.is_some()
+            || !self.reading_area(x, y)
+        {
+            return None;
+        }
+        let row = self.hits.iter().find_map(|h| match h.action {
+            Hit::Row(i) if y >= h.rect.top && y < h.rect.bottom => Some(i),
+            _ => None,
+        })?;
+        let index = self.boxes.partition_point(|b| b.rows.1 < row);
+        let b = self.boxes.get(index).filter(|b| b.rows.0 <= row)?;
+        let mut area: Option<RECT> = None;
+        for h in &self.hits {
+            if let Hit::Row(i) = h.action
+                && (b.rows.0..=b.rows.1).contains(&i)
+            {
+                let r = area.get_or_insert(h.rect);
+                r.top = r.top.min(h.rect.top);
+                r.bottom = r.bottom.max(h.rect.bottom);
+            }
+        }
+        let mut area = area?;
+        let column = area.right;
+        area.bottom = area.bottom.min(self.content_bottom());
+        let first = self.layout.as_ref()?.rows.get(b.rows.0)?;
+        if let Some(edge) = first.table.as_ref().and_then(|t| t.edges.last()) {
+            area.right = area.right.min(self.left() + edge + 1 - self.shift(first));
+        }
+        // A table scrolled out of the column has nothing to show a button for.
+        (x >= area.left && area.right > area.left).then_some((index, area, column))
+    }
+
+    /// Width of `text` in the interface font at logical `size`.
+    unsafe fn text_width(&mut self, dc: HDC, text: &str, size: i32, bold: bool) -> i32 {
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let old = SelectObject(
+            dc,
+            self.fonts.get(FontKey {
+                size,
+                bold,
+                italic: false,
+                mono: false,
+                strike: false,
+            }),
+        );
+        let mut extent = SIZE::default();
+        GetTextExtentPoint32W(dc, units.as_ptr(), units.len() as i32, &mut extent);
+        SelectObject(dc, old);
+        extent.cx
+    }
+
+    /// Copy button in the top-right corner of the box under the pointer. It keeps to
+    /// the top of the box's visible part, so long code blocks need no scrolling back.
+    /// A table narrower than the column gets it just outside its corner instead of
+    /// over its header.
+    pub(super) unsafe fn paint_copy_button(&mut self, dc: HDC, p: Palette) {
+        let (Some((index, area, column)), Some((x, y))) = (self.copy_target(), self.mouse) else {
+            return;
+        };
+        if self.boxes[index].content.is_none() {
+            return;
+        }
+        let copied = self.just_copied(index);
+        let label = if copied {
+            tr("已复制")
+        } else {
+            tr("复制")
+        };
+        let room = area.bottom - area.top;
+        let height = self.s(22).min(room - self.s(4));
+        if height < self.s(16) {
+            return;
+        }
+        let width = self.s(30) + self.text_width(dc, label, 11, false);
+        // The wider label decides, so the button stays put when it changes.
+        let widest = self.s(30)
+            + self
+                .text_width(dc, tr("复制"), 11, false)
+                .max(self.text_width(dc, tr("已复制"), 11, false));
+        let gap = self.s(6);
+        let outside = self.boxes[index].kind == markdown::BoxKind::Table
+            && area.right + gap + widest <= column;
+        let top = area.top + self.s(4).min((room - height) / 2);
+        let r = if outside {
+            chrome_rect(
+                area.right + gap,
+                top,
+                area.right + gap + width,
+                top + height,
+            )
+        } else {
+            chrome_rect(
+                area.right - gap - width,
+                top,
+                area.right - gap,
+                top + height,
+            )
+        };
+        // The strip beside a narrow table belongs to it while its button is there.
+        let reach = if outside { r.right } else { area.right };
+        if x >= reach {
+            return;
+        }
+        let hover = contains(r, x, y);
+        let pressed = self.pressed == Some(Hit::CopyBlock(index));
+        let radius = self.s(5);
+        // A one-pixel outline, then the face.
+        chrome_round(dc, r, if copied { p.accent } else { p.edge }, radius);
+        chrome_round(
+            dc,
+            chrome_rect(r.left + 1, r.top + 1, r.right - 1, r.bottom - 1),
+            if pressed {
+                p.selection
+            } else if hover {
+                p.panel
+            } else {
+                p.page
+            },
+            radius - 1,
+        );
+        let color = if copied {
+            p.accent
+        } else if hover {
+            p.fg
+        } else {
+            p.muted
+        };
+        // The open check mark keeps the full glyph scale so its stroke matches the
+        // label; the closed sheets read as heavy at a smaller one.
+        smooth::icon(
+            dc,
+            chrome_rect(r.left + self.s(4), r.top, r.left + self.s(22), r.bottom),
+            if copied { smooth::CHECK } else { smooth::COPY },
+            color,
+            self.fonts.dpi as f32 / 96.0 * if copied { 1.0 } else { 0.72 },
+        );
+        self.label(
+            dc,
+            label,
+            chrome_rect(r.left + self.s(22), r.top, r.right - self.s(6), r.bottom),
+            11,
+            false,
+            color,
+            DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX,
+        );
+        self.hits.push(HitBox {
+            rect: r,
+            action: Hit::CopyBlock(index),
+        });
     }
 }

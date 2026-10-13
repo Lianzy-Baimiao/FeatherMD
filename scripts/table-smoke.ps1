@@ -65,6 +65,12 @@ $sourceLines = [string[]]@('alpha beta gamma delta', 'second line here', 'one tw
 [IO.File]::WriteAllLines($source, $sourceLines, $utf8)
 $long = Join-Path $Output 'long-source.md'
 [IO.File]::WriteAllLines($long, [string[]](0..299 | ForEach-Object { 'row {0:D3} of the source selection test' -f $_ }), $utf8)
+# Copy buttons: fenced code, indented code, a quote, a table and a long block.
+$boxFile = Join-Path $Output 'boxes.md'
+$fenced = [string[]]@('fn main() {', '', "    println!(""复制"");", '}')
+$indented = [string[]]@('first indented', "`tsecond with tab")
+$longCode = [string[]](0..119 | ForEach-Object { 'code line {0:D3}' -f $_ })
+[IO.File]::WriteAllLines($boxFile, [string[]](@('# 一键复制', '', '鼠标移到代码块、引用和表格上，右上角出现复制按钮。', '', '```rust') + $fenced + @('```', '', 'Indented code:', '') + ($indented | ForEach-Object { "    $_" }) + @('', '> 第一行引用', '> 第二行，**加粗**。', '', '| 键 | 值 |', '| --- | --- |', '| a | 1 |', '| b | 2 |', '', '```') + $longCode + @('```', '', '结尾段落。')), $utf8)
 
 function Query([int]$id, [int]$index = 0) { [TableSmoke]::SendMessageW($window, 0x802a, [IntPtr]$id, [IntPtr]$index).ToInt64() }
 function Send([uint32]$msg, [int]$wp, [IntPtr]$lp) { [void][TableSmoke]::SendMessageW($window, $msg, [IntPtr]$wp, $lp) }
@@ -78,7 +84,8 @@ function Idle {
  throw 'Layout timed out'
 }
 function StartReader([string]$path, [string]$settings) {
- [IO.File]::WriteAllText($ini, $settings, $utf8)
+ # Fixed interface language: CI runners follow an English system locale.
+ [IO.File]::WriteAllText($ini, $settings + "language=zh-CN`n", $utf8)
  $script:createdIni = $true
  $env:FEATHERMD_TEST_SNAPSHOT = $snapshot
  $script:process = Start-Process -FilePath $Exe -ArgumentList ('"' + $path + '"') -WindowStyle Hidden -PassThru
@@ -124,6 +131,28 @@ function PointerDown([int]$x, [int]$y, [int]$keys = 1) { Send 0x201 $keys ([Tabl
 function PointerMove([int]$x, [int]$y) { Send 0x200 1 ([TableSmoke]::Point($x, $y)) }
 function PointerUp([int]$x, [int]$y) { Send 0x202 0 ([TableSmoke]::Point($x, $y)) }
 function StableGdi { $min = [int]::MaxValue; for ($j = 0; $j -lt 12; $j++) { Start-Sleep -Milliseconds 5; $min = [Math]::Min($min, [TableSmoke]::GetGuiResources($process.Handle, 0)) }; return $min }
+# Hovers box $index on its first visible row and returns its copy button.
+function HoverBox([int]$index) {
+ $first = Query 69 $index; $last = Query 70 $index
+ for ($i = 0; $i -lt 400 -and (Query 61 $first) -lt 0 -and (Query 13) -lt $first; $i++) { Send 0x100 0x28 ([IntPtr]::Zero); Idle; Capture }
+ $row = $first
+ while ((Query 61 $row) -lt 0 -and $row -lt $last) { $row++ }
+ $r = Row $row
+ PointerMove ($r.Left + (Scale 4)) $r.Y
+ Capture
+ $button = @{ Left = (Query 71); Top = (Query 72); Right = (Query 73); Bottom = (Query 74); Box = (Query 75) }
+ if ($button.Left -lt 0 -or $button.Box -ne $index) { throw "No copy button over box ${index}: $($button.Box)" }
+ return $button
+}
+# Clicks a copy button; the test seam writes the copied text to copy.txt.
+function ClickCopy($button) {
+ Remove-Item -LiteralPath $copyFile -ErrorAction SilentlyContinue
+ $x = [int](($button.Left + $button.Right) / 2); $y = [int](($button.Top + $button.Bottom) / 2)
+ PointerMove $x $y; Capture
+ PointerDown $x $y; PointerUp $x $y
+ if (-not (Test-Path -LiteralPath $copyFile)) { throw 'Copy button wrote nothing' }
+ return [IO.File]::ReadAllText($copyFile, $utf8)
+}
 $suffix = if ($Theme -eq 'dark') { '-dark' } else { '' }
 
 try {
@@ -185,6 +214,64 @@ try {
  Send 0x100 0x1b ([IntPtr]::Zero)
  Resize (Scale 1080) (Scale 820)
  $tableGdi = StableGdi
+ StopReader
+
+ # Copy buttons: hovering a box shows one in its top-right corner. Code is copied
+ # without fences (indented code loses one indent); quotes and tables as shown.
+ StartReader $boxFile "theme=$Theme`nfont_size=18`nwrap=true`n"
+ Capture
+ if ((Query 67) -ne 5) { throw "Expected 5 copy boxes, found $(Query 67)" }
+ $kinds = (0..4 | ForEach-Object { Query 68 $_ }) -join ','
+ if ($kinds -ne '0,1,2,3,0') { throw "Box kinds (fenced, indented, quote, table, fenced): $kinds" }
+ $para = Row ((Query 69 0) - 2)
+ PointerMove ($para.Left + (Scale 4)) $para.Y; Capture
+ if ((Query 71) -ne -1) { throw 'A copy button appeared over a paragraph' }
+ $hover = HoverBox 0
+ Capture ('copy-hover' + $suffix)
+ if ((Query 76) -ne 0) { throw 'A fresh copy button shows the check mark' }
+ $boxFirst = Query 69 0
+ $columnRight = (Row $boxFirst).Left - (Scale 12) + (Query 55)
+ if ([Math]::Abs($hover.Right - ($columnRight - (Scale 6))) -gt 2 -or $hover.Top -ge (Query 61 $boxFirst)) { throw "Copy button is not in the top-right corner: $($hover.Left),$($hover.Top)-$($hover.Right) column right $columnRight" }
+ $text = ClickCopy $hover
+ if ($text -cne ($fenced -join "`r`n")) { throw "Fenced code copied '$text'" }
+ Capture ('copy-done' + $suffix)
+ if ((Query 76) -ne 1) { throw 'Copy button did not show the check mark' }
+ Start-Sleep -Milliseconds 1700
+ Capture
+ if ((Query 76) -ne 0) { throw 'The check mark did not return to Copy' }
+ $text = ClickCopy (HoverBox 1)
+ if ($text -cne ($indented -join "`r`n")) { throw "Indented code copied '$text'" }
+ $text = ClickCopy (HoverBox 2)
+ if ($text -cne "第一行引用`r`n第二行，加粗。") { throw "Quote copied '$text'" }
+ # A table narrower than the column gets its button beside it, not over its header.
+ $tableButton = HoverBox 3
+ $headerEnd = Query 60 (Query 69 3)
+ if ($tableButton.Left -le $headerEnd) { throw "The table's copy button covers its header: $($tableButton.Left) <= $headerEnd" }
+ Capture ('copy-table' + $suffix)
+ $text = ClickCopy $tableButton
+ if ($text -cne "键`t值`r`na`t1`r`nb`t2") { throw "Table copied '$text'" }
+ # A long block: the button keeps to the top of the box's visible part.
+ $boxFirst = Query 69 4
+ for ($i = 0; $i -lt 400 -and (Query 13) -lt ($boxFirst + 5); $i++) { Send 0x100 0x28 ([IntPtr]::Zero); Idle; Capture }
+ if ((Query 13) -lt ($boxFirst + 5)) { throw 'Could not scroll into the long code block' }
+ $sticky = HoverBox 4
+ $topRow = Query 13
+ if ($sticky.Top -ge (Query 61 $topRow)) { throw "Copy button did not keep to the visible top: $($sticky.Top) vs row $topRow at $(Query 61 $topRow)" }
+ $copiedLong = (ClickCopy $sticky) -split "`r`n"
+ if ($copiedLong.Count -ne 120 -or $copiedLong[0] -cne 'code line 000' -or $copiedLong[119] -cne 'code line 119') { throw "Long block copied $($copiedLong.Count) lines" }
+ # Source mode shows every line as code and has no copy buttons.
+ Send 0x111 205 ([IntPtr]::Zero); Idle; Capture
+ if ((Query 67) -ne 0 -or (Query 71) -ne -1) { throw 'Source mode kept copy buttons' }
+ Send 0x111 205 ([IntPtr]::Zero); Idle; Capture
+ if ((Query 67) -ne 5) { throw 'Copy boxes did not return in the preview' }
+ # Ctrl+C goes through the same test seam, never the user's clipboard.
+ Remove-Item -LiteralPath $copyFile -ErrorAction SilentlyContinue
+ Send 0x111 105 ([IntPtr]::Zero)
+ if (-not (Test-Path -LiteralPath $copyFile)) { throw 'Copy did not use the test seam' }
+ $copyGdiBefore = StableGdi
+ for ($round = 0; $round -lt 4; $round++) { [void](ClickCopy (HoverBox 4)); Capture }
+ $copyGdiAfter = StableGdi
+ if ($copyGdiAfter -gt $copyGdiBefore + 2) { throw "Copy buttons leaked GDI handles: $copyGdiBefore -> $copyGdiAfter" }
  StopReader
 
  # Source mode: character selection over exact source text.
@@ -255,8 +342,11 @@ try {
   wide_table_scrolls_alone = $true; unwrapped_tables_natural_width = $true; table_copy_tab_separated = $true
   source_drag_exact = $true; source_double_click_word = $true; source_shift_click_cjk_emoji = $true
   source_select_all_and_esc = $true; source_drag_autoscroll_rows = $scrolled; source_autoscroll_copied_lines = $copiedLines.Count
+  copy_boxes = 5; copy_fenced_without_fences = $true; copy_indented_dedented = $true; copy_quote_as_shown = $true
+  copy_table_tab_separated = $true; copy_button_sticky_top = $true; copy_long_block_lines = $copiedLong.Count
+  copy_check_mark_clears = $true; copy_gdi_before = $copyGdiBefore; copy_gdi_after = $copyGdiAfter
   table_gdi = $tableGdi; gdi_before = $gdiBefore; gdi_after = $gdiAfter
-  screenshots = @("table-wide$suffix.png", "table-scrolled$suffix.png", "table-narrow$suffix.png", "source-selection$suffix.png")
+  screenshots = @("table-wide$suffix.png", "table-scrolled$suffix.png", "table-narrow$suffix.png", "copy-hover$suffix.png", "copy-done$suffix.png", "copy-table$suffix.png", "source-selection$suffix.png")
   limitations = 'Hidden window with synthetic mouse messages; real pointer input and the system clipboard are not exercised (Copy is read through the test seam).'
   exe_bytes = (Get-Item -LiteralPath $Exe).Length
  }
