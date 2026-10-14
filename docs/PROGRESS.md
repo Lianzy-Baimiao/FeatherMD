@@ -1,5 +1,14 @@
 # Progress / continuation notes
 
+## v0.1.9 publication record — 2026-10-14
+
+- 作者/最后修改人：lianzy。用户要求“上传github，发Releases,更新About”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.9
+- Tag/source: 3e5e048b458dc7015b3a115e7ec0c3c9750d2d3e (annotated tag v0.1.9, title “FeatherMD 羽读 v0.1.9 · 排版、图片与 20 款皮肤”). GitHub Actions run 38500655155 (main, the first CI run of 0.1.9) passed on Windows and Ubuntu: all 19 native smokes at 96 DPI with a 1024×720 work area and an en-US locale (default_window "1024x720 in 1024x720"; navigation headings 499/607, wrapped 314/355; table reading width 712, wide table 1343, GDI 24→24; image light/dark 5 images, GDI 27→27; about GDI 25→25; i18n 105 views with no clipped text, "System" resolved to en, 8 live switches GDI 31→31, USER 22→22). The About text measured beforehand at 90–144 DPI also fit on the runner. Tag run 38501192394 also passed.
+- Assets: FeatherMD.exe 1087488 bytes, FeatherMD-0.1.9-windows-x64.zip 2563922 bytes, SHA256SUMS.txt 180 bytes (SHA-256 c1e58a36650022570707bb26eac75dedad60b21f6608900a44b2ee8a0a70154f). All three were downloaded again; they are byte-identical to the local distribution and match the GitHub asset digests. All 44 non-EXE ZIP entries are byte-identical to the blobs at the tag, and the EXE is newer than every compile input. EXE/ZIP hashes are in the candidate entry below.
+- Release-note preview URLs v0.1.9/docs/reading-typography.png (57,207 bytes), reading-skins.png (578,315 bytes) and reading-images.png (29,514 bytes) return HTTP 200, byte-identical to the tagged blobs. releases/latest reports v0.1.9. v0.1.8 tag (78e0e5e) and its asset digests are unchanged.
+- 实网检查（下载的 EXE、各自的临时便携 INI、真实 GitHub API、系统代理设置）：已发布的 v0.1.8 显示“发现新版本 v0.1.9”，详情“FeatherMD 羽读 v0.1.9 · 排版、图片与 20 款皮肤　发布于 2026-10-14”，显示“前往下载页…”与更多按钮徽标，905 ms；v0.1.9 显示“已是最新版本”，无下载按钮与徽标，390 ms（均为单次本机样本）。两者自动检查关闭时都没有自动检查，INI 记录 update_latest=v0.1.9，update_check 仍为 false；临时 INI 已删除。
+- GitHub 仓库 About：简介由“羽读 · 640 KiB native Rust Markdown viewer…”（体积已过时）改为“羽读 · Native Rust Markdown viewer for Windows. One ~1 MiB EXE, bounded-memory paging for huge files, code highlighting, safe HTML, optional local images, 20 skins, 4 UI languages. No browser runtime; offline by default.”；新增 11 个主题：markdown、markdown-viewer、markdown-reader、rust、windows、win32、gdi、native、portable、lightweight、large-files。主页字段保持为空。
+
 ## 2026-10-14 — v0.1.9 candidate: local images, HTML subset, code highlighting, reading layout, 20 skins, preview character selection
 
 - 作者/最后修改人：lianzy。用户需求（2026-10-13 夜间，要求持续工作直到待办全部完成；**未要求提交、推送或发布**）：①右上角图标不好看；②设置增加“显示图片”，默认不勾选；③阅读排版：默认字号 16，行距、标题与代码 / 关键字样式；④支持 p、h1 等 HTML 标签；⑤去掉左上角的英文；⑥多做一些皮肤；⑦遗留：正文默认字体随界面语言、预览按字符选择、段落换行时标点不在行首。
