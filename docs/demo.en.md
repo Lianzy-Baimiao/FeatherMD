@@ -7,7 +7,7 @@ Lighter, so you read more.
 A native Markdown reader written in **Rust**. No browser engine, and no waiting for the whole file to load.
 
 - **Fast first page**: reads only the nearby 128 KiB at a time
-- **Focused reading**: 12 skins, including Book and Antique
+- **Focused reading**: 20 skins, including Book, Antique and night themes
 - **Portable**: one EXE, no runtime to install
 - [x] Interface in 简体中文, 繁體中文, English and 日本語
 - [x] Background search and jump to percentage
@@ -24,7 +24,7 @@ fn main() {
 }
 ```
 
-**Safe defaults**: offline by default; HTML and scripts in documents never run.
+**Safe defaults**: offline by default; HTML tags in documents only shape text, and scripts never run.
 
 [Visit the FeatherMD project](https://github.com/Lianzy-Baimiao/FeatherMD)
 

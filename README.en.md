@@ -11,9 +11,9 @@
 
 ![FeatherMD reading view in English](docs/reading-light.en.png)
 
-The top bar is one compact 34 px row of icons: the **eye / code** capsule switches between preview and source, and **folder / magnifier / ellipsis** open a document, find and show More. Icons are anti-aliased GDI+ vectors: straight lines sit on the pixel grid, curves stay smooth, and hovering shows a name and shortcut.
+The 34 px title bar stays quiet: the feather mark and the document name on the left; on the right, **Open / Find / Appearance / More** share one size and line weight, and hovering shows a soft rounded backdrop with a name and shortcut. The window buttons light up as whole columns, and Close turns red. The **eye / code** switch between preview and source sits at the left of the status bar. Icons are anti-aliased GDI+ vectors: straight lines sit on the pixel grid and curves stay smooth.
 
-**Appearance is a single button**: a sun, moon, monitor or palette shows the current skin. Click it for Light / Dark / System; the fourth row, "More skins…", opens Settings. **Ctrl+T** opens it too: choose with the arrow keys or Tab, Enter to apply, Esc to cancel.
+**Appearance is a single button** (a half-filled circle). Click it for Light / Dark / System; the fourth row, "More skins…", opens the 20 skins in Settings. **Ctrl+T** opens it too: choose with the arrow keys or Tab, Enter to apply, Esc to cancel.
 
 **Right-click → Edit** (Ctrl+E) opens the document in the editor you chose. FeatherMD itself stays read-only; after saving, F5 reloads it at the same place.
 
@@ -42,7 +42,7 @@ The other screenshots in this README show the Simplified Chinese interface; ever
 
 Opening a Markdown file should not start a browser first.
 
-FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you turn on the automatic check or choose "Check for updates". The v0.1.8 Windows x64 EXE is about **914 KiB** (all four interface languages included) and needs no .NET, VC++ runtime or other third-party runtime.
+FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you turn on the automatic check or choose "Check for updates". The v0.1.9 Windows x64 EXE is about **1.04 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
 
 **Large files are not loaded whole before they show.** Only the nearby 128 KiB is read at a time; reading and searching run in the background and only visible lines are drawn. The file's total size does not decide how much memory the first page needs.
 
@@ -51,18 +51,30 @@ FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry
 1. Download **FeatherMD.exe** from Releases, put it in a folder you like and double-click it.
 2. Drop a Markdown file on the window, or press **Ctrl+O**.
 3. Click a heading in the outline to jump to it. The button right of the "Outline" heading hides the outline and the one at the left edge of the text shows it again; **Ctrl+B** toggles it, and the choice is kept.
-4. The eye / code icons switch preview and source; the appearance button picks a skin. The ellipsis "More → Settings…" (Ctrl+,) changes skins, opacity, the reading font and size, the default editor and the interface language; word wrap and the reading width are in More too.
+4. The eye / code switch at the left of the status bar changes between preview and source (Ctrl+R); the appearance button picks a skin. The ellipsis "More → Settings…" (Ctrl+,) changes skins, opacity, the reading font and size, whether images are shown, the default editor and the interface language; word wrap and the reading width are in More too.
 5. **More → About FeatherMD** (F1) shows the version, shortcuts and reading notes, and links to the GitHub project page and to Afdian to support the author. External links ask first, then open in your default browser.
 6. **More → Check for updates…** checks for a new version by hand; the Settings "Updates" page can also check at startup (off by default).
 7. **More → Language…** switches the interface language; it applies as soon as you save.
 
 Windows 10 (1607+) / Windows 11 **x64**. Tested on Windows 11 x64; other versions have not each been checked on real hardware. No installer and no administrator rights. The EXE is not code-signed yet, so Windows SmartScreen may warn about an unknown publisher; check the source and the SHA-256 instead of turning protection off.
 
+### Reading layout, code highlighting and HTML tags
+
+The default size is 16 px with lines about 1.6 times as tall; a blank line is a paragraph gap a little shorter than a line, headings have more room above than below, and levels one and two get a thin rule (a wrapped heading draws it under its last line only). Wrapped list items line up with their text, task items show checkboxes, quotes get a grey bar and secondary text, and table body rows are lightly striped.
+
+Code blocks sit on a rounded panel in a slightly smaller monospace font with the language in the top-left corner. **Code highlighting** covers Rust, C/C++, C#, Java/Kotlin/Scala, Swift, Go, JavaScript/TypeScript, Python, Ruby, PHP, Lua, SQL, shell, PowerShell, batch files, JSON, YAML, TOML/INI, Dockerfile, CSS, HTML/XML and diff: keywords, types, function names, strings, numbers and comments get colours tuned to each skin, and block comments and multi-line strings keep their colour across lines. Inline code and `<kbd>` keys are small rounded chips.
+
+Common **HTML tags** shape the text: `<p>`, `<h1>`–`<h6>`, `<br>`, `<hr>`, `<b>`/`<strong>`, `<i>`/`<em>`, `<u>`, `<s>`/`<del>`, `<code>`, `<kbd>`, `<mark>`, `<sub>`/`<sup>`, `<a>`, `<img>`, `<blockquote>`, `<ul>`/`<ol>`/`<li>`, `<pre>`, `<div>`/`<span>`/`<center>`, `<details>`/`<summary>` (always open), centre/right alignment from `align` attributes and `text-align` styles, and common character entities. The `<h1 align="center">` many READMEs open with goes into the outline too. The content of `<script>`, `<style>`, `<iframe>` and the like is neither shown nor run: tags only change the layout and never execute anything.
+
+![FeatherMD sample page: code highlighting, a centred HTML heading, inline code and keys, a table and a task list](docs/reading-typography.png)
+
 ### Skins and opacity
 
-**More → Settings… → Appearance**: 12 skins — System, Light, Dark, Eye care, **Book** (a warm white page on a linen desk), **Antique** (rice paper, ink-black text, cinnabar accents and a double ruled frame), Sage, Sky, Sakura, Mist, Midnight and Black (for OLED). Picking one previews it on the reader at once, the arrow keys move between cards, Cancel or Esc restores the old one, and a saved choice survives restarts.
+**More → Settings… → Appearance**: 20 skins, light ones first — System, Light, **Paper** (plain white), Mist, Sky, Eye care, **Book** (a warm white page on a linen desk), **Antique** (rice paper, ink-black text, cinnabar accents and a double ruled frame), **Newsprint** (warm grey paper with navy links), Sage, Sakura, **Lilac**; then Dark, **Dusk** (a softer grey for night reading), **Polar** (cool slate blue), Midnight, **Deep sea** (dark teal), **Violet**, **Mocha** (warm brown with amber) and Black (for OLED). Picking one previews it on the reader at once, the arrow keys move between cards, Cancel or Esc restores the old one, and a saved choice survives restarts. Code highlighting colours follow each skin.
 
-**Window opacity** 30%–100% in 5% steps, by dragging or with the arrow keys. It applies only to the reader window; Settings stays opaque, and at 100% no layered window is used. In every skin, body text keeps at least 9.8:1 contrast against its background and secondary text at least 4.3:1.
+**Window opacity** 30%–100% in 5% steps, by dragging or with the arrow keys. It applies only to the reader window; Settings stays opaque, and at 100% no layered window is used. In every skin, body text keeps at least 9.8:1 contrast against its background, secondary text at least 4.3:1 and links at least 4.5:1 (unit-tested).
+
+![FeatherMD: one page in the Paper, Newsprint, Light, Polar, Dark, Deep sea, Violet and Mocha skins](docs/reading-skins.png)
 
 <details>
 <summary>Skin settings and the Book / Antique skins</summary>
@@ -103,6 +115,18 @@ In a long code block the button keeps to the top of the visible part, so there i
 
 ![FeatherMD copy button on a code block](docs/copy-button.png)
 
+### Local images
+
+**More → Settings… → Reading → Show images** is **off by default**. While it is off, an image shows as "[Image: alt text]" and FeatherMD reads no image file at all.
+
+When it is on, only **images on this computer** are shown: relative paths start from the document's folder (so does `/assets/a.png`), and absolute drive paths and `file:///C:/…` work too. The format is recognised from the file's content (PNG, JPEG, GIF, BMP, TIFF, ICO), not its extension; JPEGs are turned upright from their EXIF orientation, transparent parts show the skin behind them, and a GIF shows its first frame. Images scale with the DPI in CSS pixels, `<img width="…" height="…">` sets their size, and they shrink to the text width and never grow taller than the reading area. Lines of only images (logos, screenshots, badges) and small icons inside a paragraph both show, and a linked image can be clicked.
+
+These are **never read**; their alt text and the reason show in their place instead: web images (http/https, `//host/…`, never downloaded), files behind a symbolic link or junction, network drives and shares, device paths, online-only OneDrive files that are not downloaded, missing files, unsupported formats such as SVG or WebP, and images over 32 MiB, 32 megapixels or 16384 px on a side.
+
+Reading and decoding happen on a background thread, so the page never waits; a page shows at most 64 images, decoded images share a budget of about 160 MiB, and images of earlier pages go first. Turning the option off frees every image at once.
+
+![FeatherMD local images: a centred logo, a photo turned upright from EXIF, badges on one line, a wide image fitted to the text, and placeholders that say why](docs/reading-images.png)
+
 ### Interface language
 
 The interface is available in **简体中文 (Simplified Chinese), 繁體中文 (Traditional Chinese), English and 日本語 (Japanese)**. By default it follows the Windows display language: Taiwan, Hong Kong and Macao use Traditional Chinese, other Chinese locales Simplified Chinese, Japanese uses Japanese, and languages without a translation show English.
@@ -121,13 +145,16 @@ When there are too many columns for even the narrowest readable width (about six
 
 ![FeatherMD table fitted to the window](docs/reading-table.png)
 
-### Character selection in source view
+### Character selection
 
-In source view (Ctrl+R) drag to select by character with an I-beam cursor: double-click selects a word, Shift+click extends the selection, and dragging past the top or bottom of the text scrolls and keeps selecting. Ctrl+A selects the loaded page, Esc clears the selection, and Ctrl+C or right-click "Copy selected text" copies it.
+Both the preview and source view (Ctrl+R) select by character with the mouse: double-click selects a word, Shift+click extends the selection, and dragging past the top or bottom of the text scrolls and keeps selecting. Ctrl+A selects the loaded page, Esc clears the selection, and Ctrl+C or right-click "Copy selected text" copies it; without a selection, Copy takes what is visible.
 
-What you copy is the **source** in the file: tabs stay tabs, CJK and emoji are never cut, lines are joined with CRLF, and a very long line split on screen gets no extra breaks. Without a selection, Copy takes the visible source. A selection reaching past the cached page (about 128 KiB) copies only the loaded part, and the status bar says so.
+- **The preview** copies the text as shown: the wrapped lines of one paragraph join into one line (with the spaces taken out at the wraps put back), paragraphs are separated by CRLF, table rows are selected whole and copy as tab-separated cells, and an image copies its alt text. Zooming, resizing or images arriving keep the same characters selected.
+- **Source view** copies the **source** in the file: tabs stay tabs, CJK and emoji are never cut, lines are joined with CRLF, and a very long line split on screen gets no extra breaks.
 
-The preview still selects whole lines; table rows copy as tab-separated cells, ready for a spreadsheet. To copy one code block, quote or table, its Copy button is quicker.
+A selection reaching past the cached page (about 128 KiB) copies only the loaded part, and the status bar says so. To copy one code block, quote or table, its Copy button is quicker.
+
+![FeatherMD character selection in the preview](docs/preview-selection.png)
 
 ![FeatherMD character selection in source view](docs/source-selection.png)
 
@@ -147,7 +174,7 @@ The check is one HTTPS request for the public release information on `api.github
 
 **More (…) → Font and default size…** (the Settings "Reading" page): pick any installed font, Latin or CJK, and a default size of **12–36 px** with a live preview. Save applies and remembers it; Cancel or Esc leaves the current settings alone, and Reset only resets this page's draft until you save.
 
-The body font is used for headings too; interface text keeps its own font, and source view, code blocks and inline code stay monospaced. Characters missing from a font fall back to other Windows fonts. The size is the same saved value that Ctrl+wheel and Ctrl+plus / minus change, so later documents and restarts use the size you saved last.
+The body font is used for headings too; interface text keeps its own font, and source view, code blocks and inline code stay monospaced. Characters missing from a font fall back to other Windows fonts. The default size is 16 px, and the default body font follows the interface language (Microsoft YaHei UI for Simplified Chinese and English, Microsoft JhengHei UI for Traditional Chinese, Meiryo for Japanese) and changes with it; once you pick another font, that font stays. The size is the same saved value that Ctrl+wheel and Ctrl+plus / minus change, so later documents and restarts use the size you saved last.
 
 The header and welcome icons are anti-aliased GDI+ vector curves with round caps, drawn at the display's DPI; there is no icon font, image download or third-party runtime.
 
@@ -162,7 +189,7 @@ The header and welcome icons are anti-aliased GDI+ vector curves with round caps
 
 ### About and project links
 
-**More → About FeatherMD** (F1): a native window in the reader's colours with the version, the GitHub project page and the Afdian page. Expand "Shortcuts and reading notes" for two columns of shortcuts (including Ctrl+E edit, Ctrl+, settings, Ctrl+T appearance and Esc to clear a selection) and notes on one-click copy, table layout, character selection in source view and the paged preview. Tab, Enter and Esc work. The window follows the current skin and interface language.
+**More → About FeatherMD** (F1): a native window in the reader's colours with the version, the GitHub project page and the Afdian page. Expand "Shortcuts and reading notes" for two columns of shortcuts (including Ctrl+E edit, Ctrl+, settings, Ctrl+T appearance and Esc to clear a selection) and notes on one-click copy, table layout, character selection, showing images and the paged preview. Tab, Enter and Esc work. The window follows the current skin and interface language.
 
 <details>
 <summary>The About window: English (light) and Simplified Chinese (dark)</summary>
@@ -218,7 +245,7 @@ The outline lists `#` to `######` headings and skips code fences. To keep large 
 | Context menu | Right-click / Shift+F10 / menu key |
 | Reload (keeps the reading position) | F5 |
 | Select the loaded page | Ctrl+A |
-| Copy the selection (characters in source, lines in preview); visible text when nothing is selected | Ctrl+C |
+| Copy the selection (the shown text in the preview, the source in source view); visible text when nothing is selected | Ctrl+C |
 | Copy a whole code block, quote or table | Hover the block → Copy in its top-right corner |
 | Clear the selection | Esc |
 | Reset reading settings | Ctrl+0 |
@@ -226,26 +253,26 @@ The outline lists `#` to `######` headings and skips code fences. To keep large 
 | Interface language | More → Language… |
 | Help | F1 |
 
-Mouse selection is **by character** in source view (double-click selects a word, Shift+click extends) and by whole line in the preview. With word wrap off, or for a table that is too wide, use the bottom scrollbar or the left/right arrow keys.
+Mouse selection is **by character** in both the preview and source view (double-click selects a word, Shift+click extends); preview tables select whole rows. With word wrap off, or for a table that is too wide, use the bottom scrollbar or the left/right arrow keys.
 
 ### Settings file
 
-Settings go to %APPDATA%\FeatherMD\settings.ini and are saved on every change; the document itself is always read-only. Skin, opacity and editor are stored as `theme`, `opacity` and `editor`; the automatic check as `update_check`, and the time of the last successful check and the latest version it saw as `update_checked` and `update_latest`. The interface language is `language` (`system`, `zh-CN`, `zh-TW`, `en` or `ja`; default `system`). Invalid values fall back to defaults, and UTF-8 files with a BOM are read too.
+Settings go to %APPDATA%\FeatherMD\settings.ini and are saved on every change; the document itself is always read-only. Skin, opacity and editor are stored as `theme`, `opacity` and `editor`; showing images as `images` (`true` / `false`, default `false`); an empty `font_family` means the body font follows the interface language; the automatic check as `update_check`, and the time of the last successful check and the latest version it saw as `update_checked` and `update_latest`. The interface language is `language` (`system`, `zh-CN`, `zh-TW`, `en` or `ja`; default `system`). Invalid values fall back to defaults, and UTF-8 files with a BOM are read too.
 
 For portable settings, create an empty **FeatherMD.ini** next to the EXE; settings are then kept in that file. A single-file setup does not need it. Recent files and document text are never written to settings.
 
 ## What it reads, and its limits
 
 - Documents in UTF-8 / UTF-8 with BOM, in any Unicode the system fonts can show (any language). The interface is in Simplified Chinese, Traditional Chinese, English and Japanese.
-- Headings, bold, italic, strikethrough, inline code, code fences, quotes, lists, task lists, rules, web links and GitHub-style tables (laid out to the window width).
-- Images show their alternative text; nothing is decoded or fetched.
-- Raw HTML is shown as text and never runs. Only http/https links open, after a confirmation.
+- Headings, bold, italic, strikethrough, inline code, code fences (common languages highlighted), quotes, lists, task lists, rules, web links, GitHub-style tables (laid out to the window width) and common HTML tags.
+- Images show their alternative text by default; with "Show images" on, only images on this computer are shown (rules above) and web images are never downloaded.
+- HTML only shapes the text: no scripts run and nothing external loads; unsupported tags and CSS are ignored. Only http/https links open, after a confirmation.
 - **This is a low-memory, paged preview, not a complete CommonMark/GFM browser renderer.** Apart from tables it lays out physical lines, so emphasis across lines, Setext headings, complex nesting (such as a table inside a list), global reference links and the like may not follow the full specification.
 - A page that does not start at the beginning of the file does not scan the whole file to rebuild its state, so code-fence or list context across pages can be incomplete; the status bar says so. A page that starts in the middle of a table without its header shows that part as a table with no header. Switch to source view for the exact text.
 - A very long line is split into safe Unicode pieces of at most 4096 bytes, so one paragraph cannot block the UI.
 - Documents with a UTF-16/UTF-32 BOM get a clear message to convert them to UTF-8 first; other invalid UTF-8 bytes show a replacement character and a note. Files are never rewritten.
 - Full-text search still reads the data in order, so its speed depends on the device; a search can be cancelled. Network drives, hard disks, file locks and system load affect it too.
-- The custom-drawn text does not yet expose full screen-reader semantics. Mouse selection in the preview is by line; character selection is available in source view only.
+- The custom-drawn text does not yet expose full screen-reader semantics. HTML is handled line by line: one tag spread over several lines, table tags (`<table>` shows as lines of text separated by "·") and deeply nested markup may not look as they do in a browser; images inside table cells show their alt text.
 
 **There is no promise of "any size, rendered completely and instantly".** The goals are bounded reads, a fast first page and an interface that stays responsive.
 
@@ -282,8 +309,10 @@ The output is target/release/feathermd.exe. The static MSVC CRT is configured in
 ./scripts/scrollbar-smoke.ps1
 ./scripts/window-smoke.ps1
 ./scripts/settings-smoke.ps1
-# Table layout, horizontal scrolling, copy buttons and character selection (copies go through a test seam, never the clipboard)
+# Table layout, horizontal scrolling, copy buttons and character selection in preview and source (copies go through a test seam, never the clipboard)
 ./scripts/table-smoke.ps1
+# Local images: off by default; when on, size, EXIF orientation, transparency, badges, links, refused junctions and reasons (images are generated by the test)
+./scripts/image-smoke.ps1
 # Every view in all four interface languages: no clipped text, live switching on Save
 ./scripts/i18n-smoke.ps1
 # The edit and update tests use a stand-in editor and a loopback stand-in for the GitHub API, no network

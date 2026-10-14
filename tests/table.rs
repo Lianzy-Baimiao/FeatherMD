@@ -146,6 +146,41 @@ fn cell_lines_break_at_spaces_and_cjk_and_keep_surrogate_pairs() {
 }
 
 #[test]
+fn wrapped_paragraphs_never_start_a_line_with_closing_punctuation() {
+    // Paragraphs break with the same rules as cells; check every width at which no
+    // word has to be split, with and without a hanging first line (list items).
+    let text = utf16(
+        "正文段落：这是一个阅读器，没有浏览器内核。长段落会自动换行（逗号、句号不在行首），like this one…“引号”结束。",
+    );
+    let ends = pens(&text);
+    let closing = "，。、；：？！）】》」』〉〕］｝…—·”’";
+    let opening = "（【《「『〈〔［｛“‘";
+    let starts = |c: u16| closing.encode_utf16().any(|p| p == c);
+    let ends_with = |c: u16| opening.encode_utf16().any(|p| p == c);
+    let widest = table::widest_token(&text, &ends);
+    for width in widest..=text.len() as i32 * 10 {
+        for first in [width, (width - 30).max(widest)] {
+            let lines = table::break_range(&text, &ends, 0, text.len(), first, width);
+            assert!(!lines.is_empty());
+            for (i, &(a, b)) in lines.iter().enumerate() {
+                assert!(a < b, "empty line at width {width}");
+                let room = if i == 0 { first } else { width };
+                let used = ends[b - 1] - if a == 0 { 0 } else { ends[a - 1] };
+                assert!(used <= room, "line {i} overflows {room} at width {width}");
+                assert!(
+                    !starts(text[a]),
+                    "line {i} starts with punctuation at width {width}"
+                );
+                assert!(
+                    !ends_with(text[b - 1]),
+                    "line {i} ends with an opening mark at width {width}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn tables_need_a_header_and_delimiter_row_and_end_at_other_blocks() {
     let page = plain(&[
         "| Name | Size |",

@@ -19,10 +19,18 @@ pub enum Theme {
     Gray,
     Midnight,
     Black,
+    Paper,
+    Newsprint,
+    Lilac,
+    Dusk,
+    Polar,
+    DeepSea,
+    Violet,
+    Mocha,
 }
 impl Theme {
-    /// Display and persistence order; indices are stable for diagnostics.
-    pub const ALL: [Self; 12] = [
+    /// Persistence order; indices are stable for diagnostics, so new skins append.
+    pub const ALL: [Self; 20] = [
         Self::System,
         Self::Light,
         Self::Dark,
@@ -35,6 +43,37 @@ impl Theme {
         Self::Gray,
         Self::Midnight,
         Self::Black,
+        Self::Paper,
+        Self::Newsprint,
+        Self::Lilac,
+        Self::Dusk,
+        Self::Polar,
+        Self::DeepSea,
+        Self::Violet,
+        Self::Mocha,
+    ];
+    /// Settings gallery order, five to a row: light skins first, then dark ones.
+    pub const GALLERY: [Self; 20] = [
+        Self::System,
+        Self::Light,
+        Self::Paper,
+        Self::Gray,
+        Self::Sky,
+        Self::Sepia,
+        Self::Book,
+        Self::Ancient,
+        Self::Newsprint,
+        Self::Green,
+        Self::Pink,
+        Self::Lilac,
+        Self::Dark,
+        Self::Dusk,
+        Self::Polar,
+        Self::Midnight,
+        Self::DeepSea,
+        Self::Violet,
+        Self::Mocha,
+        Self::Black,
     ];
     pub fn resolve(self, system_dark: bool) -> Self {
         match self {
@@ -45,10 +84,24 @@ impl Theme {
     }
     /// Call on a resolved theme; `System` itself is neither light nor dark.
     pub fn is_dark(self) -> bool {
-        matches!(self, Self::Dark | Self::Midnight | Self::Black)
+        matches!(
+            self,
+            Self::Dark
+                | Self::Midnight
+                | Self::Black
+                | Self::Dusk
+                | Self::Polar
+                | Self::DeepSea
+                | Self::Violet
+                | Self::Mocha
+        )
     }
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|t| *t == self).unwrap_or(0)
+    }
+    /// Position of this skin's card in the Settings gallery.
+    pub fn gallery_index(self) -> usize {
+        Self::GALLERY.iter().position(|t| *t == self).unwrap_or(0)
     }
     pub fn key(self) -> &'static str {
         match self {
@@ -64,6 +117,14 @@ impl Theme {
             Self::Gray => "gray",
             Self::Midnight => "midnight",
             Self::Black => "black",
+            Self::Paper => "paper",
+            Self::Newsprint => "newsprint",
+            Self::Lilac => "lilac",
+            Self::Dusk => "dusk",
+            Self::Polar => "polar",
+            Self::DeepSea => "deepsea",
+            Self::Violet => "violet",
+            Self::Mocha => "mocha",
         }
     }
     pub fn from_key(key: &str) -> Option<Self> {
@@ -116,6 +177,7 @@ impl Editor {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
+    /// Reading face; empty follows the interface language (see `reading_font`).
     pub font_family: String,
     pub font_size: i32,
     pub theme: Theme,
@@ -134,12 +196,15 @@ pub struct Settings {
     pub update_latest: String,
     /// Interface language; `None` follows the Windows display language.
     pub language: Option<Lang>,
+    /// Show local images in the preview. Off by default; remote images are never
+    /// downloaded.
+    pub images: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            font_family: "Microsoft YaHei UI".into(),
-            font_size: 18,
+            font_family: String::new(),
+            font_size: 16,
             theme: Theme::System,
             opacity: 100,
             editor: Editor::System,
@@ -151,6 +216,7 @@ impl Default for Settings {
             update_checked: 0,
             update_latest: String::new(),
             language: None,
+            images: false,
         }
     }
 }
@@ -172,6 +238,12 @@ impl Settings {
     pub fn clamp_opacity(value: i64) -> u8 {
         let value = value.clamp(i64::from(Self::MIN_OPACITY), 100);
         (((value + 2) / 5) * 5) as u8
+    }
+
+    /// The reading face in use: the chosen one, or the interface language's.
+    pub fn reading_font(&self) -> &str {
+        Self::validate_font_family(&self.font_family)
+            .unwrap_or_else(|| crate::i18n::current().reading_font())
     }
 
     pub fn path() -> PathBuf {
@@ -200,9 +272,7 @@ impl Settings {
             if let Some((key, value)) = line.trim().split_once('=') {
                 match key.trim() {
                     "font_family" => {
-                        if let Some(family) = Self::validate_font_family(value) {
-                            s.font_family = family.to_string();
-                        }
+                        s.font_family = Self::validate_font_family(value).unwrap_or("").to_string();
                     }
                     "font_size" => {
                         if let Ok(v) = value.trim().parse::<i32>() {
@@ -233,6 +303,7 @@ impl Settings {
                         }
                     }
                     "language" => s.language = Lang::parse(value),
+                    "images" => s.images = value.trim() == "true",
                     _ => {}
                 }
             }
@@ -241,8 +312,8 @@ impl Settings {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "# FeatherMD settings\nfont_family={}\nfont_size={}\ntheme={}\nopacity={}\neditor={}\nwrap={}\nraw={}\nwide={}\noutline={}\nupdate_check={}\nupdate_checked={}\nupdate_latest={}\nlanguage={}\n",
-            Self::validate_font_family(&self.font_family).unwrap_or("Microsoft YaHei UI"),
+            "# FeatherMD settings\nfont_family={}\nfont_size={}\ntheme={}\nopacity={}\neditor={}\nwrap={}\nraw={}\nwide={}\noutline={}\nupdate_check={}\nupdate_checked={}\nupdate_latest={}\nlanguage={}\nimages={}\n",
+            Self::validate_font_family(&self.font_family).unwrap_or(""),
             self.font_size,
             self.theme.key(),
             Self::clamp_opacity(i64::from(self.opacity)),
@@ -258,7 +329,8 @@ impl Settings {
             } else {
                 ""
             },
-            self.language.map_or("system", Lang::code)
+            self.language.map_or("system", Lang::code),
+            self.images
         )
     }
     pub fn save(&self, path: &Path) -> io::Result<()> {

@@ -130,7 +130,9 @@ function Flush { [void][I18nSmoke]::SendMessageW($dialog, 0, [IntPtr]::Zero, [In
 function OpenDialog([int]$command, [string]$title, [int]$ready) {
  Post $window 0x111 $command
  $script:dialog = WaitWindow '#32770' $title
- for ($j = 0; $j -lt 100 -and [I18nSmoke]::GetDlgItem($dialog, $ready) -eq [IntPtr]::Zero; $j++) { Start-Sleep -Milliseconds 20 }
+ # Init enumerates fonts and editors first, which can take seconds on a busy machine.
+ for ($j = 0; $j -lt 500 -and [I18nSmoke]::GetDlgItem($dialog, $ready) -eq [IntPtr]::Zero; $j++) { Start-Sleep -Milliseconds 20 }
+ if ([I18nSmoke]::GetDlgItem($dialog, $ready) -eq [IntPtr]::Zero) { throw "Dialog '$title' did not finish creating control $ready" }
  # The modal loop shows a dialog when it first goes idle, which can come after an
  # early hide; hide until it stays hidden.
  for ($quiet = 0; $quiet -lt 5) {
@@ -145,16 +147,17 @@ function CloseDialog {
  $script:dialog = [IntPtr]::Zero
 }
 function Item([int]$id) { $h = [I18nSmoke]::GetDlgItem($dialog, $id); if ($h -eq [IntPtr]::Zero) { throw "Control $id missing" }; return $h }
-function HeaderLeft { return ((Query 0) - (Scale 132) - (Scale 236) - 1) }
-# Hovers every header and caption control until its tooltip shows.
+function HeaderLeft { return ((Query 0) - (Scale 132) - (Scale 148) - 1) }
+# Hovers every title-bar, caption and footer control until its tooltip shows.
 function HeaderTips([string]$prefix) {
- $left = HeaderLeft; $width = [int](Query 0)
- $points = @(18, 50, 102, 138, 175, 212 | ForEach-Object { $left + (Scale $_) })
- $points += @(0, 1, 2 | ForEach-Object { $width - (Scale 132) - 1 + (Scale ($_ * 44 + 22)) })
+ $left = HeaderLeft; $width = [int](Query 0); $footer = [int](Query 1) - (Scale 15)
+ $points = @(16, 52, 88, 124 | ForEach-Object { ,@(($left + (Scale $_)), (Scale 17)) })
+ $points += @(0, 1, 2 | ForEach-Object { ,@(($width - (Scale 132) - 1 + (Scale ($_ * 44 + 22))), (Scale 17)) })
+ $points += @(26, 54 | ForEach-Object { ,@((Scale $_), $footer) })
  $n = 0
- foreach ($x in $points) {
+ foreach ($point in $points) {
   if ((Query 4) -ne 1) { throw 'Paint before hover failed' }
-  Send $window 0x200 0 ([I18nSmoke]::Point($x, (Scale 17)))
+  Send $window 0x200 0 ([I18nSmoke]::Point($point[0], $point[1]))
   Start-Sleep -Milliseconds 600
   if ((Query 43) -ne 1) { Problem "$prefix tooltip $n did not appear (hover $(Query 44))" }
   Check $window ("$prefix-tip$n")

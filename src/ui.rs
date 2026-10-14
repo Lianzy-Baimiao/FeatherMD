@@ -2,10 +2,13 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 mod about;
 mod chrome;
+mod pictures;
 mod preferences;
+mod reading;
+mod select;
 mod smooth;
 mod snapshot;
-use crate::layout::{FontKey, Fonts, Layout, Row};
+use crate::layout::{FontKey, Fonts, Layout, Picture, Row, Run, View};
 use feathermd::{
     document::{Document, Page, SearchResult, human_size},
     i18n::{self, Lang, tr, trf},
@@ -16,6 +19,7 @@ use feathermd::{
     viewport::Viewport,
     worker::{Reply, Request, SearchRequest, Workers},
 };
+use select::Spot;
 use std::{
     cell::RefCell,
     ffi::OsString,
@@ -180,7 +184,34 @@ fn selected_units(
     let eol = tail && end == usize::MAX && !line.continued;
     (a < b || eol).then(|| (a.min(b) - first, b - first, eol))
 }
-fn rgb(r: u32, g: u32, b: u32) -> u32 {
+/// Pen position after each displayed unit of `run`, in its font.
+unsafe fn pens(dc: HDC, fonts: &mut Fonts, run: &Run) -> Vec<i32> {
+    let mut dx = vec![0; run.text.len()];
+    if run.text.is_empty() {
+        return dx;
+    }
+    let old = SelectObject(dc, fonts.get(run.font));
+    let (mut fit, mut size) = (0, SIZE::default());
+    GetTextExtentExPointW(
+        dc,
+        run.text.as_ptr(),
+        run.text.len() as i32,
+        i32::MAX / 4,
+        &mut fit,
+        dx.as_mut_ptr(),
+        &mut size,
+    );
+    SelectObject(dc, old);
+    dx
+}
+/// Copy text of a preview run: an image copies its alternative text.
+fn push_run(out: &mut String, run: &Run) {
+    match &run.picture {
+        Some(picture) => out.push_str(&picture.alt),
+        None => out.push_str(&String::from_utf16_lossy(&run.text)),
+    }
+}
+const fn rgb(r: u32, g: u32, b: u32) -> u32 {
     r | (g << 8) | (b << 16)
 }
 fn system_uses_dark_theme() -> bool {
@@ -226,7 +257,7 @@ impl Palette {
     }
     #[allow(
         clippy::too_many_arguments,
-        reason = "One positional constructor keeps twelve palettes scannable"
+        reason = "One positional constructor keeps twenty palettes scannable"
     )]
     const fn flat(
         bg: u32,
@@ -373,6 +404,92 @@ impl Palette {
                 rgb(56, 46, 30),
                 rgb(20, 20, 20),
             ),
+            // Plain white paper with crisp ink and a clear blue link.
+            Theme::Paper => Self::flat(
+                rgb(255, 255, 255),
+                rgb(31, 35, 40),
+                rgb(96, 103, 112),
+                rgb(246, 247, 249),
+                rgb(222, 226, 231),
+                rgb(20, 98, 196),
+                rgb(221, 234, 252),
+                rgb(244, 246, 248),
+            ),
+            // Warm grey newsprint, near-black ink and navy links.
+            Theme::Newsprint => Self::flat(
+                rgb(242, 240, 234),
+                rgb(28, 27, 25),
+                rgb(98, 94, 86),
+                rgb(234, 231, 223),
+                rgb(212, 207, 196),
+                rgb(44, 72, 116),
+                rgb(219, 226, 236),
+                rgb(232, 229, 221),
+            ),
+            Theme::Lilac => Self::flat(
+                rgb(247, 243, 251),
+                rgb(46, 36, 60),
+                rgb(107, 94, 124),
+                rgb(239, 233, 246),
+                rgb(220, 209, 233),
+                rgb(118, 62, 160),
+                rgb(230, 216, 244),
+                rgb(238, 231, 246),
+            ),
+            // A soft charcoal for evening reading, lower contrast than Dark.
+            Theme::Dusk => Self::flat(
+                rgb(40, 44, 52),
+                rgb(214, 218, 224),
+                rgb(152, 160, 172),
+                rgb(46, 51, 60),
+                rgb(62, 68, 80),
+                rgb(234, 150, 128),
+                rgb(70, 74, 88),
+                rgb(48, 53, 63),
+            ),
+            // Cool slate and frost blue.
+            Theme::Polar => Self::flat(
+                rgb(42, 49, 61),
+                rgb(228, 232, 238),
+                rgb(158, 168, 184),
+                rgb(49, 57, 70),
+                rgb(68, 78, 95),
+                rgb(136, 176, 216),
+                rgb(62, 80, 102),
+                rgb(52, 60, 74),
+            ),
+            // Deep teal water with sea-green links.
+            Theme::DeepSea => Self::flat(
+                rgb(4, 38, 48),
+                rgb(214, 222, 216),
+                rgb(136, 160, 162),
+                rgb(8, 46, 57),
+                rgb(26, 68, 80),
+                rgb(72, 196, 180),
+                rgb(16, 78, 92),
+                rgb(10, 50, 62),
+            ),
+            Theme::Violet => Self::flat(
+                rgb(36, 32, 52),
+                rgb(234, 230, 244),
+                rgb(166, 158, 190),
+                rgb(42, 38, 60),
+                rgb(62, 56, 86),
+                rgb(198, 158, 252),
+                rgb(68, 58, 108),
+                rgb(46, 41, 66),
+            ),
+            // Roasted brown with cream text and an amber accent.
+            Theme::Mocha => Self::flat(
+                rgb(40, 34, 30),
+                rgb(232, 220, 200),
+                rgb(168, 152, 132),
+                rgb(48, 41, 36),
+                rgb(70, 60, 52),
+                rgb(226, 160, 90),
+                rgb(84, 62, 44),
+                rgb(50, 43, 37),
+            ),
         }
     }
 }
@@ -390,6 +507,14 @@ fn skin_name(theme: Theme) -> &'static str {
         Theme::Gray => tr("雾灰"),
         Theme::Midnight => tr("夜蓝"),
         Theme::Black => tr("纯黑"),
+        Theme::Paper => tr("素白"),
+        Theme::Newsprint => tr("报纸"),
+        Theme::Lilac => tr("丁香"),
+        Theme::Dusk => tr("暮色"),
+        Theme::Polar => tr("极夜"),
+        Theme::DeepSea => tr("深海"),
+        Theme::Violet => tr("紫夜"),
+        Theme::Mocha => tr("咖啡"),
     }
 }
 #[derive(Clone, PartialEq, Eq)]
@@ -457,8 +582,8 @@ struct App {
     width: i32,
     height: i32,
     hits: Vec<HitBox>,
-    /// Preview mode: selected layout rows.
-    selection: Option<(usize, usize)>,
+    /// Preview mode: character selection as (anchor, active) positions.
+    selection: Option<(Spot, Spot)>,
     /// Source mode: character selection as (anchor, active) carets.
     text_selection: Option<(Caret, Caret)>,
     selecting: bool,
@@ -499,6 +624,12 @@ struct App {
     boxes: Vec<CopyBox>,
     /// The box whose copy button was just used, by its first row's source byte.
     copied: Option<(u64, Instant)>,
+    /// Decoded local images (only when Settings → Reading → Show images is on).
+    pictures: pictures::Pictures,
+    /// An image finished while the pointer was dragging; relayout when it ends.
+    pictures_changed: bool,
+    /// Client rectangles of the images the last paint drew (diagnostics).
+    painted_pictures: Vec<RECT>,
 }
 impl App {
     fn new() -> Self {
@@ -512,7 +643,7 @@ impl App {
             menu: null_mut(),
             settings_menu: null_mut(),
             fonts: Fonts::new(96),
-            reading_fonts: Fonts::with_family(96, &settings.font_family),
+            reading_fonts: Fonts::with_family(96, settings.reading_font()),
             settings,
             system_dark: system_uses_dark_theme(),
             settings_path,
@@ -561,7 +692,17 @@ impl App {
             update_checks: 0,
             boxes: Vec::new(),
             copied: None,
+            pictures: pictures::Pictures::default(),
+            pictures_changed: false,
+            painted_pictures: Vec::new(),
         }
+    }
+    /// Folder that relative image paths of the open document start from.
+    fn document_folder(&self) -> PathBuf {
+        self.document
+            .as_ref()
+            .and_then(|d| pictures::folder(&d.path))
+            .unwrap_or_default()
     }
     /// A newer published release recorded by the last successful check.
     fn update_available(&self) -> Option<&str> {
@@ -769,6 +910,8 @@ impl App {
         self.layout = None;
         self.boxes.clear();
         self.copied = None;
+        // F5 and another document read their images afresh.
+        self.pictures.clear();
         self.top = 0;
         self.anchor = 0;
         self.horizontal = 0;
@@ -811,11 +954,42 @@ impl App {
     }
     unsafe fn relayout(&mut self, anchor: u64) {
         self.outline_selected = None;
+        self.pictures_changed = false;
         if let Some(page) = &self.page {
             let blocks = markdown::blocks(&page.lines, self.settings.raw);
             let dc = GetDC(self.hwnd);
             let width = self.body_width();
-            let layout = Layout::build(dc, &blocks, &self.settings, &mut self.reading_fonts, width);
+            // Queue this page's local images first, so layout sees every one.
+            let folder = self.document_folder();
+            let images = self.settings.images && !self.settings.raw;
+            self.pictures.begin();
+            if images {
+                for span in blocks.iter().flat_map(|b| &b.spans) {
+                    if let Some(image) = &span.image
+                        && let feathermd::image::Source::Local(path) =
+                            feathermd::image::resolve(&image.src, &folder)
+                    {
+                        self.pictures.want(&path);
+                    }
+                }
+            }
+            let pictures = &self.pictures;
+            let lookup = |image: &markdown::Image| {
+                if images {
+                    pictures.lookup(&image.src, &folder)
+                } else {
+                    Picture::Off
+                }
+            };
+            let view = View {
+                settings: &self.settings,
+                pictures: &lookup,
+                // An image row stays shorter than the reading area, so row-wise
+                // scrolling can always step past it.
+                max_height: (self.content_bottom() - self.content_top() - self.s(36))
+                    .max(self.s(48)),
+            };
+            let layout = Layout::build(dc, &blocks, &view, &mut self.reading_fonts, width);
             ReleaseDC(self.hwnd, dc);
             // Source mode shows every line as code; only the preview has boxes.
             self.boxes = if self.settings.raw {
@@ -823,9 +997,19 @@ impl App {
             } else {
                 copy_boxes(&blocks, &layout.rows, page)
             };
+            let mut layout = layout;
+            for b in &self.boxes {
+                if matches!(
+                    b.kind,
+                    markdown::BoxKind::Fenced | markdown::BoxKind::Indented
+                ) {
+                    for row in layout.rows.get_mut(b.rows.0..=b.rows.1).unwrap_or(&mut []) {
+                        row.boxed = true;
+                    }
+                }
+            }
             self.layout = Some(layout);
             self.position(anchor, 0);
-            self.selection = None;
             self.scrollbar();
         }
         self.invalidate();
@@ -834,6 +1018,15 @@ impl App {
         if let Some(outcome) = self.update_check.as_ref().and_then(|p| p.poll()) {
             self.update_check = None;
             self.record_update(&outcome, false);
+        }
+        // Decoded images of this page: lay it out again around the same top row,
+        // but not under a drag, which would lose its selection.
+        self.pictures_changed |= self.pictures.receive();
+        if self.pictures_changed && !self.selecting && self.drag.is_none() && !self.loading {
+            let anchor = self.current();
+            let wrapped = self.wrapped_row(self.top);
+            self.relayout(anchor);
+            self.position(anchor, wrapped);
         }
         while let Ok(reply) = self.workers.replies.try_recv() {
             match reply {
@@ -935,7 +1128,6 @@ impl App {
             self.pending_scroll = None;
             self.anchor = anchor;
             self.position(anchor, 0);
-            self.selection = None;
             self.scrollbar();
             self.invalidate();
             return;
@@ -1210,7 +1402,6 @@ impl App {
                     self.top += 1;
                 }
                 self.anchor = self.current();
-                self.selection = None;
             }
         } else {
             self.jump(value);
@@ -1270,12 +1461,15 @@ impl App {
     /// so commands handled while it was open are not overwritten.
     unsafe fn apply_preferences(&mut self, draft: Settings) {
         let reflow = draft.font_family != self.settings.font_family
-            || draft.font_size != self.settings.font_size;
-        if draft.font_family != self.settings.font_family {
-            self.reading_fonts = Fonts::with_family(self.fonts.dpi, &draft.font_family);
-        }
+            || draft.font_size != self.settings.font_size
+            || draft.images != self.settings.images;
         self.settings.font_family = draft.font_family;
         self.settings.font_size = draft.font_size;
+        if !draft.images {
+            // Turned off: free the decoded images at once.
+            self.pictures.clear();
+        }
+        self.settings.images = draft.images;
         self.settings.theme = draft.theme;
         self.settings.opacity = draft.opacity;
         self.settings.editor = draft.editor;
@@ -1288,7 +1482,13 @@ impl App {
         if language {
             self.apply_language();
         }
-        if reflow || language {
+        // The automatic reading face follows the interface language.
+        let face = self.settings.reading_font().to_owned();
+        let refont = self.reading_fonts.family() != face;
+        if refont {
+            self.reading_fonts = Fonts::with_family(self.fonts.dpi, &face);
+        }
+        if reflow || language || refont {
             self.persist();
         } else {
             // Skin, opacity and editor never change layout or the wrapped-row position.
@@ -1309,6 +1509,7 @@ impl App {
             italic: false,
             mono: false,
             strike: false,
+            underline: false,
         });
         SendMessageW(self.edit, WM_SETFONT, font as usize, 1);
         drop(old);
@@ -1559,11 +1760,48 @@ impl App {
         }
         end.checked_sub(1).filter(|&last| last >= self.top)
     }
-    /// Moves the active end of a source selection to the pointer.
+    /// The preview selection in reading order; None when nothing is selected.
+    fn preview_range(&self) -> Option<(Spot, Spot)> {
+        let (a, b) = self.selection?;
+        (a != b).then(|| (a.min(b), a.max(b)))
+    }
+    /// Preview position at client `x` on layout row `index`. A table row is one
+    /// piece: its left half is before it, its right half after it.
+    unsafe fn spot_at(&mut self, index: usize, x: i32) -> Option<Spot> {
+        let origin = {
+            let row = self.layout.as_ref()?.rows.get(index)?;
+            self.left() - self.shift(row)
+        };
+        let row = self.layout.as_ref()?.rows.get(index)?;
+        if let Some(table) = &row.table {
+            let middle = table.edges.last().copied().unwrap_or(0) / 2;
+            let unit = usize::from(x - origin >= middle);
+            return Some(Spot {
+                block: row.start,
+                unit,
+            });
+        }
+        let dc = GetDC(self.hwnd);
+        let fonts = &mut self.reading_fonts;
+        let unit = select::nearest(row, x - origin, |run| pens(dc, fonts, run));
+        ReleaseDC(self.hwnd, dc);
+        Some(Spot {
+            block: row.start,
+            unit,
+        })
+    }
+    /// Moves the active end of a source or preview selection to the pointer.
     unsafe fn drag_to(&mut self, x: i32, y: i32) {
         let Some(index) = self.row_near(y) else {
             return;
         };
+        if !self.settings.raw {
+            if let (Some(spot), Some((anchor, _))) = (self.spot_at(index, x), self.selection) {
+                self.selection = Some((anchor, spot));
+                self.invalidate();
+            }
+            return;
+        }
         if let (Some((caret, _)), Some((anchor, _))) =
             (self.caret_at(index, x), self.text_selection)
         {
@@ -1610,27 +1848,29 @@ impl App {
             let to = self.row_caret(layout.rows.get(last_visible)?, true)?;
             return Some((text::selected(lines, from, to).0, tr("已复制可见内容")));
         }
-        let range = self.selection.unwrap_or((self.top, last_visible));
-        let (a, b) = (range.0.min(range.1), range.0.max(range.1));
-        let mut text = String::new();
-        let mut table_row = None;
-        for row in layout.rows.get(a..=b).unwrap_or(&[]) {
-            if let Some(line) = &row.table {
-                // A wrapped table row is copied once, as tab-separated cells.
-                if table_row != Some(row.start) {
-                    table_row = Some(row.start);
-                    text.push_str(&line.copy);
-                    text.push_str("\r\n");
-                }
-                continue;
-            }
-            table_row = None;
-            for run in &row.runs {
-                text.push_str(&String::from_utf16_lossy(&run.text));
-            }
-            text.push_str("\r\n");
+        if let Some((from, to)) = self.preview_range() {
+            // A selection kept across a page change may reach past the loaded page.
+            let lines = &self.page.as_ref()?.lines;
+            let clipped = lines.first().is_some_and(|l| from.block < l.start)
+                || lines.last().is_some_and(|l| to.block > l.start);
+            let status = if clipped {
+                tr("已复制选中文本中已载入的部分")
+            } else {
+                tr("已复制选中文本")
+            };
+            return Some((select::text(&layout.rows, from, to), status));
         }
-        Some((text, tr("已复制选中行（未选择时复制可见内容）")))
+        // Nothing selected: what is on screen, as shown.
+        let (first, last) = (layout.rows.get(self.top)?, layout.rows.get(last_visible)?);
+        let from = Spot {
+            block: first.start,
+            unit: first.unit,
+        };
+        let to = Spot {
+            block: last.start,
+            unit: select::row_end(last).max(1),
+        };
+        Some((select::text(&layout.rows, from, to), tr("已复制可见内容")))
     }
     unsafe fn copy(&mut self) {
         let Some((text, status)) = self.copy_text() else {
@@ -1675,7 +1915,7 @@ impl App {
                 Some(_) => {}
                 None => {
                     for run in &row.runs {
-                        out.push_str(&String::from_utf16_lossy(&run.text));
+                        push_run(&mut out, run);
                     }
                 }
             }
@@ -1853,10 +2093,10 @@ impl App {
             state(self.layout.is_some()),
             COPY,
             w(
-                if self.settings.raw && self.text_selection.is_some_and(|(a, b)| a != b) {
+                if (self.settings.raw && self.text_selection.is_some_and(|(a, b)| a != b))
+                    || (!self.settings.raw && self.preview_range().is_some())
+                {
                     tr("复制选中文本\tCtrl+C")
-                } else if !self.settings.raw && self.selection.is_some() {
-                    tr("复制选中行\tCtrl+C")
                 } else {
                     tr("复制可见内容\tCtrl+C")
                 },
@@ -1887,9 +2127,15 @@ impl App {
         if lp as i32 == -1 {
             // Shift+F10 / Menu key: anchor to the selection or the first visible line.
             self.document.as_ref()?;
+            // The row holding the selection's start, when it is on screen.
             let row = self
-                .selection
-                .map(|(a, b)| a.min(b))
+                .preview_range()
+                .zip(self.layout.as_ref())
+                .and_then(|((from, _), layout)| {
+                    layout.rows.iter().position(|r| {
+                        r.start == from.block && from.unit < select::row_end(r).max(r.unit + 1)
+                    })
+                })
                 .filter(|row| *row >= self.top)
                 .unwrap_or(self.top);
             let y = self
@@ -1963,8 +2209,20 @@ impl App {
                         ));
                         self.status = tr("已全选当前分页").into();
                     }
-                } else if let Some(l) = &self.layout {
-                    self.selection = Some((0, l.rows.len().saturating_sub(1)));
+                } else if let Some(l) = &self.layout
+                    && let (Some(first), Some(last)) = (l.rows.first(), l.rows.last())
+                {
+                    self.selection = Some((
+                        Spot {
+                            block: first.start,
+                            unit: 0,
+                        },
+                        Spot {
+                            block: last.start,
+                            unit: select::row_end(last).max(1),
+                        },
+                    ));
+                    self.status = tr("已全选当前分页").into();
                 }
             }
 
@@ -1987,6 +2245,8 @@ impl App {
             PREVIEW | SOURCE => {
                 if self.settings.raw != (id == SOURCE) {
                     self.settings.raw = id == SOURCE;
+                    self.selection = None;
+                    self.text_selection = None;
                     self.persist();
                 }
             }
@@ -2052,6 +2312,7 @@ impl App {
             }
             RAW => {
                 self.settings.raw = !self.settings.raw;
+                self.selection = None;
                 self.text_selection = None;
                 self.persist();
             }
@@ -2066,7 +2327,8 @@ impl App {
                     update_latest: std::mem::take(&mut self.settings.update_latest),
                     ..Settings::default()
                 };
-                self.reading_fonts = Fonts::with_family(self.fonts.dpi, &self.settings.font_family);
+                self.reading_fonts =
+                    Fonts::with_family(self.fonts.dpi, self.settings.reading_font());
                 self.persist();
                 self.start_outline();
             }
@@ -2249,6 +2511,7 @@ impl App {
                 italic: false,
                 mono: false,
                 strike: false,
+                underline: false,
             }),
         );
         SetTextColor(dc, color);
@@ -2298,192 +2561,13 @@ impl App {
         } else {
             let left = self.left();
             let body_width = self.body_width();
-            let mut y = self.content_top() + self.s(12);
+            let y = self.content_top() + self.s(12);
             let bottom = self.content_bottom();
             self.paint_page(dc, p);
-            if let Some(layout) = &self.layout {
-                let saved = SaveDC(dc);
-                IntersectClipRect(dc, left, y, left + body_width, bottom);
-                for (index, row) in layout.rows.iter().enumerate().skip(self.top) {
-                    if y >= bottom {
-                        break;
-                    }
-                    let rect = RECT {
-                        left,
-                        top: y,
-                        right: left + body_width,
-                        bottom: y + row.height,
-                    };
-                    let selected = !self.settings.raw
-                        && self
-                            .selection
-                            .is_some_and(|(a, b)| index >= a.min(b) && index <= a.max(b));
-                    let found = self.found.is_some_and(|n| n >= row.start && n < row.end);
-                    let shift = self.shift(row);
-                    if selected || found {
-                        Self::fill(dc, &rect, p.selection);
-                    } else if matches!(
-                        row.kind,
-                        markdown::Kind::Code | markdown::Kind::Fence | markdown::Kind::Quote
-                    ) {
-                        Self::fill(dc, &rect, p.code);
-                    }
-                    if let Some(table) = &row.table {
-                        let (x0, x1) = (
-                            left + table.edges[0] - shift,
-                            left + table.edges[table.edges.len() - 1] - shift,
-                        );
-                        if table.header && !selected && !found {
-                            Self::fill(
-                                dc,
-                                &RECT {
-                                    left: x0,
-                                    right: x1,
-                                    ..rect
-                                },
-                                p.code,
-                            );
-                        }
-                        let line = |top: i32| RECT {
-                            left: x0,
-                            top,
-                            right: x1 + 1,
-                            bottom: top + 1,
-                        };
-                        if table.first {
-                            Self::fill(dc, &line(y), p.edge);
-                        }
-                        if table.close {
-                            Self::fill(dc, &line(y + row.height - 1), p.edge);
-                        }
-                        for &edge in table.edges.iter() {
-                            let x = left + edge - shift;
-                            Self::fill(
-                                dc,
-                                &RECT {
-                                    left: x,
-                                    top: y,
-                                    right: x + 1,
-                                    bottom: y + row.height,
-                                },
-                                p.edge,
-                            );
-                        }
-                    }
-                    // Source mode: highlight the selected characters only.
-                    if self.settings.raw
-                        && let (Some(sel), Some(page), Some(run)) =
-                            (self.text_selection, &self.page, row.runs.first())
-                        && let Some((a, b, eol)) = selected_units(&page.lines, sel, row)
-                    {
-                        let old = SelectObject(dc, self.reading_fonts.get(run.font));
-                        let pen = |n: usize| {
-                            let mut size = SIZE::default();
-                            if n > 0 {
-                                GetTextExtentPoint32W(dc, run.text.as_ptr(), n as i32, &mut size);
-                            }
-                            size.cx
-                        };
-                        let x = left + run.x - shift;
-                        let right = x + pen(b) + if eol { self.s(6) } else { 0 };
-                        Self::fill(
-                            dc,
-                            &RECT {
-                                left: x + pen(a),
-                                right,
-                                ..rect
-                            },
-                            p.text_highlight(),
-                        );
-                        SelectObject(dc, old);
-                    }
-                    if row.kind == markdown::Kind::Quote {
-                        Self::fill(
-                            dc,
-                            &RECT {
-                                right: left + self.s(3),
-                                ..rect
-                            },
-                            p.accent,
-                        );
-                    }
-                    if row.kind == markdown::Kind::Rule {
-                        Self::fill(
-                            dc,
-                            &RECT {
-                                left,
-                                top: y + row.height / 2,
-                                right: left + body_width,
-                                bottom: y + row.height / 2 + 1,
-                            },
-                            p.edge,
-                        );
-                    }
-                    self.hits.push(HitBox {
-                        rect,
-                        action: Hit::Row(index),
-                    });
-                    // Table lines centre the text in their band below the cell padding.
-                    let (inset, band) = row
-                        .table
-                        .as_ref()
-                        .map_or((0, row.height), |t| (t.inset, t.band));
-                    for run in &row.runs {
-                        let x = left + run.x - shift;
-                        let text_y = y + inset + (band - self.fonts.scale(run.font.size)) / 2 - 1;
-                        let old = SelectObject(dc, self.reading_fonts.get(run.font));
-                        if run.code && !selected && !found {
-                            Self::fill(
-                                dc,
-                                &RECT {
-                                    left: x - self.s(2),
-                                    top: text_y - self.s(1),
-                                    right: x + run.width + self.s(2),
-                                    bottom: y + inset + band - self.s(3),
-                                },
-                                p.code,
-                            );
-                        }
-                        SetTextColor(
-                            dc,
-                            if run.link.is_some() {
-                                p.accent
-                            } else if row.kind == markdown::Kind::Fence {
-                                p.muted
-                            } else {
-                                p.fg
-                            },
-                        );
-                        TextOutW(dc, x, text_y, run.text.as_ptr(), run.text.len() as i32);
-                        SelectObject(dc, old);
-                        if let Some(url) = &run.link {
-                            self.hits.push(HitBox {
-                                rect: RECT {
-                                    left: x.max(left),
-                                    top: y,
-                                    right: (x + run.width).min(left + body_width),
-                                    bottom: y + row.height,
-                                },
-                                action: Hit::Link(url.clone()),
-                            });
-                        }
-                    }
-                    if matches!(row.kind, markdown::Kind::Heading(1 | 2)) {
-                        Self::fill(
-                            dc,
-                            &RECT {
-                                left,
-                                top: y + row.height - 1,
-                                right: left + body_width,
-                                bottom: y + row.height,
-                            },
-                            p.edge,
-                        );
-                    }
-                    y += row.height;
-                }
-                RestoreDC(dc, saved);
-            }
+            let saved = SaveDC(dc);
+            IntersectClipRect(dc, left, y, left + body_width, bottom);
+            self.paint_rows(dc, p, y, bottom);
+            RestoreDC(dc, saved);
             self.paint_copy_button(dc, p);
         }
         self.paint_footer(dc, p);
@@ -2749,7 +2833,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 _ => -1,
             },
             // Source selection present and non-empty.
-            63 => app.text_selection.is_some_and(|(a, b)| a != b) as isize,
+            63 => {
+                (app.text_selection.is_some_and(|(a, b)| a != b) || app.preview_range().is_some())
+                    as isize
+            }
+            // Preview: client x of the boundary before unit HIWORD(LPARAM) of layout
+            // row LOWORD(LPARAM).
+            91 => {
+                let (index, unit) = ((lp & 0xffff) as usize, (lp >> 16) as usize);
+                // A plain reference, so the layout and the font cache borrow apart.
+                let app = &mut *app;
+                match app.layout.as_ref().and_then(|l| l.rows.get(index)) {
+                    Some(row) => {
+                        let origin = app.left() - app.shift(row);
+                        let dc = GetDC(hwnd);
+                        let fonts = &mut app.reading_fonts;
+                        let x = select::x_of(row, unit, |run| pens(dc, fonts, run));
+                        ReleaseDC(hwnd, dc);
+                        (origin + x) as isize
+                    }
+                    None => -1,
+                }
+            }
             // Copy boxes: count; per box LPARAM its kind (0 fenced, 1 indented,
             // 2 quote, 3 table), first and last layout row.
             67 => app.boxes.len() as isize,
@@ -2788,6 +2893,40 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     std::fs::write(path, labels.join("\r\n")).map_or(-1, |_| labels.len() as isize)
                 }
                 None => -1,
+            },
+            // Left edge of the reading column (its width is query 55).
+            80 => app.left() as isize,
+            // Images: decoded image runs in the layout, images of this page still
+            // being read, decoded bytes held, images drawn by the last paint and
+            // the client rectangle of drawn image LPARAM.
+            81 => app.layout.as_ref().map_or(0, |l| {
+                l.rows
+                    .iter()
+                    .flat_map(|r| &r.runs)
+                    .filter(|r| r.picture.is_some())
+                    .count() as isize
+            }),
+            82 => app.pictures.pending() as isize,
+            83 => app.pictures.bytes() as isize,
+            90 => app.pictures.bitmaps() as isize,
+            84 => app.painted_pictures.len() as isize,
+            85..=88 => app
+                .painted_pictures
+                .get(lp as usize)
+                .map_or(-1, |r| match wp {
+                    85 => r.left,
+                    86 => r.top,
+                    87 => r.right,
+                    _ => r.bottom,
+                } as isize),
+            // What a click at client point LPARAM hits: 1 link, 2 text row, 3 a
+            // command, 4 another target, 0 nothing.
+            89 => match app.hit(lp as u16 as i16 as i32, (lp >> 16) as u16 as i16 as i32) {
+                Some(Hit::Link(_)) => 1,
+                Some(Hit::Row(_)) => 2,
+                Some(Hit::Command(_)) => 3,
+                Some(_) => 4,
+                None => 0,
             },
             37 => app
                 .outline
@@ -2950,7 +3089,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_DPICHANGED => {
             let anchor = app.current();
             app.fonts = Fonts::new((wp & 0xffff) as u32);
-            app.reading_fonts = Fonts::with_family(app.fonts.dpi, &app.settings.font_family);
+            app.reading_fonts = Fonts::with_family(app.fonts.dpi, app.settings.reading_font());
             let r = &*(lp as *const RECT);
             SetWindowPos(
                 hwnd,
@@ -2971,6 +3110,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 italic: false,
                 mono: false,
                 strike: false,
+                underline: false,
             });
             SendMessageW(app.edit, WM_SETFONT, font as usize, 1);
             app.relayout(anchor);
@@ -3125,10 +3265,30 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             SetCapture(hwnd);
                         }
                     }
-                } else {
-                    app.selection = Some((row, row));
-                    app.selecting = true;
-                    SetCapture(hwnd);
+                } else if let Some(spot) = app.spot_at(row, x) {
+                    // The preview selects characters too, as shown on screen.
+                    if msg == WM_LBUTTONDBLCLK {
+                        let table = app
+                            .layout
+                            .as_ref()
+                            .and_then(|l| l.rows.get(row))
+                            .is_some_and(|r| r.table.is_some());
+                        app.selection = Some(if table {
+                            (Spot { unit: 0, ..spot }, Spot { unit: 1, ..spot })
+                        } else {
+                            let rows = app.layout.as_ref().map_or(&[][..], |l| &l.rows[..]);
+                            select::word(rows, spot.block, spot.unit)
+                        });
+                    } else {
+                        let anchor = match app.selection {
+                            Some((anchor, _)) if wp & MK_SHIFT != 0 => anchor,
+                            _ => spot,
+                        };
+                        app.selection = Some((anchor, spot));
+                        app.selecting = true;
+                        app.drag_point = Some((x, y));
+                        SetCapture(hwnd);
+                    }
                 }
                 app.invalidate();
             }
@@ -3170,25 +3330,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             if app.drag.is_some() {
                 app.drag_scrollbar(x, y);
-            } else if app.selecting && app.settings.raw {
+            } else if app.selecting {
                 app.drag_point = Some((x, y));
                 app.drag_to(x, y);
-            } else if app.selecting {
-                let row = app.hits.iter().find_map(|h| {
-                    if y >= h.rect.top && y < h.rect.bottom {
-                        if let Hit::Row(i) = h.action {
-                            Some(i)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                });
-                if let (Some((start, _)), Some(end)) = (app.selection, row) {
-                    app.selection = Some((start, end));
-                    app.invalidate();
-                }
             }
             0
         }
@@ -3348,7 +3492,7 @@ unsafe fn menus() -> (HMENU, HMENU) {
         (FIND, tr("查找…\tCtrl+F")),
         (GOTO, tr("跳转到百分比…\tCtrl+G")),
         (RELOAD, tr("重新载入\tF5")),
-        (COPY, tr("复制选中行 / 可见内容\tCtrl+C")),
+        (COPY, tr("复制选中文本 / 可见内容\tCtrl+C")),
         (EXIT, tr("退出")),
     ] {
         add(file, id, text);
@@ -3370,7 +3514,7 @@ unsafe fn menus() -> (HMENU, HMENU) {
         (WIDE, tr("宽屏阅读")),
         (RESET, tr("恢复默认阅读设置")),
         (RELOAD, tr("重新载入\tF5")),
-        (COPY, tr("复制选中行 / 可见内容\tCtrl+C")),
+        (COPY, tr("复制选中文本 / 可见内容\tCtrl+C")),
         (CHECK_UPDATES, tr("检查更新…")),
         (ABOUT, tr("关于 FeatherMD…\tF1")),
         (LICENSES, tr("导出内置许可证…")),
@@ -3496,7 +3640,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             a.menu = menu;
             a.settings_menu = settings_menu;
             a.fonts = Fonts::new(GetDpiForWindow(hwnd));
-            a.reading_fonts = Fonts::with_family(a.fonts.dpi, &a.settings.font_family);
+            a.reading_fonts = Fonts::with_family(a.fonts.dpi, a.settings.reading_font());
             a.edit = CreateWindowExW(
                 0,
                 w("EDIT").as_ptr(),
@@ -3517,6 +3661,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
                 italic: false,
                 mono: false,
                 strike: false,
+                underline: false,
             });
             SendMessageW(a.edit, WM_SETFONT, font as usize, 1);
             SendMessageW(a.edit, 0x00c5, 8192, 0);

@@ -13,7 +13,7 @@ const SS_CENTER_MIDDLE: u32 = 0x0201;
 const WIDTH: i32 = 520;
 const HEIGHT: i32 = 480;
 /// Extra height of the expanded shortcuts and notes panel.
-const DETAILS_HEIGHT: i32 = 240;
+const DETAILS_HEIGHT: i32 = 260;
 
 fn destination(button: usize) -> Option<&'static str> {
     match button {
@@ -95,6 +95,7 @@ impl About {
             italic: false,
             mono: false,
             strike: false,
+            underline: false,
         }
     }
     unsafe fn create(&mut self) -> bool {
@@ -194,7 +195,8 @@ impl About {
         }
         for (i, note) in [
             tr("代码块、引用和表格：鼠标移到右上角可一键复制；表格随窗口宽度自动排版。"),
-            tr("源码模式按字符选择，双击选中词语。"),
+            tr("预览与源码都按字符选择，双击选中词语。"),
+            tr("图片默认不显示，可在设置 → 阅读中开启；只读本机文件，不下载网络图片。"),
             tr("预览按有界分页显示；跨页语法可能不完整，可在源码模式核对。"),
         ]
         .into_iter()
@@ -408,7 +410,7 @@ impl About {
         chrome_round(dc, self.rect(32, 78, 56, 56), p.selection, self.s(14));
         chrome_round(dc, self.rect(389, 82, 90, 32), p.panel, self.s(10));
         if self.expanded {
-            chrome_round(dc, self.rect(32, 404, 456, 242), p.panel, self.s(8));
+            chrome_round(dc, self.rect(32, 404, 456, 262), p.panel, self.s(8));
         }
         smooth::icon(
             dc,

@@ -190,14 +190,16 @@ function CheckHitTests {
  Hit 'bottom left' 1 ($height - 2) 16
  Hit 'bottom right' ($width - 2) ($height - 2) 17
 }
-function HeaderLeft { return ((Query 0) - (Scale 132) - (Scale 236) - 1) }
+function HeaderLeft { return ((Query 0) - (Scale 132) - (Scale 148) - 1) }
+# Footer preview/source switch: segment centres 26 and 54 px from the left edge.
+function FooterY { return ((Query 1) - (Scale 15)) }
 function ThemePicker {
- Click ((HeaderLeft) + (Scale 175)) (Scale 17)
+ Click ((HeaderLeft) + (Scale 88)) (Scale 17)
  if ((Query 42) -lt 0) { throw 'Theme icon did not open the picker' }
 }
 function PickTheme([int]$index) {
  ThemePicker
- Click ((HeaderLeft) + (Scale 100)) ((Query 45) + (Scale (38 + 42 * $index + 19)))
+ Click ((HeaderLeft) - (Scale 20)) ((Query 45) + (Scale (38 + 42 * $index + 19)))
  if ((Query 42) -ne -1) { throw 'Theme choice did not close the picker' }
 }
 function HeaderKey([int]$key) {
@@ -207,24 +209,30 @@ function HeaderKey([int]$key) {
 function CheckHeaderSwitches {
  $left = HeaderLeft
  if ((Query 49) -ne (Scale 34)) { throw "Header is not 34 logical pixels: $(Query 49)" }
- foreach ($offset in @(18,50,102,138,175,212)) { Hit 'header icon' ($left + (Scale $offset)) (Scale 17) 1 }
- Click ($left + (Scale 50)) (Scale 17)
- if ((Query 38) -ne 1) { throw 'Top source switch failed' }
- Capture 'header-source'
- Click ($left + (Scale 18)) (Scale 17)
- if ((Query 38) -ne 0) { throw 'Top preview switch failed' }
- [void][WindowSmoke]::SendMessageW($window, 0x200, [IntPtr]::Zero, [WindowSmoke]::Position(($left + (Scale 50)), (Scale 17)))
- if ((Query 44) -ne 410) { throw 'Source icon did not receive hover' }
+ foreach ($offset in @(16,52,88,124)) { Hit 'header icon' ($left + (Scale $offset)) (Scale 17) 1 }
+ foreach ($offset in @(26,54)) { Hit 'footer mode switch' (Scale $offset) (FooterY) 1 }
+ Click (Scale 54) (FooterY)
+ if ((Query 38) -ne 1) { throw 'Footer source switch failed' }
+ Capture 'mode-source'
+ Click (Scale 26) (FooterY)
+ if ((Query 38) -ne 0) { throw 'Footer preview switch failed' }
+ [void][WindowSmoke]::SendMessageW($window, 0x200, [IntPtr]::Zero, [WindowSmoke]::Position((Scale 54), (FooterY)))
+ if ((Query 44) -ne 410) { throw 'Source switch did not receive hover' }
  if ((Query 43) -ne 0) { throw 'Tooltip appeared without its delay' }
  Start-Sleep -Milliseconds 600
- if ((Query 43) -ne 1) { throw "Header icon tooltip did not appear; hover=$(Query 44)" }
- Capture 'header-source-tooltip'
+ if ((Query 43) -ne 1) { throw "Footer switch tooltip did not appear; hover=$(Query 44)" }
+ Capture 'mode-source-tooltip'
+ [void][WindowSmoke]::SendMessageW($window, 0x2a3, [IntPtr]::Zero, [IntPtr]::Zero)
+ [void][WindowSmoke]::SendMessageW($window, 0x200, [IntPtr]::Zero, [WindowSmoke]::Position(($left + (Scale 16)), (Scale 17)))
+ Start-Sleep -Milliseconds 600
+ if ((Query 43) -ne 1 -or (Query 44) -ne 101) { throw "Header icon tooltip did not appear; hover=$(Query 44)" }
+ Capture 'header-open-tooltip'
  [void][WindowSmoke]::SendMessageW($window, 0x2a3, [IntPtr]::Zero, [IntPtr]::Zero)
  if ((Query 43) -ne 0) { throw 'Tooltip did not hide on mouse leave' }
  ThemePicker
  Capture 'theme-picker-light'
  # Panel title is inert, not a click-through into the document.
- Click ($left + (Scale 100)) (Scale 60)
+ Click ($left - (Scale 20)) (Scale 60)
  if ((Query 42) -lt 0) { throw 'Panel whitespace unexpectedly closed the picker' }
  HeaderKey 27
  if ((Query 42) -ne -1 -or (Query 39) -ne 1) { throw 'Escape did not cancel the theme picker' }
@@ -233,7 +241,7 @@ function CheckHeaderSwitches {
  Click (Scale 300) (Scale 330)
  if ((Query 42) -ne -1 -or (Query 9) -ne $before -or (Query 39) -ne 1) { throw 'Outside click did not cancel without activating content' }
  ThemePicker
- Click ($left + (Scale 175)) (Scale 17)
+ Click ($left + (Scale 88)) (Scale 17)
  if ((Query 42) -ne -1) { throw 'Clicking theme icon again did not close the picker' }
  ThemePicker
  HeaderKey 40
@@ -256,7 +264,7 @@ function CheckHeaderSwitches {
  if ((Query 40) -ne (Query 41)) { throw 'System theme refresh failed' }
  Capture 'header-follow-system'
  PickTheme 0
- Click ($left + (Scale 138)) (Scale 17)
+ Click ($left + (Scale 52)) (Scale 17)
  if ((Query 7) -eq 0) { throw 'Search icon did not open search' }
  HeaderKey 27
 }
@@ -356,8 +364,7 @@ try {
  AssertChrome
 
  # Persist the user's preference, not the resolved system color.
- $switchLeft = HeaderLeft
- Click ($switchLeft + (Scale 50)) (Scale 17)
+ Click (Scale 54) (FooterY)
  PickTheme 2
  StopReader
  StartReader $document
@@ -412,8 +419,8 @@ try {
   outline_headings = $headingCount; outline_clicked_byte = $headingOffset; outline_wheel_top = $outlineAfterWheel
   outline_toggle_preserves_position = $true; outline_short_section_click_highlight = $true; outline_preference_survives_restart = $true
   compact_header_icons_and_tooltips = $true; theme_picker_mouse_keyboard_and_dismissal = $true; welcome_has_no_empty_sidebar = $true
-  top_mode_and_theme_switches = $true; system_theme_refresh_and_persistence = $true
-  screenshots = @('initial-light.png', 'outline-click.png', 'outline-scrolled.png', 'outline-hidden.png', 'outline-persisted-hidden.png', 'outline-reopened.png', 'narrow-light.png', 'narrow-dark.png', 'narrow-search.png', 'narrow-search-outline-hidden.png', 'welcome-light.png', 'welcome-dark.png', 'welcome-narrow.png', 'theme-picker-light.png', 'theme-picker-dark.png', 'header-source-tooltip.png', 'narrow-search-theme-picker.png', 'outline-short-click.png')
+  footer_mode_and_header_theme_switches = $true; system_theme_refresh_and_persistence = $true
+  screenshots = @('initial-light.png', 'outline-click.png', 'outline-scrolled.png', 'outline-hidden.png', 'outline-persisted-hidden.png', 'outline-reopened.png', 'narrow-light.png', 'narrow-dark.png', 'narrow-search.png', 'narrow-search-outline-hidden.png', 'welcome-light.png', 'welcome-dark.png', 'welcome-narrow.png', 'theme-picker-light.png', 'theme-picker-dark.png', 'mode-source-tooltip.png', 'header-open-tooltip.png', 'narrow-search-theme-picker.png', 'outline-short-click.png')
   limitations = 'Real pointer input, maximize/minimize/restore, monitor changes, snap, and outline scan limits are not exercised by this hidden-window test.'
   exe_bytes = (Get-Item -LiteralPath $Exe).Length
  }

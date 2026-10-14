@@ -199,8 +199,10 @@ fn opening(unit: u16) -> bool {
         )
     )
 }
-/// A line may break before `units[i]`: after a space, or next to a CJK character,
-/// but not before closing or after opening punctuation.
+/// U+FFFC stands for an image in a line: a line may break on either side of it.
+pub const OBJECT: u16 = 0xfffc;
+/// A line may break before `units[i]`: after a space, or next to a CJK character
+/// or an image, but not before closing or after opening punctuation.
 fn breakable(units: &[u16], i: usize) -> bool {
     if i == 0 || i >= units.len() || high(units[i - 1]) {
         return false;
@@ -209,26 +211,41 @@ fn breakable(units: &[u16], i: usize) -> bool {
     after != 32
         && !closing(after)
         && !opening(before)
-        && (before == 32 || wide(before) || wide(after))
+        && (before == 32 || wide(before) || wide(after) || before == OBJECT || after == OBJECT)
 }
 
 /// Greedy cell line breaking over UTF-16 `units`; `ends[i]` is the pen position
 /// after unit `i`. Returns `[start, end)` ranges with breaking spaces removed. A word
 /// wider than `width` is split; a surrogate pair is never split.
 pub fn break_lines(units: &[u16], ends: &[i32], width: i32) -> Vec<(usize, usize)> {
+    break_range(units, ends, 0, units.len(), width, width)
+}
+
+/// `break_lines` over `units[from..to]`, with the first line `first` wide and the
+/// others `rest` wide (a hanging list item).
+pub fn break_range(
+    units: &[u16],
+    ends: &[i32],
+    from: usize,
+    to: usize,
+    first: i32,
+    rest: i32,
+) -> Vec<(usize, usize)> {
+    let to = to.min(units.len()).min(ends.len());
     let at = |i: usize| if i == 0 { 0 } else { ends[i - 1] };
     let mut lines = Vec::new();
-    let mut start = 0;
-    while start < units.len() && units[start] == 32 {
+    let mut start = from;
+    while start < to && units[start] == 32 {
         start += 1;
     }
-    while start < units.len() {
+    while start < to {
+        let width = if lines.is_empty() { first } else { rest };
         let origin = at(start);
         let mut fit = start;
-        while fit < units.len() && ends[fit] - origin <= width {
+        while fit < to && ends[fit] - origin <= width {
             fit += 1;
         }
-        let mut end = if fit == units.len() {
+        let mut end = if fit == to {
             fit
         } else {
             (start + 1..=fit)
@@ -240,7 +257,7 @@ pub fn break_lines(units: &[u16], ends: &[i32], width: i32) -> Vec<(usize, usize
             end = start + 1;
         }
         // Only a forced split can land inside a surrogate pair: keep the pair whole.
-        if end < units.len() && high(units[end - 1]) {
+        if end < to && high(units[end - 1]) {
             if end - 1 > start {
                 end -= 1;
             } else {
@@ -253,7 +270,7 @@ pub fn break_lines(units: &[u16], ends: &[i32], width: i32) -> Vec<(usize, usize
         }
         lines.push((start, trimmed));
         start = end;
-        while start < units.len() && units[start] == 32 {
+        while start < to && units[start] == 32 {
             start += 1;
         }
     }

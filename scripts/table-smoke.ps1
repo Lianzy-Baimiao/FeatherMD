@@ -230,7 +230,8 @@ try {
  Capture ('copy-hover' + $suffix)
  if ((Query 76) -ne 0) { throw 'A fresh copy button shows the check mark' }
  $boxFirst = Query 69 0
- $columnRight = (Row $boxFirst).Left - (Scale 12) + (Query 55)
+ # Code text is inset inside its box, so measure from the reading column itself.
+ $columnRight = (Query 80) + (Query 55)
  if ([Math]::Abs($hover.Right - ($columnRight - (Scale 6))) -gt 2 -or $hover.Top -ge (Query 61 $boxFirst)) { throw "Copy button is not in the top-right corner: $($hover.Left),$($hover.Top)-$($hover.Right) column right $columnRight" }
  $text = ClickCopy $hover
  if ($text -cne ($fenced -join "`r`n")) { throw "Fenced code copied '$text'" }
@@ -272,6 +273,39 @@ try {
  for ($round = 0; $round -lt 4; $round++) { [void](ClickCopy (HoverBox 4)); Capture }
  $copyGdiAfter = StableGdi
  if ($copyGdiAfter -gt $copyGdiBefore + 2) { throw "Copy buttons leaked GDI handles: $copyGdiBefore -> $copyGdiAfter" }
+ StopReader
+
+ # Preview: character selection over the text as shown (proportional font, so
+ # positions come from the reader: query 91 is the x of a unit boundary).
+ StartReader $source "theme=$Theme`nfont_size=18`nwrap=true`n"
+ Capture
+ function UnitX([int]$row, [int]$unit) { return [int](Query 91 (($unit -shl 16) -bor $row)) }
+ PointerDown (UnitX 0 6) (Row 0).Y
+ PointerMove (UnitX 1 3) (Row 1).Y
+ PointerMove (UnitX 2 4) (Row 2).Y
+ PointerUp (UnitX 2 4) (Row 2).Y
+ $expected = "beta gamma delta`r`nsecond line here`r`none "
+ if ((Copied) -cne $expected) { throw "Preview drag copied '$(Copied)'" }
+ if ((Query 63) -ne 1) { throw 'Preview drag left no selection' }
+ Capture ('preview-selection' + $suffix)
+ # Double-click a word; Shift+click across CJK and an emoji; select all; Esc.
+ $x = [int](((UnitX 0 7) + (UnitX 0 8)) / 2)
+ PointerDown $x (Row 0).Y; PointerUp $x (Row 0).Y
+ Send 0x203 1 ([TableSmoke]::Point($x, (Row 0).Y)); PointerUp $x (Row 0).Y
+ if ((Copied) -cne 'beta') { throw "Preview double-click selected '$(Copied)'" }
+ $r3 = Row 3
+ PointerDown (UnitX 3 0) $r3.Y; PointerUp (UnitX 3 0) $r3.Y
+ PointerDown ($r3.Right + 40) $r3.Y 5; PointerUp ($r3.Right + 40) $r3.Y
+ if ((Copied) -cne $sourceLines[3]) { throw "Preview Shift+click copied '$(Copied)'" }
+ Send 0x111 108 ([IntPtr]::Zero)
+ if ((Copied) -cne ($sourceLines -join "`r`n")) { throw "Preview select all copied '$(Copied)'" }
+ Send 0x100 0x1b ([IntPtr]::Zero)
+ if ((Query 63) -ne 0) { throw 'Esc did not clear the preview selection' }
+ # The selection keeps its characters through a relayout (a larger font).
+ PointerDown (UnitX 0 6) (Row 0).Y; PointerMove (UnitX 0 10) (Row 0).Y; PointerUp (UnitX 0 10) (Row 0).Y
+ Send 0x111 202 ([IntPtr]::Zero); Idle; Capture
+ if ((Copied) -cne 'beta') { throw "Zooming changed the preview selection: '$(Copied)'" }
+ Send 0x111 203 ([IntPtr]::Zero); Idle
  StopReader
 
  # Source mode: character selection over exact source text.

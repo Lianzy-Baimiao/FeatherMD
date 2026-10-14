@@ -104,13 +104,13 @@ function Capture([IntPtr]$h, [string]$name) {
  try { $bitmap.Save((Join-Path $Output $name), [Drawing.Imaging.ImageFormat]::Png); return $bitmap.Clone() } finally { $bitmap.Dispose() }
 }
 function Badge {
- # Any accent pixel in the top-right corner of the More button (header_left + 210..228, 4..18 logical px).
+ # Any accent pixel in the top-right corner of the More button (header_left + 124..140, 4..18 logical px).
  $dpi = Query 3
- $left = [int](Query 0) - [Math]::Floor(132 * $dpi / 96) - [Math]::Floor(236 * $dpi / 96) - 1
+ $left = [int](Query 0) - [Math]::Floor(132 * $dpi / 96) - [Math]::Floor(148 * $dpi / 96) - 1
  $image = Capture $window 'header.png'
  try {
   for ($y = [Math]::Floor(4 * $dpi / 96); $y -le [Math]::Floor(18 * $dpi / 96); $y++) {
-   for ($x = $left + [Math]::Floor(210 * $dpi / 96); $x -le $left + [Math]::Floor(228 * $dpi / 96); $x++) {
+   for ($x = $left + [Math]::Floor(124 * $dpi / 96); $x -le $left + [Math]::Floor(140 * $dpi / 96); $x++) {
     $c = $image.GetPixel($x, $y)
     if ("$($c.R),$($c.G),$($c.B)" -eq $accent) { return $accent }
    }

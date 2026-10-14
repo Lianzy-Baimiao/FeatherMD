@@ -44,7 +44,8 @@ $snapshot = Join-Path $Output 'settings.bmp'
 $oldSnapshot = $env:FEATHERMD_TEST_SNAPSHOT
 $createdIni = $false
 $oldDpi = [SettingsSmoke]::SetThreadDpiAwarenessContext([IntPtr](-4))
-$skins = @('跟随系统','浅色','深色','护眼','书本','古籍','豆沙绿','天青','樱粉','雾灰','夜蓝','纯黑')
+# Gallery order (card ids 1120+): light skins, then dark ones. Queries 39/47 report Theme::ALL indices.
+$skins = @('跟随系统','浅色','素白','雾灰','天青','护眼','书本','古籍','报纸','豆沙绿','樱粉','丁香','深色','暮色','极夜','夜蓝','深海','紫夜','咖啡','纯黑')
 $themeIndex = @{ system = 0; light = 1; dark = 2; sepia = 3 }[$Theme]
 function Query([int]$id) { [SettingsSmoke]::SendMessageW($window, 0x802a, [IntPtr]$id, [IntPtr]::Zero).ToInt64() }
 function Post([IntPtr]$h, [uint32]$message, [int]$value) {
@@ -104,7 +105,7 @@ try {
  StartReader
  $page = @{ light = '252,252,250'; dark = '25,29,34'; sepia = '247,239,221' }[$Theme]
 
- # Appearance page: twelve named skin cards, opened from More → Settings.
+ # Appearance page: twenty named skin cards, opened from More → Settings.
  OpenSettings 415
  if ([SettingsSmoke]::IsWindowEnabled($window)) { throw 'Settings is not modal' }
  if ((Query 12) -ne 18) { throw 'Reader is blocked during the Settings modal loop' }
@@ -114,8 +115,8 @@ try {
  if (([SettingsSmoke]::GetWindowLongW($dialog, -20) -band 0x80000) -ne 0) { throw 'Settings window must stay opaque' }
  Capture $dialog "appearance-$Theme.png" $page
 
- # Clicking a card previews it on the reader without saving.
- Post (Item 1125) 0xf5 0; Flush
+ # Clicking a card previews it on the reader without saving (card 7 is Ancient, ALL index 5).
+ Post (Item 1127) 0xf5 0; Flush
  if ((Query 47) -ne 5 -or (Query 39) -ne $themeIndex) { throw "Ancient preview failed: preview=$(Query 47) saved=$(Query 39)" }
  Capture $dialog 'appearance-ancient.png' '236,224,197'
  Capture $window 'preview-ancient.png'
@@ -128,9 +129,9 @@ try {
  if ((Query 47) -ne -1 -or (Query 39) -ne $themeIndex -or (Query 48) -ne 255 -or (Layered)) { throw 'Cancel did not restore skin and opacity' }
  if ((Get-Content -LiteralPath $ini -Raw) -match 'opacity=80|theme=ancient') { throw 'Cancel saved the draft' }
 
- # Save a skin and opacity.
+ # Save a skin and opacity (card 6 is Book, ALL index 4).
  OpenSettings 415
- Post (Item 1124) 0xf5 0; Flush
+ Post (Item 1126) 0xf5 0; Flush
  for ($i = 0; $i -lt 5; $i++) { Post (Item 1140) 0x100 0x25; Flush }
  Post $dialog 0x111 1; WaitClosed
  Start-Sleep -Milliseconds 80
@@ -139,14 +140,16 @@ try {
  if ($saved -notmatch '(?m)^theme=book\r?$' -or $saved -notmatch '(?m)^opacity=75\r?$') { throw 'Skin/opacity not persisted' }
  Capture $window 'reading-book.png'
 
- # Arrow keys move through the 4x3 grid and preview; Escape cancels.
+ # Arrow keys move through the 5x4 grid and preview; Escape cancels.
  OpenSettings 415
- Post (Item 1124) 0x100 0x27; Flush
+ Post (Item 1126) 0x100 0x27; Flush
  if ((Query 47) -ne 5) { throw "Right arrow did not select Ancient: $(Query 47)" }
- Post (Item 1125) 0x100 0x28; Flush
- if ((Query 47) -ne 9) { throw "Down arrow did not select Gray: $(Query 47)" }
- Post (Item 1129) 0x100 0x25; Flush
- if ((Query 47) -ne 8) { throw "Left arrow did not select Pink: $(Query 47)" }
+ Post (Item 1127) 0x100 0x28; Flush
+ if ((Query 47) -ne 2) { throw "Down arrow did not select Dark: $(Query 47)" }
+ Post (Item 1132) 0x100 0x25; Flush
+ if ((Query 47) -ne 14) { throw "Left arrow did not select Lilac: $(Query 47)" }
+ Post (Item 1131) 0x100 0x26; Flush
+ if ((Query 47) -ne 4) { throw "Up arrow did not select Book: $(Query 47)" }
  # Restore defaults resets only this page's draft.
  Post (Item 1103) 0xf5 0; Flush
  if ((Query 47) -ne 0 -or (Query 48) -ne 255) { throw 'Appearance defaults did not reset skin/opacity' }
@@ -174,10 +177,22 @@ try {
  Post $dialog 0x111 1; WaitClosed
  if ((Get-Content -LiteralPath $ini -Raw) -notmatch '(?m)^editor=notepad\r?$') { throw 'Editor choice not persisted' }
 
- # Reading page keeps the former font dialog behaviour.
+ # Reading page keeps the former font dialog behaviour, plus "Show images", off by default.
  OpenSettings 414
  Capture $dialog 'reading.png'
- Post $dialog 0x100 27; WaitClosed
+ if ([SettingsSmoke]::SendMessageW((Item 1105), 0xf0, [IntPtr]::Zero, [IntPtr]::Zero).ToInt64() -ne 0) { throw 'Show images is checked by default' }
+ Post (Item 1105) 0xf5 0; Flush
+ if ([SettingsSmoke]::SendMessageW((Item 1105), 0xf0, [IntPtr]::Zero, [IntPtr]::Zero).ToInt64() -ne 1) { throw 'Show images did not check' }
+ Capture $dialog 'reading-images.png'
+ Post $dialog 0x111 1; WaitClosed
+ if ((Get-Content -LiteralPath $ini -Raw) -notmatch '(?m)^images=true\r?$') { throw 'Show images not persisted' }
+ OpenSettings 414
+ if ([SettingsSmoke]::SendMessageW((Item 1105), 0xf0, [IntPtr]::Zero, [IntPtr]::Zero).ToInt64() -ne 1) { throw 'Show images not restored' }
+ # Restore defaults on this page clears it again.
+ Post (Item 1103) 0xf5 0; Flush
+ if ([SettingsSmoke]::SendMessageW((Item 1105), 0xf0, [IntPtr]::Zero, [IntPtr]::Zero).ToInt64() -ne 0) { throw 'Reading defaults kept Show images' }
+ Post $dialog 0x111 1; WaitClosed
+ if ((Get-Content -LiteralPath $ini -Raw) -notmatch '(?m)^images=false\r?$') { throw 'Show images default not saved' }
 
  $gdiBefore = StableGdi
  for ($i = 0; $i -lt 12; $i++) {
@@ -195,6 +210,7 @@ try {
  $metrics = [ordered]@{
   result = 'PASS'; theme = $Theme; skins = $skins.Count; live_preview_and_cancel = $true; opacity_keyboard_and_alpha = $true
   arrow_grid_navigation = $true; page_defaults = $true; picker_gallery_row = $true; editor_choice_persisted = $true
+  show_images_default_off_saved_and_reset = $true
   save_and_restart = $true; gdi_before = $gdiBefore; gdi_after = $gdiAfter
   limitations = 'Hidden windows and native messages; no physical pointer, real desktop compositing or multi-monitor DPI checks.'
  }

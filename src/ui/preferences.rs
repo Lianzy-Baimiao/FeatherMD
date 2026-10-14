@@ -22,8 +22,11 @@ const FAMILY: usize = 1101;
 const SIZE: usize = 1102;
 const DEFAULTS: usize = 1103;
 const ERROR: usize = 1104;
+const SHOW_IMAGES: usize = 1105;
 const NAV: [usize; 5] = [1110, 1111, 1112, 1113, 1114];
+/// Skin cards 1120–1139, one per `Theme::GALLERY` entry, five to a row.
 const CARD: usize = 1120;
+const GALLERY_COLUMNS: i32 = 5;
 const OPACITY: usize = 1140;
 const OPACITY_VALUE: usize = 1141;
 const EDITOR_LIST: usize = 1150;
@@ -202,8 +205,8 @@ impl Prefs {
         EnumFontFamiliesExW(dc, &lf, Some(enum_font), &mut names as *mut _ as isize, 0);
         ReleaseDC(self.hwnd, dc);
         // Keep a previously saved choice visible even if a font was uninstalled.
-        names.insert(self.draft.font_family.clone());
-        names.insert(Settings::default().font_family);
+        names.insert(self.draft.reading_font().to_owned());
+        names.insert(i18n::current().reading_font().to_owned());
         self.families = names.into_iter().collect();
         // Fixed metadata probes only; see editor::detect.
         self.editors = vec![
@@ -239,13 +242,14 @@ impl Prefs {
         let page = Some(0);
         self.label(tr("皮肤"), 1210, (page, [X0, 24, 300, 30]), TITLE);
         self.label(
-            tr("书本、古籍与常用配色，选择后立即预览。"),
+            tr("纸张、书本、夜读与常用配色，选择后立即预览。"),
             1211,
             (page, [X0, 58, 470, 22]),
             NOTE,
         );
-        for (i, theme) in Theme::ALL.into_iter().enumerate() {
-            let (column, row) = (i as i32 % 4, i as i32 / 4);
+        // Card ids follow the gallery order: light skins, then dark ones.
+        for (i, theme) in Theme::GALLERY.into_iter().enumerate() {
+            let (column, row) = (i as i32 % GALLERY_COLUMNS, i as i32 / GALLERY_COLUMNS);
             let card = self.add(
                 "BUTTON",
                 skin_name(theme),
@@ -256,18 +260,18 @@ impl Prefs {
                     } else {
                         0
                     },
-                (page, [X0 + column * 121, 92 + row * 96, 109, 86]),
+                (page, [X0 + column * 97, 88 + row * 76, 88, 70]),
                 BODY,
             );
             SetWindowSubclass(card, Some(button_proc), 1, 0);
         }
-        self.label(tr("窗口不透明度"), 1212, (page, [X0, 392, 200, 22]), BODY);
+        self.label(tr("窗口不透明度"), 1212, (page, [X0, 394, 200, 22]), BODY);
         self.add(
             "STATIC",
             "",
             OPACITY_VALUE,
             SS_NOPREFIX | SS_RIGHT,
-            (page, [X0 + 300, 392, 176, 22]),
+            (page, [X0 + 300, 394, 176, 22]),
             Look(14, true, Tone::Accent),
         );
         let slider = self.add(
@@ -335,14 +339,38 @@ impl Prefs {
         self.label(
             tr("仅正文与标题使用此字体，代码仍保持等宽。"),
             1206,
-            (page, [X0, 352, 480, 22]),
+            (page, [X0, 310, 480, 22]),
             NOTE,
         );
         self.label(
             tr("字号范围 12–36 px · 保存后自动记住"),
             1207,
-            (page, [X0, 378, 480, 22]),
+            (page, [X0, 334, 480, 22]),
             NOTE,
+        );
+        let images = self.add(
+            "BUTTON",
+            tr("显示图片(&I)"),
+            SHOW_IMAGES,
+            WS_TABSTOP | BS_AUTOCHECKBOX as u32,
+            (page, [X0, 376, 360, 26]),
+            BODY,
+        );
+        SendMessageW(
+            images,
+            BM_SETCHECK,
+            if self.draft.images {
+                BST_CHECKED as usize
+            } else {
+                0
+            },
+            0,
+        );
+        self.label(
+            tr("只显示本机上的图片；网络图片不会下载，以替代文字显示。"),
+            1208,
+            (page, [X0 + 28, 404, 452, 40]),
+            Look(12, false, Tone::Muted),
         );
 
         // External editor.
@@ -660,7 +688,7 @@ impl Prefs {
     unsafe fn layout(&mut self, center: bool) {
         let old_ui =
             std::mem::replace(&mut self.ui, Fonts::new(GetDpiForWindow(self.hwnd).max(96)));
-        self.preview = Fonts::with_family(self.ui.dpi, &self.draft.font_family);
+        self.preview = Fonts::with_family(self.ui.dpi, self.draft.reading_font());
         self.caption();
         let mut bounds = self.rect(0, 0, WIDTH, HEIGHT);
         AdjustWindowRectExForDpi(
@@ -694,6 +722,7 @@ impl Prefs {
                 italic: false,
                 mono: false,
                 strike: false,
+                underline: false,
             });
             SendMessageW(control.hwnd, WM_SETFONT, font as usize, 1);
             SetWindowPos(
@@ -762,7 +791,7 @@ impl Prefs {
         GetDlgItem(
             self.hwnd,
             match self.page {
-                0 => (CARD + self.draft.theme.index()) as i32,
+                0 => (CARD + self.draft.theme.gallery_index()) as i32,
                 1 => FAMILY as i32,
                 2 => EDITOR_LIST as i32,
                 4 => LANGUAGE_LIST as i32,
@@ -783,7 +812,7 @@ impl Prefs {
     unsafe fn select_skin(&mut self, theme: Theme) {
         self.draft.theme = theme;
         // Radio-group semantics: only the selected card is a Tab stop.
-        for (i, candidate) in Theme::ALL.into_iter().enumerate() {
+        for (i, candidate) in Theme::GALLERY.into_iter().enumerate() {
             let card = GetDlgItem(self.hwnd, (CARD + i) as i32);
             let style = GetWindowLongPtrW(card, GWL_STYLE) as u32;
             let style = if candidate == theme {
@@ -854,7 +883,7 @@ impl Prefs {
         let family = self
             .families
             .iter()
-            .position(|f| f == &self.draft.font_family)
+            .position(|f| f == self.draft.reading_font())
             .unwrap_or(0);
         SendDlgItemMessageW(self.hwnd, FAMILY as i32, CB_SETCURSEL, family, 0);
         SetDlgItemTextW(
@@ -894,7 +923,9 @@ impl Prefs {
             1 => {
                 self.draft.font_family = defaults.font_family;
                 self.draft.font_size = defaults.font_size;
-                self.preview = Fonts::with_family(self.ui.dpi, &self.draft.font_family);
+                self.draft.images = defaults.images;
+                SendDlgItemMessageW(self.hwnd, SHOW_IMAGES as i32, BM_SETCHECK, 0, 0);
+                self.preview = Fonts::with_family(self.ui.dpi, self.draft.reading_font());
                 self.set_draft();
                 self.update();
             }
@@ -937,8 +968,14 @@ impl Prefs {
             && let Some(family) = self.families.get(index)
         {
             self.draft.font_size = size;
-            if &self.draft.font_family != family {
-                self.draft.font_family = family.clone();
+            if self.draft.reading_font() != family {
+                // The language's own face stays automatic, so it follows a later
+                // language change; any other face is remembered by name.
+                self.draft.font_family = if family == i18n::current().reading_font() {
+                    String::new()
+                } else {
+                    family.clone()
+                };
                 self.preview = Fonts::with_family(self.ui.dpi, family);
             }
         }
@@ -958,6 +995,7 @@ impl Prefs {
                 italic: false,
                 mono: false,
                 strike: false,
+                underline: false,
             }),
         );
         SetBkMode(dc, TRANSPARENT as i32);
@@ -989,10 +1027,10 @@ impl Prefs {
         Self::fill(dc, &self.rect(X0, 484, WIDTH - X0 - 28, 1), p.edge);
         match self.page {
             1 => {
-                chrome::chrome_round(dc, self.rect(X0, 198, 480, 136), p.panel, self.s(14));
+                chrome::chrome_round(dc, self.rect(X0, 196, 480, 100), p.panel, self.s(14));
                 for (text, y, bold) in [
-                    (tr("字里行间，慢慢读。"), 214, true),
-                    ("FeatherMD · A little room to read.", 270, false),
+                    (tr("字里行间，慢慢读。"), 204, true),
+                    ("FeatherMD · A little room to read.", 246, false),
                 ] {
                     let font = self.preview.get(FontKey {
                         size: self.draft.font_size,
@@ -1000,6 +1038,7 @@ impl Prefs {
                         italic: false,
                         mono: false,
                         strike: false,
+                        underline: false,
                     });
                     SelectObject(dc, font);
                     SetBkMode(dc, TRANSPARENT as i32);
@@ -1130,7 +1169,7 @@ impl Prefs {
         let saved = SaveDC(dc);
         let p = self.palette();
         let index = item.CtlID as usize - CARD;
-        let theme = Theme::ALL[index.min(Theme::ALL.len() - 1)];
+        let theme = Theme::GALLERY[index.min(Theme::GALLERY.len() - 1)];
         let selected = theme == self.draft.theme;
         let r = item.rcItem;
         Self::fill(dc, &r, p.page);
@@ -1138,7 +1177,7 @@ impl Prefs {
             left: r.left + self.s(3),
             top: r.top + self.s(3),
             right: r.right - self.s(3),
-            bottom: r.bottom - self.s(26),
+            bottom: r.bottom - self.s(22),
         };
         if selected || hover(item.hwndItem) {
             chrome::chrome_round(
@@ -1221,7 +1260,7 @@ impl Prefs {
         };
         chrome::chrome_round(dc, inner, skin.bg, radius - 1);
         let header = RECT {
-            bottom: inner.top + self.s(11),
+            bottom: inner.top + self.s(9),
             ..inner
         };
         let saved = SaveDC(dc);
@@ -1238,10 +1277,10 @@ impl Prefs {
             skin.edge,
         );
         let sheet = RECT {
-            left: inner.left + self.s(10),
-            top: header.bottom + self.s(5),
-            right: inner.right - self.s(10),
-            bottom: inner.bottom - self.s(4),
+            left: inner.left + self.s(8),
+            top: header.bottom + self.s(4),
+            right: inner.right - self.s(8),
+            bottom: inner.bottom - self.s(3),
         };
         if skin.page != skin.bg {
             chrome::chrome_round(dc, sheet, skin.page, self.s(3));
@@ -1260,12 +1299,13 @@ impl Prefs {
                 );
             }
         }
-        let x = sheet.left + self.s(10);
-        for (y, width, height, color) in [
-            (6, 46, 4, skin.fg),
-            (15, 64, 3, skin.muted),
-            (22, 54, 3, skin.muted),
-            (29, 30, 3, skin.accent),
+        // A heading, a line of text and a link, sized to the sheet.
+        let x = sheet.left + self.s(6);
+        let room = (sheet.right - self.s(6) - x).max(1);
+        for (y, percent, height, color) in [
+            (5, 62, 4, skin.fg),
+            (13, 100, 3, skin.muted),
+            (20, 46, 3, skin.accent),
         ] {
             let top = sheet.top + self.s(y);
             if top + self.s(height) > sheet.bottom {
@@ -1276,7 +1316,7 @@ impl Prefs {
                 RECT {
                     left: x,
                     top,
-                    right: (x + self.s(width)).min(sheet.right - self.s(8)),
+                    right: x + room * percent / 100,
                     bottom: top + self.s(height),
                 },
                 color,
@@ -1591,7 +1631,7 @@ unsafe extern "system" fn button_proc(
     hover: usize,
 ) -> isize {
     let control = GetDlgCtrlID(hwnd) as usize;
-    let card = (CARD..CARD + Theme::ALL.len()).contains(&control);
+    let card = (CARD..CARD + Theme::GALLERY.len()).contains(&control);
     match msg {
         WM_GETDLGCODE if card => {
             return DefSubclassProc(hwnd, msg, wp, lp) | DLGC_WANTARROWS as isize;
@@ -1607,12 +1647,12 @@ unsafe extern "system" fn button_proc(
         }
         WM_KEYDOWN if card && (0x25..=0x28).contains(&wp) => {
             let index = (control - CARD) as i32;
-            let count = Theme::ALL.len() as i32;
+            let count = Theme::GALLERY.len() as i32;
             let next = match wp {
                 0x25 => index - 1,
                 0x27 => index + 1,
-                0x26 => index - 4,
-                _ => index + 4,
+                0x26 => index - GALLERY_COLUMNS,
+                _ => index + GALLERY_COLUMNS,
             };
             if (0..count).contains(&next) {
                 let target = GetDlgItem(GetParent(hwnd), CARD as i32 + next);
@@ -1832,8 +1872,8 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
                 state.reset_page();
             } else if let Some(page) = NAV.iter().position(|n| *n == id) {
                 state.show_page(page);
-            } else if (CARD..CARD + Theme::ALL.len()).contains(&id) {
-                state.select_skin(Theme::ALL[id - CARD]);
+            } else if (CARD..CARD + Theme::GALLERY.len()).contains(&id) {
+                state.select_skin(Theme::GALLERY[id - CARD]);
             } else if (id == FAMILY && code == CBN_SELCHANGE as usize)
                 || (id == SIZE && code == EN_CHANGE as usize)
             {
@@ -1848,6 +1888,10 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
                 state.draft.update_check =
                     SendDlgItemMessageW(hwnd, AUTO_CHECK as i32, BM_GETCHECK, 0, 0)
                         == BST_CHECKED as isize;
+            } else if id == SHOW_IMAGES {
+                state.draft.images =
+                    SendDlgItemMessageW(hwnd, SHOW_IMAGES as i32, BM_GETCHECK, 0, 0)
+                        == BST_CHECKED as isize;
             }
             1
         }
@@ -1859,7 +1903,7 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         WM_NOTIFY => {
             let header = &*(lp as *const NMHDR);
             if header.code == NM_CUSTOMDRAW
-                && (header.idFrom == OPACITY || header.idFrom == AUTO_CHECK)
+                && matches!(header.idFrom, OPACITY | AUTO_CHECK | SHOW_IMAGES)
             {
                 let draw = &*(lp as *const NMCUSTOMDRAW);
                 let result = if header.idFrom == OPACITY {
@@ -1894,7 +1938,7 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
             let id = item.CtlID as usize;
             if id == FAMILY || id == EDITOR_LIST || id == LANGUAGE_LIST {
                 state.list_item(item);
-            } else if (CARD..CARD + Theme::ALL.len()).contains(&id) {
+            } else if (CARD..CARD + Theme::GALLERY.len()).contains(&id) {
                 state.card(item);
             } else if NAV.contains(&id) {
                 state.nav(item);
@@ -1979,7 +2023,7 @@ pub(super) unsafe fn show(
         page: page.min(PAGES.len() - 1),
         draft: settings.clone(),
         ui: Fonts::new(dpi),
-        preview: Fonts::with_family(dpi, &settings.font_family),
+        preview: Fonts::with_family(dpi, settings.reading_font()),
         families: Vec::new(),
         editors: Vec::new(),
         valid: true,

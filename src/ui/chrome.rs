@@ -5,8 +5,23 @@ use super::*;
 const HEADER_ICON: f32 = 0.86;
 /// Caption buttons keep the familiar Windows width; only their height shrank.
 const CAPTION_BUTTON: i32 = 44;
-/// Preview/source capsule through More, in logical pixels.
-const ACTIONS_WIDTH: i32 = 236;
+/// Open, Find, Appearance and More: 32 px buttons 4 px apart, then an 8 px gap
+/// before the caption buttons, in logical pixels.
+const ACTIONS: [usize; 4] = [OPEN, FIND, THEME_PICKER, SETTINGS];
+const ACTION_PITCH: i32 = 36;
+const ACTIONS_WIDTH: i32 = ACTION_PITCH * ACTIONS.len() as i32 + 4;
+/// Close-button red of the Windows title bar, and the paler red while pressed.
+const CLOSE_HOVER: u32 = rgb(196, 43, 28);
+const CLOSE_PRESSED: u32 = rgb(201, 72, 60);
+
+/// `percent` of the way from colour `a` to colour `b`, per channel.
+pub(super) fn mix(a: u32, b: u32, percent: u32) -> u32 {
+    let channel = |shift: u32| {
+        let (a, b) = ((a >> shift) & 255, (b >> shift) & 255);
+        ((a * (100 - percent) + b * percent + 50) / 100) << shift
+    };
+    channel(0) | channel(8) | channel(16)
+}
 
 /// Header appearance picker: three basic choices plus the full skin gallery.
 pub(super) const PICKER: [(usize, &str); 4] = [
@@ -27,7 +42,6 @@ pub(super) fn picker_index(theme: Theme) -> usize {
 #[derive(Clone, Copy)]
 enum ChromeTone {
     Quiet,
-    Selected,
     Primary,
 }
 
@@ -61,7 +75,6 @@ impl App {
         let hover = self.hover == Some(id);
         let pressed = self.pressed == Some(Hit::Command(id));
         let background = match tone {
-            ChromeTone::Selected => Some(p.selection),
             ChromeTone::Primary => Some(if pressed {
                 p.muted
             } else if hover {
@@ -83,7 +96,6 @@ impl App {
             chrome_round(dc, rect, color, radius);
         }
         let color = match tone {
-            ChromeTone::Selected => p.accent,
             ChromeTone::Primary => p.page,
             ChromeTone::Quiet => p.fg,
         };
@@ -92,7 +104,7 @@ impl App {
             text,
             rect,
             12,
-            matches!(tone, ChromeTone::Primary | ChromeTone::Selected),
+            matches!(tone, ChromeTone::Primary),
             color,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
         );
@@ -111,36 +123,78 @@ impl App {
         smooth::icon(dc, rect, id, color, self.fonts.dpi as f32 / 96.0);
     }
 
-    /// Title-bar glyph at the compact header scale.
-    unsafe fn header_glyph(&self, dc: HDC, rect: RECT, id: usize, color: u32) {
-        let id = if id == MAXIMIZE && IsZoomed(self.hwnd) != 0 {
+    /// Title-bar and footer glyph: `size` times the DPI scale, drawn with the line
+    /// weight every header glyph shares.
+    unsafe fn header_glyph(&self, dc: HDC, rect: RECT, id: usize, color: u32, size: f32) {
+        let dpi = self.fonts.dpi as f32 / 96.0;
+        smooth::icon_weighted(dc, rect, id, color, dpi * size, smooth::header_weight(dpi));
+    }
+
+    /// Hover and pressed fills of the quiet title-bar and footer buttons: a light
+    /// veil of the text colour over the panel, as Windows draws its own.
+    fn veil(&self, p: Palette, pressed: bool) -> u32 {
+        let dark = self.active_theme().is_dark();
+        let percent = match (dark, pressed) {
+            (false, false) => 7,
+            (false, true) => 12,
+            (true, false) => 9,
+            (true, true) => 14,
+        };
+        mix(p.panel, p.fg, percent)
+    }
+
+    /// Caption buttons fill their whole column on hover, Close in Windows red.
+    unsafe fn caption_button(&mut self, dc: HDC, rect: RECT, id: usize, p: Palette) {
+        let hover = self.hover == Some(id);
+        let pressed = self.pressed == Some(Hit::Command(id));
+        let close = id == EXIT;
+        let fill = match (close, hover || pressed) {
+            (_, false) => None,
+            (true, true) => Some(if pressed { CLOSE_PRESSED } else { CLOSE_HOVER }),
+            (false, true) => Some(self.veil(p, pressed)),
+        };
+        if let Some(color) = fill {
+            Self::fill(dc, &rect, color);
+        }
+        self.hits.push(HitBox {
+            rect,
+            action: Hit::Command(id),
+        });
+        let glyph = if id == MAXIMIZE && IsZoomed(self.hwnd) != 0 {
             smooth::RESTORE
         } else {
             id
         };
-        smooth::icon(
-            dc,
-            rect,
-            id,
-            color,
-            self.fonts.dpi as f32 / 96.0 * HEADER_ICON,
-        );
+        let color = match (close && (hover || pressed), hover) {
+            (true, _) => rgb(255, 255, 255),
+            (false, true) => p.fg,
+            (false, false) => p.muted,
+        };
+        self.header_glyph(dc, rect, glyph, color, 1.0);
     }
 
-    /// Caption buttons hit-test their full column; hover draws a pill matching the other icons.
-    unsafe fn caption_button(&mut self, dc: HDC, rect: RECT, id: usize, p: Palette) {
-        let middle = (rect.top + rect.bottom) / 2;
-        let pill = chrome_rect(
-            rect.left + self.s(4),
-            middle - self.s(13),
-            rect.right - self.s(4),
-            middle + self.s(13),
-        );
-        self.chrome_button(dc, "", pill, id, ChromeTone::Quiet, p);
-        if let Some(hit) = self.hits.last_mut() {
-            hit.rect = rect;
+    /// One of the quiet title-bar actions: a rounded hover pill and its glyph.
+    /// `open` keeps the pressed look while the action's panel is showing.
+    unsafe fn header_button(
+        &mut self,
+        dc: HDC,
+        rect: RECT,
+        id: usize,
+        glyph: usize,
+        open: bool,
+        p: Palette,
+    ) {
+        let hover = self.hover == Some(id);
+        let pressed = self.pressed == Some(Hit::Command(id)) || open;
+        if hover || pressed {
+            chrome_round(dc, rect, self.veil(p, pressed), self.s(6));
         }
-        self.header_glyph(dc, rect, id, p.muted);
+        self.hits.push(HitBox {
+            rect,
+            action: Hit::Command(id),
+        });
+        let color = if hover || pressed { p.fg } else { p.muted };
+        self.header_glyph(dc, rect, glyph, color, HEADER_ICON);
     }
 
     pub(super) fn header_left(&self) -> i32 {
@@ -162,16 +216,18 @@ impl App {
     }
 
     pub(super) fn theme_menu_rect(&self) -> RECT {
-        // Right-aligned with the appearance button.
-        let right = self.header_left() + self.s(192);
+        // Right-aligned with the appearance button, the third action.
+        let right = self.header_left() + self.s(2 * ACTION_PITCH + 32);
         // Stay below the native search EDIT HWND; parent painting cannot cover a child window.
         let gap = if self.edit_mode.is_some() { 56 } else { 6 };
         let top = self.s(HEADER_HEIGHT + gap);
         chrome_rect(right - self.s(224), top, right, top + self.s(250))
     }
 
+    /// Tooltip of the title-bar or footer control under the pointer.
     pub(super) fn header_tip(&self) -> Option<String> {
-        if self.theme_menu.is_some() || self.mouse.is_none_or(|(_, y)| y >= self.s(HEADER_HEIGHT)) {
+        let bars = |y: i32| y < self.s(HEADER_HEIGHT) || y >= self.height - self.s(30);
+        if self.theme_menu.is_some() || self.mouse.is_none_or(|(_, y)| !bars(y)) {
             return None;
         }
         Some(
@@ -256,13 +312,9 @@ impl App {
                 }
                 let row = chrome_rect(r.left + self.s(7), y, r.right - self.s(7), y + self.s(38));
                 let selected = i == picker_index(self.settings.theme);
-                if selected || i == focus || self.hover == Some(id) {
-                    chrome_round(
-                        dc,
-                        row,
-                        if selected { p.selection } else { p.code },
-                        self.s(6),
-                    );
+                // The check mark and accent text mark the choice; rows only veil.
+                if i == focus || self.hover == Some(id) {
+                    chrome_round(dc, row, mix(p.bg, p.fg, 7), self.s(6));
                 }
                 let color = if selected { p.accent } else { p.fg };
                 self.chrome_glyph(
@@ -356,12 +408,13 @@ impl App {
                 .max(80));
             let left = ((hit.rect.left + hit.rect.right - width) / 2)
                 .clamp(self.s(8), self.width - width - self.s(8));
-            let r = chrome_rect(
-                left,
-                self.s(HEADER_HEIGHT + 7),
-                left + width,
-                self.s(HEADER_HEIGHT + 41),
-            );
+            // Below the title bar, or above the footer for its controls.
+            let top = if hit.rect.top >= self.height - self.s(30) {
+                self.height - self.s(30 + 41)
+            } else {
+                self.s(HEADER_HEIGHT + 7)
+            };
+            let r = chrome_rect(left, top, left + width, top + self.s(34));
             chrome_round(dc, r, p.fg, self.s(6));
             self.label(
                 dc,
@@ -381,7 +434,7 @@ impl App {
         Self::fill(dc, &chrome_rect(1, 1, self.width - 1, bottom), p.panel);
         let left = self.header_left();
         let controls_left = self.width - self.s(CAPTION_BUTTON * 3) - 1;
-        let brand = self.document.is_none() || self.width >= self.s(900);
+        // Only the feather mark and the document name: the title bar stays quiet.
         self.feather_mark(
             dc,
             chrome_rect(
@@ -392,152 +445,46 @@ impl App {
             ),
             p.accent,
         );
-        if brand {
-            self.label(
-                dc,
-                "FeatherMD",
-                chrome_rect(self.s(42), 1, self.s(130), bottom),
-                12,
-                true,
-                p.fg,
-                DT_SINGLELINE | DT_VCENTER,
-            );
-        }
         if !self.document_name.is_empty() {
-            let x = self.s(if brand { 146 } else { 44 });
-            if brand {
-                Self::fill(
-                    dc,
-                    &chrome_rect(
-                        self.s(134),
-                        self.s(middle - 6),
-                        self.s(134) + 1,
-                        self.s(middle + 6),
-                    ),
-                    p.edge,
-                );
-            }
             let name = self.document_name.clone();
             self.label(
                 dc,
                 &name,
-                chrome_rect(x, 1, left - self.s(16), bottom),
+                chrome_rect(self.s(44), 1, left - self.s(16), bottom),
                 12,
                 false,
-                p.muted,
+                p.fg,
                 DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
             );
         }
-        // Concentric radii: capsule 7, segments 5 with a 2 px inset.
-        chrome_round(
-            dc,
-            chrome_rect(
-                left,
-                self.s(middle - 13),
-                left + self.s(68),
-                self.s(middle + 13),
-            ),
-            p.code,
-            self.s(7),
-        );
-        for (offset, id, selected) in [
-            (2, PREVIEW, !self.settings.raw),
-            (34, SOURCE, self.settings.raw),
-        ] {
-            let rect = chrome_rect(
-                left + self.s(offset),
-                self.s(middle - 11),
-                left + self.s(offset + 32),
-                self.s(middle + 11),
-            );
-            self.chrome_button(
-                dc,
-                "",
-                rect,
-                id,
-                if selected {
-                    ChromeTone::Selected
-                } else {
-                    ChromeTone::Quiet
-                },
-                p,
-            );
-            self.header_glyph(dc, rect, id, if selected { p.accent } else { p.muted });
-        }
-        Self::fill(
-            dc,
-            &chrome_rect(
-                left + self.s(77),
-                self.s(middle - 6),
-                left + self.s(77) + 1,
-                self.s(middle + 6),
-            ),
-            p.edge,
-        );
-        for (offset, width, id) in [
-            (86, 32, OPEN),
-            (122, 32, FIND),
-            (158, 34, THEME_PICKER),
-            (196, 32, SETTINGS),
-        ] {
-            let rect = chrome_rect(
-                left + self.s(offset),
-                self.s(middle - 13),
-                left + self.s(offset + width),
-                self.s(middle + 13),
-            );
-            self.chrome_button(
-                dc,
-                "",
-                rect,
-                id,
-                if id == THEME_PICKER && self.theme_menu.is_some() {
-                    ChromeTone::Selected
-                } else {
-                    ChromeTone::Quiet
-                },
-                p,
-            );
+        // Four equal actions; Appearance keeps its pressed look while its panel is open.
+        for (index, id) in ACTIONS.into_iter().enumerate() {
+            let x = left + self.s(index as i32 * ACTION_PITCH);
+            let rect = chrome_rect(x, self.s(middle - 13), x + self.s(32), self.s(middle + 13));
             let glyph = if id == THEME_PICKER {
-                // Follows a live Settings draft as well as the saved preference.
-                match self.preview.map_or(self.settings.theme, |(theme, _)| theme) {
-                    Theme::Light => THEME_LIGHT,
-                    Theme::Dark => THEME_DARK,
-                    Theme::System => THEME_SYSTEM,
-                    _ => smooth::PALETTE,
-                }
+                smooth::CONTRAST
             } else {
                 id
             };
-            let mut icon = rect;
-            if id == THEME_PICKER {
-                icon.right -= self.s(9);
-            }
-            self.header_glyph(dc, icon, glyph, p.muted);
+            let open = id == THEME_PICKER && self.theme_menu.is_some();
+            self.header_button(dc, rect, id, glyph, open, p);
             if id == SETTINGS && self.update_available().is_some() {
-                // A small accent dot: a newer release is available (More → 发现新版本).
-                let (x, y) = (rect.right - self.s(7), rect.top + self.s(6));
+                // An accent dot over the last of the three dots: a newer release
+                // is available (More → 发现新版本).
+                let (x, y) = (rect.right - self.s(9), rect.top + self.s(7));
                 let r = self.s(3);
+                let ring = if self.hover == Some(id) {
+                    self.veil(p, false)
+                } else {
+                    p.panel
+                };
                 chrome_round(
                     dc,
                     chrome_rect(x - r - 1, y - r - 1, x + r + 1, y + r + 1),
-                    p.panel,
+                    ring,
                     r + 1,
                 );
                 chrome_round(dc, chrome_rect(x - r, y - r, x + r, y + r), p.accent, r);
-            }
-            if id == THEME_PICKER {
-                self.header_glyph(
-                    dc,
-                    chrome_rect(
-                        rect.right - self.s(13),
-                        rect.top,
-                        rect.right - self.s(3),
-                        rect.bottom,
-                    ),
-                    THEME_PICKER,
-                    p.muted,
-                );
             }
         }
         for (index, id) in [MINIMIZE, MAXIMIZE, EXIT].into_iter().enumerate() {
@@ -920,6 +867,7 @@ impl App {
             p.panel,
         );
         Self::fill(dc, &chrome_rect(1, top, self.width - 1, top + 1), p.edge);
+        self.paint_mode_switch(dc, top, p);
         let mut metadata = tr("只读  ·  离线").to_string();
         let mut status = if self.status == tr("就绪")
             || self.status == tr("只读 · 离线阅读")
@@ -969,7 +917,7 @@ impl App {
         self.label(
             dc,
             &metadata,
-            chrome_rect(self.s(16), top, self.s(176), self.height),
+            chrome_rect(self.s(82), top, self.s(242), self.height),
             11,
             false,
             p.muted,
@@ -978,7 +926,7 @@ impl App {
         self.label(
             dc,
             &status,
-            chrome_rect(self.s(184), top, self.width - self.s(218), self.height),
+            chrome_rect(self.s(250), top, self.width - self.s(218), self.height),
             11,
             false,
             p.muted,
@@ -1018,6 +966,42 @@ impl App {
             p.muted,
             DT_SINGLELINE | DT_VCENTER | DT_CENTER,
         );
+    }
+
+    /// Preview / source switch at the left of the footer: a sunken track with a
+    /// raised thumb under the active mode.
+    unsafe fn paint_mode_switch(&mut self, dc: HDC, top: i32, p: Palette) {
+        let dark = self.active_theme().is_dark();
+        let (y0, y1) = (top + self.s(5), self.height - self.s(4));
+        let track = chrome_rect(self.s(10), y0, self.s(70), y1);
+        let sunken = if dark {
+            mix(p.panel, p.bg, 60)
+        } else {
+            mix(p.panel, p.fg, 6)
+        };
+        chrome_round(dc, track, sunken, self.s(6));
+        for (index, id) in [PREVIEW, SOURCE].into_iter().enumerate() {
+            let x = track.left + self.s(2 + index as i32 * 28);
+            let rect = chrome_rect(x, y0 + self.s(2), x + self.s(28), y1 - self.s(2));
+            let active = (id == SOURCE) == self.settings.raw;
+            let hover = self.hover == Some(id);
+            if active {
+                let face = if dark { mix(p.panel, p.fg, 14) } else { p.page };
+                chrome_round(dc, rect, p.edge, self.s(4));
+                chrome_round(
+                    dc,
+                    chrome_rect(rect.left + 1, rect.top + 1, rect.right - 1, rect.bottom - 1),
+                    face,
+                    self.s(4) - 1,
+                );
+            }
+            self.hits.push(HitBox {
+                rect,
+                action: Hit::Command(id),
+            });
+            let color = if active || hover { p.fg } else { p.muted };
+            self.header_glyph(dc, rect, id, color, 0.66);
+        }
     }
 
     pub(super) unsafe fn paint_scrollbars(&mut self, dc: HDC, p: Palette) {
@@ -1185,6 +1169,7 @@ impl App {
                 italic: false,
                 mono: false,
                 strike: false,
+                underline: false,
             }),
         );
         let mut extent = SIZE::default();

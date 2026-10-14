@@ -180,11 +180,21 @@ impl Line {
                 prefix = &prefix[..error.valid_up_to()];
             }
             let text = String::from_utf8_lossy(prefix);
-            if let Some((level, content)) = atx(text.trim_end_matches('\r'), self.truncated) {
+            let text = text.trim_end_matches('\r');
+            if let Some((level, content)) = atx(text, self.truncated) {
                 result.headings.push(Heading {
                     offset,
                     level,
                     text: plain_heading(content),
+                });
+            } else if text.trim_start().starts_with("<h")
+                && let Some((level, title)) = crate::html::heading(text)
+            {
+                // `<h1 align="center">Title</h1>` on one line, as many READMEs open.
+                result.headings.push(Heading {
+                    offset,
+                    level,
+                    text: title.chars().take(MAX_HEADING_CHARS).collect(),
                 });
             }
         }

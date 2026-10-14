@@ -1,5 +1,24 @@
 # Progress / continuation notes
 
+## 2026-10-14 — v0.1.9 candidate: local images, HTML subset, code highlighting, reading layout, 20 skins, preview character selection
+
+- 作者/最后修改人：lianzy。用户需求（2026-10-13 夜间，要求持续工作直到待办全部完成；**未要求提交、推送或发布**）：①右上角图标不好看；②设置增加“显示图片”，默认不勾选；③阅读排版：默认字号 16，行距、标题与代码 / 关键字样式；④支持 p、h1 等 HTML 标签；⑤去掉左上角的英文；⑥多做一些皮肤；⑦遗留：正文默认字体随界面语言、预览按字符选择、段落换行时标点不在行首。
+- 会话说明：上一会话（e11eff24）在写图片读取时中断（02:33）；其记录 22:36 之后没有保存助手消息，但改动都在工作区。本会话从工作区继续：先修好 1 项失败的图片路径测试（`//?/C:/a.png` 先被切掉 `?` 后变成 `//`，误判为网络地址）和 2 处 clippy，再完成其余部分。
+- 标题栏：左上角只留羽毛标识与文档名；打开 / 查找 / 外观 / 更多同尺寸同线宽（`smooth::header_weight`），悬停为文字色的淡圆角底；外观为固定的半圆图标；窗口按钮整列悬停、关闭为红色；预览 / 源码移到状态栏左侧的分段开关。
+- 排版（`layout::flow` 重写）：每块文字只测量一次再统一断行（与表格同一 `table::break_range`，列表首行更窄以悬挂缩进，`<br>` 强制换行）；行高 1.6 倍、空行间距、标题上大下小、一二级标题末行下划线、代码块圆角底板与语言标签、行内代码与 kbd 圆角、引用灰线、表格斑马纹、任务复选框、上下标、混排基线对齐。
+- HTML（`src/html.rs`）与高亮（`src/highlight.rs`）：见 ARCHITECTURE “Reading layout, highlighting and HTML”。新增 `<center>` 与 `text-align` 样式的对齐（含测试）。
+- 皮肤：新增素白、报纸、丁香、暮色、极夜、深海、紫夜、咖啡，共 20 款；先用对比度脚本选色再写入，避开他人主题的原值。新皮肤追加在 `Theme::ALL` 末尾（已保存序号不变），画廊用 `Theme::GALLERY` 浅色在前、5×4。
+- 图片（`src/image.rs`、`src/ui/pictures.rs`）：默认关闭；只读本机固定 / 可移动 / 光盘 / 内存盘；逐级 FindFirstFileW 拒绝联接点、符号链接等重解析点（云文件与去重除外），不打开仅在云端的文件；32 MiB / 16384 px / 3200 万像素上限；按文件头识别格式后才交给 GDI+；EXIF 方向；保留最多 2048 px；每页 64 张、共 160 MiB；后台线程，退出时 GDI+ 只在解码线程结束后关闭。排版中图片是一个 U+FFFC 单元，站在基线上。
+- 预览按字符选择（`src/ui/select.rs`）：位置为“块起始字节 + 显示单元”，重排后不变；复制时补回换行处去掉的空格，表格整行，图片复制替代文字。设置阅读页、关于窗口说明与菜单文字随之更新。
+- 遗留项：正文默认字体为空即跟随界面语言（日文 Meiryo）；标点不在行首由 `table::break_range` 保证，新增全宽度属性测试。
+- 首个本地候选的证据（未发布；之后只改了关于窗口与文档，见下方“发布”两条）（本机 125% / 120 DPI，MSVC release，FileVersion 0.1.9）：fmt --check、clippy --all-targets --locked -D warnings、cargo test --locked（99 项）通过；`cargo build --release --locked`。dist/FeatherMD.exe 1,086,976 字节，SHA-256 207ad063a00c53c5dfb9025929e13014a7fd9b7d5f5a1c022d20f875749b2429（与 target/release 相同）；dist/FeatherMD-0.1.9-windows-x64.zip 2,494,165 字节，SHA-256 cc003dfb9ab45e933173ef15bad94e1356b9060ae39b25408e9f35eb4933ba66，45 项，与工作区源文件逐字节一致，不含 INI 或测试数据。交付 EXE 上 19 项原生回归全部 PASS（新增 image-smoke 浅 / 深：5 张图片尺寸、居中、透明、EXIF 6、徽章同行、链接命中、宽图随窗口重排、4 种原因、联接点被拒、GDI 27→27、关闭后释放内存与位图）。docs 下 34 张截图与交付 EXE 的截图逐字节一致。i18n 105 个视图在 120 DPI 无截断；本轮新增文字用同一字体在 96 DPI 实测宽度均放得下（最紧的是皮肤卡片 “Newsprint” 68/84 px），**未在 CI 的 96 DPI 上运行**。dumpbin：新增 Windows 自带的 shlwapi.dll。
+- 偶发失败：打包前最后一轮全量回归中 about-dark 一次未在 3 秒内等到外部链接确认框；随后单独重跑 10 次与交付 EXE 全量回归均通过，未复现。疑为隐藏、未激活的对话框上 BM_CLICK 偶尔不生效，脚本未改。
+- 性能见 PERFORMANCE §8：普通段落重排 53→36 ms，表格不变，代码块 +1–2 ms，首屏无差别。
+- 限制：未在真实的“仅在云端”OneDrive 文件、U 盘或映射网络驱动器上实测（只有规则与联接点测试）；指向网络共享的 subst 盘符未单独处理；GIF/TIFF 只显示第一帧；HTML 按行处理（跨行的单个标签、`<table>` 不按浏览器呈现）；表格单元格内的图片显示替代文字。新增界面文字的繁中、英文、日文翻译由 AI 起草，未经母语者审校。
+- 用户设置：本机 %APPDATA%\FeatherMD\settings.ini 在 02:49:24 被一个已带 `images` 键的版本重写（内容仍是用户自己的值，只多了 `images=false`）；本会话的界面测试都用 EXE 旁的临时便携 INI，且最早一次在约 03:00 才开始，来源未查明。
+- 发布请求（2026-10-14 上午，用户：“上传github，发Releases,更新About”）：About 同时理解为应用内的关于窗口与 GitHub 仓库的 About。关于窗口新增第 4 条说明“图片默认不显示，可在设置 → 阅读中开启；只读本机文件，不下载网络图片。”（四种语言），展开面板加高 20 逻辑像素（DETAILS_HEIGHT 260，面板 262）。上线前用与应用相同的字体、矩形与 DrawTextW 标志测量了关于窗口全部文字在 90 / 92 / 96 / 120 / 144 DPI 下的宽度（CI 的 1024×720 工作区会把展开后的窗口缩到约 90 DPI）：全部放得下，最紧的是英文新说明 418/428 px（96 DPI）与英文分页说明 421/428 px。四份 README 的关于段落、CHANGELOG 同步；PERFORMANCE §8 的体积改为发布 EXE 的字节数。
+- 发布候选的证据（本机此时为 150% / 144 DPI、单显示器 2560×1600，此前为 120 DPI）：fmt --check、clippy --all-targets --locked -D warnings、cargo test --locked（99 项）、`cargo build --release --locked` 与两个测试替身通过。dist/FeatherMD.exe 1,087,488 字节，SHA-256 1dc7c896249854b1d0f67c33083461b36c8876c9a58a50fe813f8a27ab4b0e5c（与 target/release 相同）；dist/FeatherMD-0.1.9-windows-x64.zip 2,563,922 字节，SHA-256 b7579d8b7fe8556b1aa0bac8477100d41f0ea1ce70264051af02c3b4a37f042b，45 项，与工作区源文件逐字节一致。交付 EXE 上 19 项原生回归全部 PASS（default_window 1620×1230 in 2560×1552；navigation headings 454/535、wrapped 251/280；about 浅 / 深 GDI 25→25；table GDI 24→24、复制 29→29；image 5 张、27→27；i18n 105 个视图无截断，8 次实时切换 GDI 30→30、USER 30→29）。关于窗口的 5 张截图（浅 / 深、zh-TW / en / ja）由交付 EXE 在 144 DPI 重新生成，与其截图逐字节一致，所以比其余截图大 1.2 倍；其余截图仍是上一轮 120 DPI 的（阅读、设置等界面代码此后未改）。dumpbin 仍只有 Windows 系统 DLL。
+
 ## v0.1.8 publication record — 2026-10-13
 
 - 作者/最后修改人：lianzy。用户在需求中预先要求“改完了自动提交推送发布”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.8

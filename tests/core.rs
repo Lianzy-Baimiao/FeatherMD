@@ -39,8 +39,29 @@ fn skins_opacity_and_editor_roundtrip_with_safe_fallbacks() {
         assert_eq!(parsed.theme, theme);
     }
     assert_eq!(Settings::parse("theme=neon").theme, Theme::System);
-    assert!(Theme::Midnight.is_dark() && Theme::Black.is_dark() && Theme::Dark.is_dark());
-    assert!(!Theme::Ancient.is_dark() && !Theme::System.is_dark());
+    let dark = [
+        Theme::Dark,
+        Theme::Midnight,
+        Theme::Black,
+        Theme::Dusk,
+        Theme::Polar,
+        Theme::DeepSea,
+        Theme::Violet,
+        Theme::Mocha,
+    ];
+    for theme in Theme::ALL {
+        assert_eq!(theme.is_dark(), dark.contains(&theme), "{}", theme.key());
+    }
+    // Saved indices of the original twelve skins never move.
+    assert_eq!(Theme::Black.index(), 11);
+    assert_eq!(Theme::Mocha.index(), 19);
+    // The gallery shows every skin exactly once: light ones first, then dark ones.
+    for theme in Theme::ALL {
+        assert_eq!(Theme::GALLERY.iter().filter(|t| **t == theme).count(), 1);
+        assert_eq!(Theme::GALLERY[theme.gallery_index()], theme);
+    }
+    let first_dark = Theme::GALLERY.iter().position(|t| t.is_dark()).unwrap();
+    assert!(Theme::GALLERY[first_dark..].iter().all(|t| t.is_dark()));
 
     assert_eq!(Settings::default().opacity, 100);
     for (text, expected) in [

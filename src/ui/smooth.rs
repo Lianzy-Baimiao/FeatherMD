@@ -12,6 +12,7 @@ pub(super) const PENCIL: usize = 10006;
 pub(super) const UPDATE: usize = 10007;
 pub(super) const GLOBE: usize = 10008;
 pub(super) const COPY: usize = 10009;
+pub(super) const CONTRAST: usize = 10010;
 
 pub(super) struct Session(usize);
 impl Session {
@@ -32,8 +33,12 @@ impl Session {
 }
 impl Drop for Session {
     fn drop(&mut self) {
-        unsafe {
-            gp::GdiplusShutdown(self.0);
+        // An image read that outlived the window may still be inside GDI+; then
+        // GDI+ stays up and ends with the process.
+        if !super::pictures::DECODER_ALIVE.load(Ordering::SeqCst) {
+            unsafe {
+                gp::GdiplusShutdown(self.0);
+            }
         }
     }
 }
@@ -147,6 +152,21 @@ impl Canvas {
             sweep,
         );
     }
+    /// Filled circle sector, angles as in `arc`.
+    unsafe fn pie(&self, center: (f32, f32), radius: f32, start: f32, sweep: f32) {
+        let (left, top) = self.at(center.0 - radius, center.1 - radius);
+        let (right, bottom) = self.at(center.0 + radius, center.1 + radius);
+        gp::GdipFillPie(
+            self.graphics,
+            self.brush.cast(),
+            left,
+            top,
+            right - left,
+            bottom - top,
+            start,
+            sweep,
+        );
+    }
     unsafe fn rounded(&self, bounds: [f32; 4], radius: f32, fill: bool) {
         let [x, y, w, h] = bounds;
         let (left, top) = self.at(x, y);
@@ -239,6 +259,28 @@ pub(super) unsafe fn icon(dc: HDC, r: RECT, id: usize, color: u32, scale: f32) {
         },
         scale,
     );
+    draw(dc, r, id, color, scale, weight);
+}
+
+/// Title-bar line weight in device pixels for a DPI scale: 1 px at 100 %, 1.5 px
+/// at 125–150 %, 2 px at 200 %. Every header glyph shares it, whatever its size.
+pub(super) fn header_weight(dpi_scale: f32) -> f32 {
+    stroke(1.1, dpi_scale)
+}
+
+/// `icon` with an explicit stroke width, for glyphs that must match each other.
+pub(super) unsafe fn icon_weighted(
+    dc: HDC,
+    r: RECT,
+    id: usize,
+    color: u32,
+    scale: f32,
+    weight: f32,
+) {
+    draw(dc, r, id, color, scale, weight);
+}
+
+unsafe fn draw(dc: HDC, r: RECT, id: usize, color: u32, scale: f32, weight: f32) {
     // Rectangular glyphs snap every coordinate; curved ones only snap their centre.
     let crisp = matches!(
         id,
@@ -276,8 +318,9 @@ pub(super) unsafe fn icon(dc: HDC, r: RECT, id: usize, color: u32, scale: f32) {
             ]);
         }
         FIND => {
-            c.ellipse(-7.0, -7.0, 11.0, 11.0, false);
-            c.line(&[(2.5, 2.5), (8.0, 8.0)]);
+            // Lens and a short handle, balanced on the centre.
+            c.ellipse(-7.0, -7.0, 12.0, 12.0, false);
+            c.line(&[(3.3, 3.3), (7.5, 7.5)]);
         }
         THEME_LIGHT | THEME_SEPIA => {
             c.ellipse(-4.0, -4.0, 8.0, 8.0, false);
@@ -307,8 +350,14 @@ pub(super) unsafe fn icon(dc: HDC, r: RECT, id: usize, color: u32, scale: f32) {
         THEME_PICKER => c.line(&[(-2.5, -1.0), (0.0, 1.5), (2.5, -1.0)]),
         SETTINGS => {
             for x in [-6.0, 0.0, 6.0] {
-                c.ellipse(x - 1.2, -1.2, 2.4, 2.4, true);
+                c.ellipse(x - 1.5, -1.5, 3.0, 3.0, true);
             }
+        }
+        CONTRAST => {
+            // Appearance: a ring holding a half disc, light and dark at once. The
+            // gap keeps the filled half from outweighing the outline glyphs.
+            c.ellipse(-7.0, -7.0, 14.0, 14.0, false);
+            c.pie((0.0, 0.0), 4.4, 270.0, 180.0);
         }
         MINIMIZE | ZOOM_OUT | ZOOM_IN => {
             c.line(&[(-5.0, 0.0), (5.0, 0.0)]);

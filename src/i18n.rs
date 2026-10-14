@@ -90,6 +90,14 @@ impl Lang {
             Self::Ja => "Yu Gothic UI",
         }
     }
+    /// Default reading face: the interface face, except Japanese, whose long text
+    /// reads better in Meiryo than in the thinner Yu Gothic UI.
+    pub fn reading_font(self) -> &'static str {
+        match self {
+            Self::Ja => "Meiryo",
+            _ => self.ui_font(),
+        }
+    }
 }
 
 static CURRENT: AtomicU8 = AtomicU8::new(0);
