@@ -324,7 +324,7 @@ pub(super) static TABLE: &[[&str; 4]] = &[
     ["取消选择", "取消選取", "Clear selection", "選択を解除"],
     ["代码块、引用和表格：鼠标移到右上角可一键复制；表格随窗口宽度自动排版。", "程式碼區塊、引文和表格：滑鼠移到右上角可一鍵複製；表格隨視窗寬度自動排版。", "Code, quotes and tables: hover for a copy button; tables fit the window.", "コード、引用、表は右上のボタンでコピー。表はウィンドウ幅に合わせます。"],
     ["预览与源码都按字符选择，双击选中词语。", "預覽與原始碼都按字元選取，按兩下選取詞語。", "Select by character in preview and source; double-click a word.", "プレビューもソースも文字単位で選択、ダブルクリックで単語を選択。"],
-    ["本机图片可在设置 → 阅读中开启；网络图片需逐张点击并确认后加载。", "本機圖片可在設定 → 閱讀中開啟；網路圖片需逐張點選並確認後載入。", "Local images: Settings → Reading. Web images: click each placeholder and confirm.", "ローカル画像は設定 → 読書で表示。Web 画像は個別にクリックし、確認して読み込みます。"],
+    ["本机图片可在设置 → 阅读中开启；网络图片需逐张点击并确认后加载。", "本機圖片可在設定 → 閱讀中開啟；網路圖片需逐張點選並確認後載入。", "Local images: Settings → Reading. Web images: click and confirm.", "ローカル画像は設定 → 読書で表示。Web 画像は個別にクリックし、確認して読み込みます。"],
     ["预览按有界分页显示；跨页语法可能不完整，可在源码模式核对。", "預覽按有界分頁顯示；跨頁語法可能不完整，可在原始碼模式核對。", "Preview pages are bounded; syntax across pages can be checked in source view.", "プレビューはページ単位です。ページをまたぐ構文はソースで確認できます。"],
     // @UI
 ];

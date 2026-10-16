@@ -829,6 +829,40 @@ pub(super) unsafe fn show(owner: HWND, theme: Theme) {
 mod tests {
     use super::*;
     #[test]
+    fn english_image_note_fits_small_work_areas_and_fallback_fonts() {
+        let text = w(feathermd::i18n::tr_in(
+            feathermd::i18n::Lang::En,
+            "本机图片可在设置 → 阅读中开启；网络图片需逐张点击并确认后加载。",
+        ));
+        // A 720 px CI desktop shrinks the expanded About dialog to about 90 DPI.
+        for dpi in [90, 92, 96, 120, 144] {
+            for family in ["Microsoft YaHei UI", "Segoe UI"] {
+                unsafe {
+                    let dc = CreateCompatibleDC(null_mut());
+                    assert!(!dc.is_null());
+                    let mut fonts = Fonts::with_family(dpi, family);
+                    let old = SelectObject(dc, fonts.get(About::key(11, false)));
+                    let mut measured = SIZE::default();
+                    let ok = GetTextExtentPoint32W(
+                        dc,
+                        text.as_ptr(),
+                        (text.len() - 1) as i32,
+                        &mut measured,
+                    );
+                    SelectObject(dc, old);
+                    DeleteDC(dc);
+                    assert_ne!(ok, 0);
+                    assert!(
+                        measured.cx <= fonts.scale(428),
+                        "{family} at {dpi} DPI: {} > {}",
+                        measured.cx,
+                        fonts.scale(428),
+                    );
+                }
+            }
+        }
+    }
+    #[test]
     fn only_explicit_about_actions_have_destinations() {
         assert_eq!(destination(GITHUB_BUTTON), Some(GITHUB));
         assert_eq!(destination(SUPPORT_BUTTON), Some(SUPPORT));

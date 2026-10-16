@@ -6,6 +6,9 @@
 - Click an HTTP(S) image placeholder in the preview, confirm the exact address, and load that image in place. Works with automatic local images off; failures offer an explicit retry. Identical URLs share the in-memory result. No automatic remote downloads, cookies, authentication, referer, redirects, disk cache or saved permissions; F5/reopening clears the result. Existing raster, byte, pixel and memory bounds remain in force; downloads run separately from local decoding, with a bounded queue and a 15-second UI deadline.
 - Four-language placeholder, confirmation, retry, Settings and About text. URL-policy, loopback HTTP and stale-result tests; image-smoke covers cancel, load, deduplication, linked images, failure/retry, source/preview switching and reload/restart without automatic downloads.
 
+### Fixed
+- The English image note in About fits small work areas, including the 96 DPI CI desktop; GDI measurement tests cover 90–144 DPI and the standard/fallback fonts.
+
 ## 0.1.9 — 2026-10-14
 
 ### Added

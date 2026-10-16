@@ -1,5 +1,10 @@
 # Progress / continuation notes
 
+## 2026-10-16 — v0.1.10 CI correction before tagging
+
+- 首次 main 推送 e22c69e 的 CI（run 38901690861）：Ubuntu 全通过；Windows 编译/测试和前 18 项原生回归（含新图片功能浅/深，各 4 次回环请求）通过，仅最后 i18n 报英文 About 图片说明截断。runner 为 96 DPI / 1024×720；展开 About 会缩到约 90 DPI，当前长句在此大小放不下。这是确定的界面缺陷，不是直接重跑可忽略的间歇失败；尚未创建标签或发布。
+- 英文由“click each placeholder and confirm”缩短为“click and confirm”。新增 GDI 单元测试，用 Microsoft YaHei UI 和 Segoe UI 测量 90 / 92 / 96 / 120 / 144 DPI 下 428 逻辑像素宽的该说明，防止回归。fmt / strict Clippy / 104 项测试 / MSVC release 通过；本机 120 DPI 的四語 105 个视图全部通过（GDI 31→31，USER 24→24），英文 About 截图已重新生成。等待修正提交的 CI 后再发布。
+
 ## 2026-10-16 — v0.1.10 release candidate: manual web images
 
 - 用户明确要求“提交、发布”。版本升级至 0.1.10（Cargo/Cargo.lock、Windows FileVersion/ProductVersion、package 默认版本）；四份 README 去掉未发布标记并更新体积、新增两张手动加载截图。About 的版本由 Cargo 自动更新，重新生成浅/深及三种翻译版共 5 张截图和阅读设置截图（全部 120 DPI）。没有修改自动下载默认行为。
