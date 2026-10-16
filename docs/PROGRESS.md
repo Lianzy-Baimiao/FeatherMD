@@ -1,5 +1,15 @@
 # Progress / continuation notes
 
+## v0.1.10 publication record — 2026-10-16
+
+- 用户明确要求“提交、发布”。已发布并设为 Latest：https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.10 （北京时间 2026-10-16 21:19:48）。不是草稿或预发布。
+- 功能提交 e22c69e；英文 About 小工作区修正提交 **120c0d7ecf056dec3d06d8d48dc9778d72c3fc6a**，为 annotated tag v0.1.10 的源代码。首次 CI 的截断缺陷见下一节；修正后的 main CI run **38904974739** 和 tag CI run **38907003137** 均在 Windows / Ubuntu 通过，含完整原生回归和四语检查：https://github.com/Lianzy-Baimiao/FeatherMD/actions/runs/38904974739 。标签推送曾两次遇到 GitHub 443 连接超时，重试成功，没有改标签目标或强推。
+- 最终 MSVC 静态 CRT 构建通过 fmt、strict Clippy、**104 项测试**（含新增的小工作区文字宽度测试）；交付 EXE 上完整 **19 项原生回归一次全部通过**，证据 `test-artifacts/release-0.1.10-final/`。CI 也通过 96 DPI 的英文 About 截断检查。版本号 0.1.10；仅依赖系统 DLL。
+- 公开附件：FeatherMD.exe **1,098,752** 字节，SHA-256 **c594dceb6bd76b66c6060b0acff1afdb5b024172d82123ed17b46d8bdb86b86b**；FeatherMD-0.1.10-windows-x64.zip **2,564,032** 字节，SHA-256 **29d8ef74b29ffe97511654fa4a75859f975e19e84329a6d956e39d1c8a03ca2e**；SHA256SUMS.txt **181** 字节，SHA-256 **c196f4ebb74b0faa43f2a3e1a246ecb2aea9a2cec134520819ef8df206bb587a**。
+- 三个附件均已从 Release 重新下载，逐字节哈希与本地交付一致，且与 GitHub asset digest、校验清单相符。ZIP 共 47 个文件：EXE 等同 target/release；46 个文档/图片均核对标签源码（仅四份 README 的 Windows CRLF 与 Git LF 不同，其余字节相同）。不含设置、测试夹具或开发环境文件。
+- 新预览图 `v0.1.10/docs/reading-web-images.png` 和 `reading-web-images-loaded.png` 的公开 URL 均返回 HTTP 200；releases/latest 返回 v0.1.10；v0.1.9 三个发布附件的 digest 保持不变。
+- 本地最终交付：**dist/release-0.1.10/**。最初未修正英文说明的包保存在 `dist/release-0.1.10-initial-candidate/`，未上传。正在运行的旧版 `dist/FeatherMD.exe` 未关闭或覆盖；旧发布 ZIP 均保留。测试使用各自的便携 INI，验证后清理。
+
 ## 2026-10-16 — v0.1.10 CI correction before tagging
 
 - 首次 main 推送 e22c69e 的 CI（run 38901690861）：Ubuntu 全通过；Windows 编译/测试和前 18 项原生回归（含新图片功能浅/深，各 4 次回环请求）通过，仅最后 i18n 报英文 About 图片说明截断。runner 为 96 DPI / 1024×720；展开 About 会缩到约 90 DPI，当前长句在此大小放不下。这是确定的界面缺陷，不是直接重跑可忽略的间歇失败；尚未创建标签或发布。
