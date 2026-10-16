@@ -35,7 +35,7 @@ impl Drop for Session {
     fn drop(&mut self) {
         // An image read that outlived the window may still be inside GDI+; then
         // GDI+ stays up and ends with the process.
-        if !super::pictures::DECODER_ALIVE.load(Ordering::SeqCst) {
+        if super::pictures::DECODERS_ALIVE.load(Ordering::SeqCst) == 0 {
             unsafe {
                 gp::GdiplusShutdown(self.0);
             }

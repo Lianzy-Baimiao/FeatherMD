@@ -1,6 +1,6 @@
 [package]
 name = "feathermd"
-version = "0.1.9"
+version = "0.1.10"
 authors = ["lianzy"]
 edition = "2024"
 rust-version = "1.88"

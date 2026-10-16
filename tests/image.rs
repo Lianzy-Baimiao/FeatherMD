@@ -14,6 +14,51 @@ fn local(path: &str) -> Source {
 }
 
 #[test]
+fn manual_web_images_require_explicit_http_urls_and_keep_queries() {
+    let url = image::WebImage::parse(" HTTPS://Example.COM:8443/图.png?raw=1&token=a%2Fb#anchor ")
+        .unwrap();
+    assert_eq!(
+        url.url,
+        "https://example.com:8443/%E5%9B%BE.png?raw=1&token=a%2Fb"
+    );
+    assert_eq!(url.resource, "/%E5%9B%BE.png?raw=1&token=a%2Fb");
+    assert_eq!(
+        (url.host.as_str(), url.port, url.secure),
+        ("example.com", 8443, true)
+    );
+    for (src, resource) in [
+        ("http://example.com", "/"),
+        ("https://example.com?x=1", "/?x=1"),
+        ("http://[::1]:8080/a", "/a"),
+    ] {
+        assert_eq!(image::WebImage::parse(src).unwrap().resource, resource);
+    }
+    for src in [
+        "//cdn.example.com/a",
+        "ftp://example.com/a",
+        "file://server/a.png",
+        "data:image/png,xxx",
+        "javascript:x",
+        "https://user:secret@example.com/a",
+        "https://example.com@localhost/a",
+        "https://example.com\\@localhost/a",
+        "https:///a",
+        "https://example.com:0/a",
+        "https://example.com:/a",
+        "https://example.com:65536/a",
+        "https://[bad]/a",
+        "https://example.com/a\r\nInjected:header",
+        "https://example.com/a b",
+        "https://example.com/a%xy",
+        "https://example.com/%",
+        "https://example.com/\0",
+    ] {
+        assert!(image::WebImage::parse(src).is_none(), "{src:?}");
+    }
+    assert!(image::WebImage::parse(&format!("https://example.com/{}", "x".repeat(2048))).is_none());
+}
+
+#[test]
 fn local_files_resolve_next_to_the_document() {
     for (src, expected) in [
         ("a.png", r"D:\Docs\notes\a.png"),

@@ -1,5 +1,22 @@
 # Progress / continuation notes
 
+## 2026-10-16 — v0.1.10 release candidate: manual web images
+
+- 用户明确要求“提交、发布”。版本升级至 0.1.10（Cargo/Cargo.lock、Windows FileVersion/ProductVersion、package 默认版本）；四份 README 去掉未发布标记并更新体积、新增两张手动加载截图。About 的版本由 Cargo 自动更新，重新生成浅/深及三种翻译版共 5 张截图和阅读设置截图（全部 120 DPI）。没有修改自动下载默认行为。
+- MSVC static-CRT release：fmt --check、strict all-targets Clippy、103 项测试、release 与两个测试替身通过。19 项原生回归本轮**一次全部 PASS**，证据 `test-artifacts/release-0.1.10/`：navigation headings 416/494、wrapped 251/280；image 浅/深各 4 次回环请求，原本机图片 GDI 27→27；i18n 105 个视图无截断、8 次实时切换，GDI 30→30、USER 30→29。前一轮 0.1.9 开发构建的间歇失败记录保留在下一节，不据此宣称已修复。dumpbin 仅 Windows 系统 DLL。
+- 打包时现有 `dist/FeatherMD.exe` 被运行中的程序占用；没有关闭程序或覆盖旧 EXE。package.ps1 增加独立 Output 目录及清理路径/重解析点检查，新包放在 `dist/release-0.1.10/`。EXE 1,098,752 字节，SHA-256 267929c899a9e67bfa5f2ee946bc594b5610227a1921df9e71d625b2cf069730；ZIP 2,564,325 字节，SHA-256 3f67c164eacc4fa49045196d3825b85df4c863bf5576658605dc488d88c5e3ab。ZIP 的 47 个文件逐字节核对当前工作区（EXE 核对 target/release），仅包含许可、四语 README、选定文档/截图和 EXE，不含 INI、测试夹具或机器专用配置。旧的发布 ZIP 保留。
+- 发布顺序：提交/推送 main，等待 GitHub Windows 与 Ubuntu CI；通过后创建 v0.1.10 标签及 GitHub Release，上传 EXE / ZIP / SHA256SUMS.txt，并重新下载验证。此处是发布前记录，实际发布结果另记。
+
+## 2026-10-16 — Manual HTTP(S) image display (unreleased)
+
+- 用户需求：远程图片不自动下载，但缺少手动入口，增加手动触发展示。按明确需求为原 AGENTS.md 的禁止远程图片规则增加第二个、逐张确认的网络例外；没有增加自动下载开关，没有提交、推送、发布或改版本号。`dist/FeatherMD.exe` 和现有发布包保持原样。
+- 预览中的 HTTP(S) 图片占位文字显示“点击加载网络图片”，使用链接色和手形指针；点击确认框显示完整地址及 IP 披露说明（默认选取消），确认后原位置显示。同地址共享内存缓存，但不会加载其他地址；失败/超时/格式不支持有重试入口。自动本机图片关闭时也可手动加载；保存无关设置不清空已手动加载的图片。外层超链接在图片加载后仍可点击；源码模式和表格单元格没有图片加载入口。
+- 实现：`image::WebImage` 仅接受明确 HTTP(S)，保留 query、去掉 fragment，拒绝凭据、控制字符、反斜杠和无效地址；`src/ui/pictures/web.rs` 用系统 WinHTTP 匿名 GET，禁 Cookie、认证、Referer、重定向，不放宽证书验证，不落盘。32 MiB、光栅签名、原有像素/缓存上限；网络解码线程独立于本机图片线程，单线程 + 4 个等待项；UI 15 s 截止。F5/换文档取消旧任务，单调任务编号防止同 URL 的旧回复覆盖新请求；两个解码线程都退出后才关闭 GDI+。四语界面、Settings/About、四份 README、ARCHITECTURE、CHANGELOG 与待办同步。
+- 构建验证：MSVC static CRT；`cargo fmt --check`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo test --locked`（103 项）、release 和两个测试替身均通过。新测试覆盖 URL/query/凭据策略，回环 HTTP 200/302/404/401、Content-Length 与无长度的 32 MiB 上限、非图片内容、匿名请求头、取消/过期、同地址旧任务回复。`target/release/feathermd.exe` 1,098,752 字节，SHA-256 bfaec689fbe1bae99d364c23f678add099f435aaf6b3c914c32b382ea12cf76d，版本仍为 0.1.9。
+- 原生验证（本机 120 DPI，隐藏窗口 + 合成消息，全部使用临时便携 INI）：image-smoke 浅/深原有本机图片断言全部通过（GDI 27→27），新增取消零请求、只加载所选 URL、重复 URL 一次 GET、链接图片、失败后手动重试、源码/预览切换不重下载、无关设置保存保留图片、下载中 F5 丢弃结果、重启无自动加载（每轮 4 次回环请求）。最后连续四轮浅/深交替全部 PASS：`test-artifacts/manual-image-repeat/`。多语言 105 个视图无截断、8 次实时切换，GDI 30→30、USER 24→24。
+- 全量 19 项回归首轮 14 PASS / 5 FAIL：wrapped navigation（Backward paging stopped）、window（tooltip）、typography-light（GDI 35→38）、table-light（拖选未滚动）、image-light（未等到包含 URL 的确认框）。window/typography/table/image 单独重跑通过；wrapped 首次重跑又报 EOF not visible，之后与未改动的 dist v0.1.9 交替各两次全部通过，两版同为 251/280 页。因而每项均有通过记录，但**不宣称首轮全量通过，也未确定间歇失败原因**。证据：`test-artifacts/manual-image-regression/`、`manual-image-recheck/`、`manual-image-baseline/`。
+- 限制：只验证本机回环 HTTP，未访问真实外网图片；真实 HTTPS/代理/证书失败未实测。系统同步 WinHTTP 调用可能超过 UI 截止，取消在调用间检查；不会为此继续创建线程，队列满时需稍后重试。仅支持直接返回 PNG/JPEG/GIF/BMP/TIFF/ICO 的地址，不跟随 3xx，不支持 SVG/WebP、隐式 `//host` 地址、带认证的地址或表格内图片。新增翻译未经母语者审校，未验证 Windows 10、多显示器或真实指针输入。
+
 ## v0.1.9 publication record — 2026-10-14
 
 - 作者/最后修改人：lianzy。用户要求“上传github，发Releases,更新About”。Public latest release: https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.9

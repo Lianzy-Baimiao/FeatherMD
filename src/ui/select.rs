@@ -316,7 +316,7 @@ mod tests {
         let mut picture = run("\u{fffc}", 30);
         picture.width = 100;
         picture.picture = Some(Inline {
-            key: Rc::from(std::path::Path::new(r"C:\a.png")),
+            key: Rc::from(r"C:\a.png"),
             top: 0,
             height: 50,
             alt: "Logo".into(),

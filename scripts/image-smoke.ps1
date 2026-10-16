@@ -1,7 +1,7 @@
-﻿param([ValidateSet('light','dark')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\image")
+﻿param([ValidateSet('light','dark')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\image", [string]$Server = "$PSScriptRoot\..\target\release\examples\update_server.exe")
 # Local images: off by default; when on, only local raster files are drawn (fitted,
 # EXIF-oriented, transparent where they are), everything else keeps a placeholder
-# that says why. Fixtures are generated here; nothing is downloaded.
+# that says why. Manual HTTP loads use generated fixtures on loopback only.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -11,6 +11,13 @@ using System.Runtime.InteropServices;
 public static class ImageSmoke {
  public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
+ [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr hwnd, EnumProc proc, IntPtr data);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageW")] static extern IntPtr ReadText(IntPtr hwnd, uint msg, IntPtr wp, StringBuilder text);
+ public static string Content(IntPtr hwnd) {
+  var text = new StringBuilder();
+  EnumChildWindows(hwnd, (h,d) => { var s = new StringBuilder(4096); ReadText(h, 13, (IntPtr)s.Capacity, s); text.AppendLine(s.ToString()); return true; }, IntPtr.Zero);
+  return text.ToString();
+ }
  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassNameW(IntPtr hwnd, StringBuilder text, int size);
  [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
@@ -33,6 +40,7 @@ public static class ImageSmoke {
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
 $Output = (Resolve-Path -LiteralPath $Output).Path
 $Exe = (Resolve-Path -LiteralPath $Exe).Path
+$Server = (Resolve-Path -LiteralPath $Server).Path
 $ini = Join-Path (Split-Path $Exe) 'FeatherMD.ini'
 if (Test-Path -LiteralPath $ini) { throw 'Refusing to overwrite existing portable settings' }
 $utf8 = [Text.UTF8Encoding]::new($false)
@@ -40,6 +48,9 @@ $oldSnapshot = $env:FEATHERMD_TEST_SNAPSHOT
 $snapshot = Join-Path $Output 'image.bmp'
 $copyFile = Join-Path $Output 'copy.txt'
 $process = $null; $window = [IntPtr]::Zero; $createdIni = $false; $dpi = 96
+$serverProcess = $null
+$feed = Join-Path $Output ('web-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $feed | Out-Null
 $oldDpi = [ImageSmoke]::SetThreadDpiAwarenessContext([IntPtr](-4))
 
 # Fixtures.
@@ -75,8 +86,8 @@ foreach ($badge in @(@('build', @(40, 160, 70, 255)), @('docs', @(30, 110, 200, 
 [IO.File]::WriteAllText((Join-Path $assets 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>', $utf8)
 # A junction to the assets: refused, since a link could point at a share.
 $junction = Join-Path $Output 'linked'
-if (Test-Path -LiteralPath $junction) { cmd /c rmdir "$junction" | Out-Null }
-cmd /c mklink /J "$junction" "$assets" | Out-Null
+if (Test-Path -LiteralPath $junction) { [IO.Directory]::Delete($junction) }
+New-Item -ItemType Junction -Path $junction -Target $assets | Out-Null
 $haveJunction = Test-Path -LiteralPath (Join-Path $junction 'halves.png')
 $document = Join-Path $Output 'images.md'
 [IO.File]::WriteAllLines($document, [string[]]@(
@@ -173,15 +184,45 @@ function StableGdi {
 }
 $frame = $null
 $suffix = if ($Theme -eq 'dark') { '-dark' } else { '' }
+function Requests {
+ $log = Join-Path $feed 'requests.log'
+ if (Test-Path -LiteralPath $log) { return @([IO.File]::ReadAllLines($log) | Where-Object { $_.StartsWith('GET ') }).Count }
+ return 0
+}
+function LoadWeb([bool]$accept) {
+ Capture
+ if ((Query 92) -lt 1) { throw 'No manual web-image target was painted' }
+ $point = Point ([int](Query 93) + 4) ([int](Query 94) + 4)
+ Send 0x201 1 $point
+ [void][ImageSmoke]::PostMessageW($window, 0x202, [IntPtr]::Zero, [IntPtr]$point)
+ $confirm = [IntPtr]::Zero
+ for ($i = 0; $i -lt 200; $i++) {
+  $confirm = [ImageSmoke]::FindClass($process.Id, '#32770')
+  if ($confirm -ne [IntPtr]::Zero -and [ImageSmoke]::Content($confirm).Contains($webUrl)) { break }
+  Start-Sleep -Milliseconds 20
+ }
+ if ($confirm -eq [IntPtr]::Zero -or -not [ImageSmoke]::Content($confirm).Contains($webUrl)) { throw 'Image confirmation did not show the exact URL' }
+ [void][ImageSmoke]::ShowWindow($confirm, 0)
+ $choice = if ($accept) { 1 } else { 2 }
+ [void][ImageSmoke]::PostMessageW($confirm, 0x111, [IntPtr]$choice, [IntPtr]::Zero)
+ for ($i = 0; $i -lt 200 -and [ImageSmoke]::IsWindow($confirm); $i++) { Start-Sleep -Milliseconds 20 }
+ if ([ImageSmoke]::IsWindow($confirm)) { throw 'Image confirmation did not close' }
+}
 try {
+ [IO.File]::WriteAllBytes((Join-Path $feed 'body'), [IO.File]::ReadAllBytes((Join-Path $assets 'halves.png')))
+ $serverProcess = Start-Process -FilePath $Server -ArgumentList ('"' + $feed + '"') -WindowStyle Hidden -PassThru
+ for ($i = 0; $i -lt 200 -and -not (Test-Path -LiteralPath (Join-Path $feed 'port')); $i++) { Start-Sleep -Milliseconds 20 }
+ $port = [IO.File]::ReadAllText((Join-Path $feed 'port')).Trim()
+ $webUrl = "http://127.0.0.1:$port/image?raw=1&token=a%2Fb"
+ [IO.File]::WriteAllText($document, [IO.File]::ReadAllText($document).Replace('https://example.com/logo.png', $webUrl), $utf8)
  # Off by default: no image is read, every image is its plain placeholder.
  StartReader ''
  if ((Query 81) -ne 0 -or (Query 83) -ne 0) { throw "Images drawn or read while off: runs=$(Query 81) bytes=$(Query 83)" }
  $text = Copied
- foreach ($expected in @('[图片: 红蓝]', '[图片: 旋转]', '[图片: 网络]', '[图片: 缺失]')) {
+ foreach ($expected in @('[图片: 红蓝]', '[图片: 旋转]', '[图片: 网络 · 点击加载网络图片]', '[图片: 缺失]')) {
   if (-not $text.Contains($expected)) { throw "Placeholder '$expected' missing while images are off: $text" }
  }
- if ($text.Contains(' · ')) { throw "A reason was shown while images are off: $text" }
+ if ((Requests) -ne 0) { throw 'Web image fetched without a click while images are off' }
  Capture ('images-off' + $suffix)
  StopReader
 
@@ -189,7 +230,7 @@ try {
  StartReader "images=true`n"
  if ((Query 81) -ne 5) { throw "Expected 5 drawn images, layout has $(Query 81)" }
  $text = Copied
- foreach ($expected in @('红蓝', '旋转', 'build', 'docs', '宽图', '[图片: 网络 · 网络图片不下载]', '[图片: 缺失 · 找不到文件]', '[图片: 坏文件 · 无法读取]', '[图片: 矢量 · 不支持的格式]')) {
+ foreach ($expected in @('红蓝', '旋转', 'build', 'docs', '宽图', '[图片: 网络 · 点击加载网络图片]', '[图片: 缺失 · 找不到文件]', '[图片: 坏文件 · 无法读取]', '[图片: 矢量 · 不支持的格式]')) {
   if (-not $text.Contains($expected)) { throw "Copy text lacks '$expected': $text" }
  }
  if ($haveJunction -and -not $text.Contains('[图片: 链接 · 不读取链接、网络或设备路径]')) { throw "An image behind a junction was not refused: $text" }
@@ -280,6 +321,60 @@ try {
  # Their display copies (one GDI bitmap each) are released too.
  if ((Query 90) -ne 0) { throw "Turning images off kept $(Query 90) display bitmaps" }
  $gdiOff = StableGdi
+ if ((Requests) -ne 0) { throw 'Enabling local images, resizing or scrolling fetched a web image' }
+ StopReader
+
+ # Manual loads work with images off. Duplicate URLs coalesce; the enclosing
+ # browser link becomes clickable only after the image has been loaded.
+ [IO.File]::WriteAllText($document, "# Manual images`n`n[![First]($webUrl)](https://example.com/not-opened)`n`n![Same]($webUrl)`n`n<img src=`"http://127.0.0.1:$port/second`" alt=`"Second`" width=`"80`">", $utf8)
+ StartReader ''
+ Capture ('web-before' + $suffix)
+ LoadWeb $false; Idle
+ if ((Requests) -ne 0 -or (Query 81) -ne 0) { throw 'Cancelling confirmation downloaded an image' }
+ LoadWeb $true; Idle; Capture ('web-loaded' + $suffix)
+ if ((Requests) -ne 1 -or (Query 81) -ne 2) { throw "Manual load did not coalesce only the requested URL: requests=$(Requests), runs=$(Query 81)" }
+ $loaded = Painted 0
+ if ((Query 89 (Point ($loaded.Left + 4) ($loaded.Top + 4))) -ne 1) { throw 'Loaded remote image lost its enclosing link' }
+ # Saving unrelated preferences must not erase manual images while local images
+ # remain off (or leave layout pointing at an empty cache).
+ [void][ImageSmoke]::PostMessageW($window, 0x111, [IntPtr]414, [IntPtr]::Zero)
+ $dialog = [IntPtr]::Zero
+ for ($i = 0; $i -lt 200; $i++) {
+  $dialog = [ImageSmoke]::FindClass($process.Id, '#32770')
+  if ($dialog -ne [IntPtr]::Zero -and [ImageSmoke]::GetDlgItem($dialog, 1105) -ne [IntPtr]::Zero) { break }
+  Start-Sleep -Milliseconds 20
+ }
+ if ($dialog -eq [IntPtr]::Zero) { throw 'Settings did not open for manual-cache test' }
+ [void][ImageSmoke]::ShowWindow($dialog, 0)
+ [void][ImageSmoke]::PostMessageW($dialog, 0x111, [IntPtr]1, [IntPtr]::Zero)
+ for ($i = 0; $i -lt 200 -and [ImageSmoke]::IsWindow($dialog); $i++) { Start-Sleep -Milliseconds 20 }
+ if ([ImageSmoke]::IsWindow($dialog)) { throw 'Settings did not close for manual-cache test' }
+ Idle; Capture
+ if ((Query 84) -ne 2 -or (Query 83) -le 0 -or (Requests) -ne 1) { throw 'Unrelated settings erased manually loaded images' }
+ Send 0x111 205 0; Idle; Capture
+ if ((Query 92) -ne 0) { throw 'Source view exposes a remote load action' }
+ Send 0x111 205 0; Idle
+ if ((Requests) -ne 1) { throw 'View toggle re-downloaded a cached image' }
+ Send 0x111 104 0; Idle
+ if ((Query 81) -ne 0 -or (Requests) -ne 1) { throw 'Reload retained remote permission or pixels' }
+ [IO.File]::WriteAllText((Join-Path $feed 'status'), '404 Not Found')
+ LoadWeb $true; Idle
+ if (-not (Copied).Contains('下载失败，点击重试')) { throw 'Download failure has no retry action' }
+ [IO.File]::WriteAllText((Join-Path $feed 'status'), '200 OK')
+ LoadWeb $true; Idle
+ if ((Requests) -ne 3 -or (Query 81) -ne 2) { throw 'Manual retry failed' }
+ # F5 during a delayed request discards its eventual result, without auto-retry.
+ Send 0x111 104 0; Idle
+ [IO.File]::WriteAllText((Join-Path $feed 'delay'), '1500')
+ LoadWeb $true
+ for ($i = 0; $i -lt 200 -and (Requests) -lt 4; $i++) { Start-Sleep -Milliseconds 10 }
+ Send 0x111 104 0; Idle
+ Start-Sleep -Milliseconds 1700; Idle
+ if ((Query 81) -ne 0 -or (Requests) -ne 4) { throw 'An obsolete download appeared after F5' }
+ [IO.File]::WriteAllText((Join-Path $feed 'delay'), '0')
+ StopReader
+ StartReader "images=true`n"
+ if ((Query 81) -ne 0 -or (Requests) -ne 4) { throw 'Restart retained remote permission' }
  StopReader
 
  $metrics = [ordered]@{
@@ -288,7 +383,8 @@ try {
   html_width_attribute_and_centre = $true; transparency_shows_page = $true; exif_orientation_6 = $true
   badges_one_line_linked_hit = $true; wide_image_fits_column = $true; refit_on_resize = $true
   decoded_bytes = $bytes; gdi_before = $gdiBefore; gdi_after = $gdiAfter; gdi_images_off = $gdiOff; turning_off_frees_images = $true
-  screenshots = @("images-off$suffix.png", "images-on$suffix.png", "images-narrow$suffix.png")
+  screenshots = @("images-off$suffix.png", "images-on$suffix.png", "images-narrow$suffix.png", "web-before$suffix.png", "web-loaded$suffix.png")
+  manual_web_load_cancel_retry_cache_reload = $true; web_requests = (Requests)
   limitations = 'Hidden window, generated fixtures on the local disk; OneDrive placeholders, removable and network drives are covered by unit-level rules only.'
   exe_bytes = (Get-Item -LiteralPath $Exe).Length
  }
@@ -298,7 +394,11 @@ try {
  try { StopReader } finally {
   if ($frame) { $frame.Dispose() }
   if ($createdIni) { Remove-Item -LiteralPath $ini -ErrorAction SilentlyContinue }
-  if (Test-Path -LiteralPath $junction) { cmd /c rmdir "$junction" | Out-Null }
+  if (Test-Path -LiteralPath $junction) { [IO.Directory]::Delete($junction) }
+  if ($serverProcess -and -not $serverProcess.HasExited) {
+   [IO.File]::WriteAllText((Join-Path $feed 'stop'), '')
+   if (-not $serverProcess.WaitForExit(5000)) { $serverProcess.Kill() }
+  }
   $env:FEATHERMD_TEST_SNAPSHOT = $oldSnapshot
   if ($oldDpi -ne [IntPtr]::Zero) { [void][ImageSmoke]::SetThreadDpiAwarenessContext($oldDpi) }
  }

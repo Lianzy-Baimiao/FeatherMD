@@ -1,7 +1,8 @@
-//! Local images for the preview: read and decode off the window thread, keep a
+//! Images for the preview: read and decode off the window thread, keep a
 //! bounded cache, draw at display size. Only files on local drives are read; links,
 //! junctions, network drives, shares, devices and online-only cloud files are
-//! refused before any byte is read, so showing images never reaches the network.
+//! refused before any byte is read. Only explicit per-image clicks may fetch HTTP(S).
+mod web;
 use super::*;
 use crate::layout::Picture;
 use feathermd::image::{self as rules, Source};
@@ -11,8 +12,8 @@ use std::{
     path::Path,
     rc::Rc,
     sync::{
-        atomic::AtomicBool,
-        mpsc::{self, Receiver, Sender},
+        atomic::{AtomicBool, AtomicUsize},
+        mpsc::{self, Receiver, SyncSender},
     },
     thread::JoinHandle,
 };
@@ -38,9 +39,10 @@ const DRIVE_REMOVABLE: u32 = 2;
 const DRIVE_FIXED: u32 = 3;
 const DRIVE_CDROM: u32 = 5;
 const DRIVE_RAMDISK: u32 = 6;
-/// True from the decoder's start until its last GDI+ call. GDI+ is shut down only
-/// when it is false, so a read that outlives the window cannot use a dead GDI+.
-pub(super) static DECODER_ALIVE: AtomicBool = AtomicBool::new(false);
+/// Live decoder threads. GDI+ is shut down only at zero, so a read that outlives
+/// the window cannot use a dead GDI+.
+pub(super) static DECODERS_ALIVE: AtomicUsize = AtomicUsize::new(0);
+const WEB_DEADLINE: Duration = Duration::from_secs(15);
 
 /// Why an image is not shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +58,10 @@ pub(super) enum Failure {
     Limit,
     /// The page's images already fill the decoded-image budget; not retried.
     Memory,
+    Network,
+    Timeout,
+    Redirect,
+    Busy,
 }
 impl Failure {
     pub(super) fn note(self) -> &'static str {
@@ -66,6 +72,10 @@ impl Failure {
             Self::TooLarge => tr("文件过大"),
             Self::Unreadable => tr("无法读取"),
             Self::Limit | Self::Memory => tr("已达图片数量上限"),
+            Self::Network => tr("下载失败，点击重试"),
+            Self::Timeout => tr("下载超时，点击重试"),
+            Self::Redirect => tr("地址已跳转，请使用图片直链"),
+            Self::Busy => tr("下载队列已满，点击重试"),
         }
     }
 }
@@ -92,9 +102,21 @@ impl Drop for Scaled {
 }
 
 enum State {
-    Pending,
+    Pending(Job),
     Ready(Arc<Decoded>),
     Failed(Failure),
+}
+#[derive(Clone)]
+struct Job {
+    id: u64,
+    key: String,
+    cancel: Arc<AtomicBool>,
+    deadline: Option<Instant>,
+}
+impl Job {
+    fn expired(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst) || self.deadline.is_some_and(|d| Instant::now() >= d)
+    }
 }
 struct Entry {
     state: State,
@@ -104,35 +126,48 @@ struct Entry {
 }
 
 struct Worker {
-    requests: Option<Sender<PathBuf>>,
-    results: Receiver<(PathBuf, Result<Decoded, Failure>)>,
+    requests: Option<SyncSender<Job>>,
+    results: Receiver<(Job, Result<Decoded, Failure>)>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 impl Worker {
-    fn start() -> Self {
-        let (requests, inbox) = mpsc::channel::<PathBuf>();
+    fn start(remote: bool) -> Self {
+        let (requests, inbox) = mpsc::sync_channel::<Job>(if remote { 4 } else { PAGE_IMAGES });
         let (outbox, results) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let quit = stop.clone();
         // Before the thread exists, so shutdown never misses it.
-        DECODER_ALIVE.store(true, Ordering::SeqCst);
+        DECODERS_ALIVE.fetch_add(1, Ordering::SeqCst);
         let thread = std::thread::spawn(move || unsafe {
             // GDI+ codecs may use COM; this thread never shows UI.
             let com = CoInitializeEx(null(), COINIT_MULTITHREADED as u32);
-            while let Ok(path) = inbox.recv() {
+            while let Ok(job) = inbox.recv() {
                 if quit.load(Ordering::SeqCst) {
                     break;
                 }
-                let result = load(&path);
-                if quit.load(Ordering::SeqCst) || outbox.send((path, result)).is_err() {
+                if job.expired() {
+                    continue;
+                }
+                let result = if let Some(deadline) = job.deadline {
+                    web::get(&job.key, &job.cancel, deadline).and_then(|bytes| {
+                        if job.expired() {
+                            Err(Failure::Timeout)
+                        } else {
+                            decode(&bytes, KEEP_SIDE)
+                        }
+                    })
+                } else {
+                    load(Path::new(&job.key))
+                };
+                if quit.load(Ordering::SeqCst) || outbox.send((job, result)).is_err() {
                     break;
                 }
             }
             if com >= 0 {
                 CoUninitialize();
             }
-            DECODER_ALIVE.store(false, Ordering::SeqCst);
+            DECODERS_ALIVE.fetch_sub(1, Ordering::SeqCst);
         });
         Self {
             requests: Some(requests),
@@ -159,10 +194,10 @@ impl Drop for Worker {
         }
     }
 }
-/// Decoded images of the open document, keyed by their resolved path.
+/// Decoded images of the open document, keyed by local path or validated URL.
 #[derive(Default)]
 pub(super) struct Pictures {
-    entries: HashMap<Rc<Path>, Entry>,
+    entries: HashMap<Rc<str>, Entry>,
     /// Current layout pass; entries used by older passes may be evicted.
     pass: u64,
     /// Images requested by the current pass.
@@ -170,6 +205,13 @@ pub(super) struct Pictures {
     /// Decoded bytes held by Ready entries.
     bytes: usize,
     worker: Option<Worker>,
+    web_worker: Option<Worker>,
+    ticket: u64,
+}
+impl Drop for Pictures {
+    fn drop(&mut self) {
+        self.clear();
+    }
 }
 impl Pictures {
     /// Starts a layout pass. Display copies of images the previous page used are
@@ -187,7 +229,8 @@ impl Pictures {
     /// Notes an image the page shows, queueing it for decoding when new (or when an
     /// earlier page had no room for it).
     pub(super) fn want(&mut self, path: &Path) {
-        let retry = match self.entries.get_mut(path) {
+        let key = path.to_string_lossy();
+        let retry = match self.entries.get_mut(key.as_ref()) {
             Some(entry) if entry.used == self.pass => return,
             Some(entry) => {
                 entry.used = self.pass;
@@ -202,14 +245,10 @@ impl Pictures {
         let state = if self.wanted > PAGE_IMAGES {
             State::Failed(Failure::Limit)
         } else {
-            let worker = self.worker.get_or_insert_with(Worker::start);
-            match &worker.requests {
-                Some(requests) if requests.send(path.to_path_buf()).is_ok() => State::Pending,
-                _ => State::Failed(Failure::Unreadable),
-            }
+            self.queue(&key, false)
         };
         self.entries.insert(
-            Rc::from(path),
+            Rc::from(key.as_ref()),
             Entry {
                 state,
                 scaled: None,
@@ -217,43 +256,148 @@ impl Pictures {
             },
         );
     }
+    fn queue(&mut self, key: &str, remote: bool) -> State {
+        self.ticket += 1;
+        let job = Job {
+            id: self.ticket,
+            key: key.into(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            deadline: remote.then(|| Instant::now() + WEB_DEADLINE),
+        };
+        let slot = if remote {
+            &mut self.web_worker
+        } else {
+            &mut self.worker
+        };
+        let worker = slot.get_or_insert_with(|| Worker::start(remote));
+        match &worker.requests {
+            Some(tx) if tx.try_send(job.clone()).is_ok() => State::Pending(job),
+            _ => State::Failed(if remote {
+                Failure::Busy
+            } else {
+                Failure::Limit
+            }),
+        }
+    }
+    /// Called only after the user confirms a single URL. Never remembered as an
+    /// automatic-download permission, even after eviction or a document reload.
+    pub(super) fn request_web(&mut self, src: &str) {
+        let Some(url) = rules::WebImage::parse(src).map(|u| u.url) else {
+            return;
+        };
+        if self
+            .entries
+            .get(url.as_str())
+            .is_some_and(|e| matches!(e.state, State::Pending(_) | State::Ready(_)))
+        {
+            return;
+        }
+        let count = self
+            .entries
+            .values()
+            .filter(|e| {
+                e.used == self.pass && matches!(e.state, State::Pending(_) | State::Ready(_))
+            })
+            .count();
+        let state = if count >= PAGE_IMAGES {
+            State::Failed(Failure::Limit)
+        } else {
+            self.queue(&url, true)
+        };
+        self.entries.insert(
+            Rc::from(url),
+            Entry {
+                state,
+                scaled: None,
+                used: self.pass,
+            },
+        );
+    }
+    /// Mark previously requested remote images as visible without scheduling I/O.
+    pub(super) fn touch_web(&mut self, src: &str) {
+        if let Some(url) = rules::WebImage::parse(src)
+            && let Some(entry) = self.entries.get_mut(url.url.as_str())
+        {
+            entry.used = self.pass;
+        }
+    }
     /// What layout shows for `src` of a document in `folder`.
-    pub(super) fn lookup(&self, src: &str, folder: &Path) -> Picture {
+    pub(super) fn lookup(&self, src: &str, folder: &Path, local: bool) -> Picture {
+        if let Some(url) = rules::WebImage::parse(src) {
+            return self.cached(&url.url).unwrap_or(Picture::Load {
+                url: url.url,
+                note: tr("点击加载网络图片"),
+            });
+        }
+        if !local {
+            return Picture::Off;
+        }
         match rules::resolve(src, folder) {
             Source::Remote => Picture::Note(tr("网络图片不下载")),
             Source::Refused => Picture::Note(Failure::Refused.note()),
             Source::Unsupported => Picture::Note(tr("不支持的格式")),
-            Source::Local(path) => match self.entries.get_key_value(path.as_path()) {
-                Some((key, entry)) => match &entry.state {
-                    State::Ready(image) => Picture::Ready {
-                        width: image.width,
-                        height: image.height,
-                        key: key.clone(),
-                    },
-                    State::Pending => Picture::Note(tr("正在载入")),
-                    State::Failed(failure) => Picture::Note(failure.note()),
-                },
-                None => Picture::Note(tr("正在载入")),
+            Source::Local(path) => self
+                .cached(&path.to_string_lossy())
+                .unwrap_or(Picture::Note(tr("正在载入"))),
+        }
+    }
+    fn cached(&self, src: &str) -> Option<Picture> {
+        let remote = rules::WebImage::parse(src).is_some();
+        match self.entries.get_key_value(src) {
+            Some((key, entry)) => match &entry.state {
+                State::Ready(image) => Some(Picture::Ready {
+                    width: image.width,
+                    height: image.height,
+                    key: key.clone(),
+                }),
+                State::Pending(_) => Some(Picture::Note(tr("正在载入"))),
+                State::Failed(failure) => Some(if remote {
+                    Picture::Load {
+                        url: src.into(),
+                        note: match failure {
+                            Failure::Network
+                            | Failure::Timeout
+                            | Failure::Busy
+                            | Failure::Redirect => failure.note(),
+                            Failure::TooLarge => tr("图片过大，点击重试"),
+                            Failure::Limit | Failure::Memory => tr("已达图片上限，点击重试"),
+                            _ => tr("格式无效或不支持，点击重试"),
+                        },
+                    }
+                } else {
+                    Picture::Note(failure.note())
+                }),
             },
+            None => None,
         }
     }
     /// Takes finished decodes; true when one belongs to the page on screen.
     pub(super) fn receive(&mut self) -> bool {
-        let Some(worker) = &self.worker else {
-            return false;
-        };
-        let finished: Vec<_> = worker.results.try_iter().collect();
+        let finished: Vec<_> = [&self.worker, &self.web_worker]
+            .into_iter()
+            .flatten()
+            .flat_map(|worker| worker.results.try_iter())
+            .collect();
         let mut changed = false;
-        for (path, result) in finished {
-            let used = match self.entries.get(path.as_path()) {
-                // A second reply for a path requested again after a clear.
+        // A stuck WinHTTP call never blocks the GUI or the local decoder. The
+        // single network worker and bounded queue also cap abandoned work.
+        for entry in self.entries.values_mut() {
+            if let State::Pending(job) = &entry.state
+                && job.expired()
+            {
+                job.cancel.store(true, Ordering::SeqCst);
+                entry.state = State::Failed(Failure::Timeout);
+                changed |= entry.used == self.pass;
+            }
+        }
+        for (job, result) in finished {
+            let used = match self.entries.get(job.key.as_str()) {
                 Some(Entry {
-                    state: State::Ready(_),
+                    state: State::Pending(pending),
+                    used,
                     ..
-                }) => continue,
-                Some(entry) => entry.used,
-                // Cleared since it was requested (another document, images off).
-                None => continue,
+                }) if pending.id == job.id => *used,
+                _ => continue,
             };
             let state = match result {
                 Ok(image) => {
@@ -267,7 +411,7 @@ impl Pictures {
                 }
                 Err(failure) => State::Failed(failure),
             };
-            if let Some(entry) = self.entries.get_mut(path.as_path()) {
+            if let Some(entry) = self.entries.get_mut(job.key.as_str()) {
                 entry.state = state;
                 entry.scaled = None;
             }
@@ -300,6 +444,11 @@ impl Pictures {
     /// Forgets every image (another document, F5, or images turned off). Decodes in
     /// flight are dropped when they arrive.
     pub(super) fn clear(&mut self) {
+        for entry in self.entries.values() {
+            if let State::Pending(job) = &entry.state {
+                job.cancel.store(true, Ordering::SeqCst);
+            }
+        }
         self.entries.clear();
         self.bytes = 0;
     }
@@ -307,7 +456,7 @@ impl Pictures {
     pub(super) fn pending(&self) -> usize {
         self.entries
             .values()
-            .filter(|e| e.used == self.pass && matches!(e.state, State::Pending))
+            .filter(|e| e.used == self.pass && matches!(e.state, State::Pending(_)))
             .count()
     }
     /// Decoded bytes held (diagnostics).
@@ -320,7 +469,7 @@ impl Pictures {
     }
     /// Draws image `key` into `target`, making its display copy when the size
     /// changed; false when there was nothing to draw.
-    pub(super) unsafe fn draw(&mut self, dc: HDC, key: &Path, target: RECT) -> bool {
+    pub(super) unsafe fn draw(&mut self, dc: HDC, key: &str, target: RECT) -> bool {
         let (width, height) = (target.right - target.left, target.bottom - target.top);
         let Some(entry) = self.entries.get_mut(key) else {
             return false;
@@ -673,6 +822,93 @@ unsafe fn scale(dc: HDC, image: &Decoded, width: i32, height: i32) -> Option<Sca
 mod tests {
     use super::*;
     use windows_sys::core::GUID;
+
+    #[test]
+    fn web_lookup_never_starts_io_and_stale_or_timed_out_results_are_ignored() {
+        let url = "https://example.com/image.png?raw=1";
+        let mut cache = Pictures::default();
+        cache.begin();
+        for enabled in [false, true] {
+            assert!(matches!(
+                cache.lookup(url, Path::new(r"C:\docs"), enabled),
+                Picture::Load { .. }
+            ));
+            cache.touch_web(url);
+        }
+        assert!(cache.worker.is_none() && cache.web_worker.is_none());
+        assert_eq!(cache.pending(), 0);
+        let (tx, rx) = mpsc::channel();
+        cache.web_worker = Some(Worker {
+            requests: None,
+            results: rx,
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        });
+        let job = Job {
+            id: 1,
+            key: url.into(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            deadline: Some(Instant::now() + WEB_DEADLINE),
+        };
+        cache.entries.insert(
+            Rc::from(url),
+            Entry {
+                state: State::Pending(job.clone()),
+                scaled: None,
+                used: cache.pass,
+            },
+        );
+        cache.clear();
+        assert!(job.cancel.load(Ordering::SeqCst));
+        let next = Job {
+            id: 2,
+            cancel: Arc::new(AtomicBool::new(false)),
+            ..job.clone()
+        };
+        cache.entries.insert(
+            Rc::from(url),
+            Entry {
+                state: State::Pending(next.clone()),
+                scaled: None,
+                used: cache.pass,
+            },
+        );
+        tx.send((
+            job,
+            Ok(Decoded {
+                width: 1,
+                height: 1,
+                pixels: vec![255; 4],
+            }),
+        ))
+        .ok()
+        .unwrap();
+        assert!(!cache.receive());
+        assert_eq!(cache.pending(), 1);
+        assert_eq!(cache.bytes(), 0);
+        if let State::Pending(job) = &mut cache.entries.get_mut(url).unwrap().state {
+            job.deadline = Some(Instant::now());
+        }
+        assert!(cache.receive());
+        assert!(next.cancel.load(Ordering::SeqCst));
+        assert_eq!(cache.pending(), 0);
+        tx.send((
+            next,
+            Ok(Decoded {
+                width: 1,
+                height: 1,
+                pixels: vec![255; 4],
+            }),
+        ))
+        .ok()
+        .unwrap();
+        assert!(!cache.receive());
+        assert_eq!(cache.bytes(), 0);
+        assert!(matches!(
+            cache.lookup(url, Path::new(""), false),
+            Picture::Load { .. }
+        ));
+    }
 
     // GDI+ built-in encoders.
     const PNG: GUID = GUID {

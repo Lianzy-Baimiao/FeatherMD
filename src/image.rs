@@ -1,7 +1,7 @@
 //! Which images the preview may show, and how large. Pure rules, no I/O: only
 //! local files under a drive letter with a known raster type qualify. Network
-//! addresses, shares, devices and other schemes are never opened, so turning
-//! images on cannot make FeatherMD reach the network.
+//! addresses never resolve to local paths. HTTP(S) images have a separate,
+//! explicit per-image permission path; turning images on never fetches them.
 use std::path::{Path, PathBuf};
 
 /// Largest image file read, decoded image and side length accepted.
@@ -34,12 +34,115 @@ pub fn raster(bytes: &[u8]) -> bool {
 pub enum Source {
     /// A local file that may be read.
     Local(PathBuf),
-    /// An http(s) or other network address: never fetched.
+    /// A network address, never automatically fetched.
     Remote,
     /// A share, device, data URI or otherwise unsafe reference: never opened.
     Refused,
     /// A local file of a type FeatherMD does not decode (SVG, WebP…).
     Unsupported,
+}
+
+/// A validated HTTP(S) image address. No credentials, implicit scheme, backslash
+/// or control characters; the query is preserved and the fragment is not sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebImage {
+    pub url: String,
+    pub host: String,
+    pub port: u16,
+    pub secure: bool,
+    pub resource: String,
+}
+impl WebImage {
+    pub fn parse(src: &str) -> Option<Self> {
+        let src = src.trim();
+        if src.len() > 2048
+            || src.chars().any(|c| c.is_control() || c.is_whitespace())
+            || src.contains(['\\', '"', '<', '>'])
+        {
+            return None;
+        }
+        let (scheme, rest) = src.split_once("://")?;
+        let secure = match scheme.to_ascii_lowercase().as_str() {
+            "https" => true,
+            "http" => false,
+            _ => return None,
+        };
+        let rest = rest.split('#').next()?;
+        let end = rest.find(['/', '?']).unwrap_or(rest.len());
+        let (authority, path) = rest.split_at(end);
+        let (host, port) = if let Some(ipv6) = authority.strip_prefix('[') {
+            let (host, port) = ipv6.split_once(']')?;
+            host.parse::<std::net::Ipv6Addr>().ok()?;
+            (
+                host,
+                port.strip_prefix(':')
+                    .or_else(|| port.is_empty().then_some(""))?,
+            )
+        } else {
+            let (host, port) = authority.split_once(':').unwrap_or((authority, ""));
+            if host.is_empty()
+                || !host.is_ascii()
+                || !host.split('.').all(|label| {
+                    !label.is_empty()
+                        && label
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                        && !label.starts_with('-')
+                        && !label.ends_with('-')
+                })
+            {
+                return None;
+            }
+            (host, port)
+        };
+        if authority.ends_with(':') {
+            return None;
+        }
+        let port = if port.is_empty() {
+            if secure { 443 } else { 80 }
+        } else {
+            port.parse::<u16>().ok()?
+        };
+        if port == 0 {
+            return None;
+        }
+        let mut resource = if path.starts_with('/') {
+            String::new()
+        } else {
+            "/".into()
+        };
+        for byte in path.bytes() {
+            if byte.is_ascii() {
+                resource.push(byte as char);
+            } else {
+                use std::fmt::Write;
+                write!(resource, "%{byte:02X}").ok()?;
+            }
+        }
+        // Invalid escapes can be interpreted differently by network stacks.
+        for (i, b) in resource.bytes().enumerate() {
+            if b == b'%'
+                && !resource
+                    .as_bytes()
+                    .get(i + 1..i + 3)
+                    .is_some_and(|hex| hex.iter().all(u8::is_ascii_hexdigit))
+            {
+                return None;
+            }
+        }
+        Some(Self {
+            url: format!(
+                "{}://{}{}",
+                if secure { "https" } else { "http" },
+                authority.to_ascii_lowercase(),
+                resource
+            ),
+            host: host.to_ascii_lowercase(),
+            port,
+            secure,
+            resource,
+        })
+    }
 }
 
 /// `%xx` escapes decoded; None when the result is not clean UTF-8 text.

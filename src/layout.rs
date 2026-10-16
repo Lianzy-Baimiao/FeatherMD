@@ -8,7 +8,7 @@ use feathermd::{
     table::{self, Align},
     text,
 };
-use std::{collections::BTreeMap, path::Path, rc::Rc};
+use std::{collections::BTreeMap, rc::Rc};
 /// Logical padding inside table cells.
 const CELL_PAD_X: i32 = 10;
 const CELL_PAD_Y: i32 = 4;
@@ -130,6 +130,8 @@ pub struct Run {
     pub width: i32,
     pub font: FontKey,
     pub link: Option<String>,
+    /// Explicit image download, distinct from an enclosing hyperlink.
+    pub load_image: Option<String>,
     /// Inline code: a rounded chip from `chip.0` to `chip.1` (relative to the text
     /// origin, like `x`).
     pub code: bool,
@@ -155,7 +157,7 @@ pub struct Run {
 #[derive(Clone)]
 pub struct Inline {
     /// Cache key of the decoded image.
-    pub key: Rc<Path>,
+    pub key: Rc<str>,
     /// Top edge relative to the row's top.
     pub top: i32,
     pub height: i32,
@@ -170,10 +172,14 @@ pub enum Picture {
     Ready {
         width: u32,
         height: u32,
-        key: Rc<Path>,
+        key: Rc<str>,
     },
     /// Not shown, with the reason.
     Note(&'static str),
+    Load {
+        url: String,
+        note: &'static str,
+    },
 }
 /// What layout needs beyond the blocks: settings, the image cache and the tallest
 /// image a row may hold (the reading area's height).
@@ -368,7 +374,8 @@ struct Piece {
     rise: i32,
     muted: bool,
     /// A decoded image: one unit as wide as the image, and its height.
-    picture: Option<(Rc<Path>, i32)>,
+    picture: Option<(Rc<str>, i32)>,
+    load_image: Option<String>,
 }
 /// One preview block as visual lines. Its pieces are measured once and broken
 /// together: after spaces or next to CJK, never before closing punctuation; list
@@ -425,6 +432,7 @@ unsafe fn flow(
         // A decoded image takes one unit as wide as the image; any other image
         // shows its placeholder text.
         let mut picture = None;
+        let mut load_image = None;
         let shown = match &span.image {
             Some(image) => match (view.pictures)(image) {
                 Picture::Ready {
@@ -453,6 +461,10 @@ unsafe fn flow(
                     "\u{fffc}".to_owned()
                 }
                 Picture::Off => markdown::image_placeholder(image, &span.text, None),
+                Picture::Load { url, note } => {
+                    load_image = Some(url);
+                    markdown::image_placeholder(image, &span.text, Some(note))
+                }
                 Picture::Note(reason) => {
                     markdown::image_placeholder(image, &span.text, Some(reason))
                 }
@@ -519,6 +531,7 @@ unsafe fn flow(
                 _ => 0,
             },
             muted: span.image.is_some() && picture.is_none(),
+            load_image,
             picture: picture.map(|(key, (_, image_height))| (key, image_height)),
         });
         units.extend(utf16);
@@ -660,6 +673,7 @@ unsafe fn flow(
                 width: (stop - glyph).max(0),
                 font: piece.key,
                 link: span.link.clone(),
+                load_image: piece.load_image.clone(),
                 code: span.code && !code_block,
                 kbd: span.kbd && !code_block,
                 mark: span.mark,

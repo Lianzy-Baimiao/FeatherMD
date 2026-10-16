@@ -521,6 +521,7 @@ fn skin_name(theme: Theme) -> &'static str {
 enum Hit {
     Command(usize),
     Link(String),
+    LoadImage(String),
     Row(usize),
     Heading(usize),
     /// Copy button of the box with this index in `App::boxes`.
@@ -624,7 +625,7 @@ struct App {
     boxes: Vec<CopyBox>,
     /// The box whose copy button was just used, by its first row's source byte.
     copied: Option<(u64, Instant)>,
-    /// Decoded local images (only when Settings → Reading → Show images is on).
+    /// Local images when enabled, plus individually confirmed remote images.
     pictures: pictures::Pictures,
     /// An image finished while the pointer was dragging; relayout when it ends.
     pictures_changed: bool,
@@ -963,6 +964,15 @@ impl App {
             let folder = self.document_folder();
             let images = self.settings.images && !self.settings.raw;
             self.pictures.begin();
+            if !self.settings.raw {
+                for image in blocks
+                    .iter()
+                    .flat_map(|b| &b.spans)
+                    .filter_map(|s| s.image.as_ref())
+                {
+                    self.pictures.touch_web(&image.src);
+                }
+            }
             if images {
                 for span in blocks.iter().flat_map(|b| &b.spans) {
                     if let Some(image) = &span.image
@@ -975,8 +985,8 @@ impl App {
             }
             let pictures = &self.pictures;
             let lookup = |image: &markdown::Image| {
-                if images {
-                    pictures.lookup(&image.src, &folder)
+                if !self.settings.raw {
+                    pictures.lookup(&image.src, &folder, images)
                 } else {
                     Picture::Off
                 }
@@ -1465,7 +1475,7 @@ impl App {
             || draft.images != self.settings.images;
         self.settings.font_family = draft.font_family;
         self.settings.font_size = draft.font_size;
-        if !draft.images {
+        if self.settings.images && !draft.images {
             // Turned off: free the decoded images at once.
             self.pictures.clear();
         }
@@ -2909,6 +2919,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             82 => app.pictures.pending() as isize,
             83 => app.pictures.bytes() as isize,
             90 => app.pictures.bitmaps() as isize,
+            // Visible manual image actions and their rectangles (diagnostics).
+            92 => app
+                .hits
+                .iter()
+                .filter(|h| matches!(h.action, Hit::LoadImage(_)))
+                .count() as isize,
+            93..=96 => app
+                .hits
+                .iter()
+                .filter(|h| matches!(h.action, Hit::LoadImage(_)))
+                .nth(lp as usize)
+                .map_or(-1, |h| match wp {
+                    93 => h.rect.left,
+                    94 => h.rect.top,
+                    95 => h.rect.right,
+                    _ => h.rect.bottom,
+                } as isize),
             84 => app.painted_pictures.len() as isize,
             85..=88 => app
                 .painted_pictures
@@ -3227,7 +3254,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             app.pressed = app.hit(x, y);
             if matches!(
                 app.pressed,
-                Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_) | Hit::CopyBlock(_))
+                Some(
+                    Hit::Command(_)
+                        | Hit::Link(_)
+                        | Hit::LoadImage(_)
+                        | Hit::Heading(_)
+                        | Hit::CopyBlock(_)
+                )
             ) {
                 SetCapture(hwnd);
                 app.invalidate();
@@ -3362,6 +3395,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     Some(Hit::Command(0)) => app.hide_edit(),
                     Some(Hit::Command(NEXT)) if app.edit_mode.is_some() => app.submit(),
                     Some(Hit::Command(id)) => app.command(id),
+                    Some(Hit::LoadImage(url)) => {
+                        let ticket = app.io_ticket;
+                        drop(app);
+                        // Release the App borrow so timers and paint can run in
+                        // the confirmation's modal loop. Only this URL is allowed.
+                        let accepted = MessageBoxW(hwnd,
+                            w(&trf("下载并显示这一张网络图片？\n\n{}\n\n图片网站会收到你的 IP 地址；仅缓存在内存中，不保存文件。", &[&url])).as_ptr(),
+                            w(tr("加载网络图片")).as_ptr(), MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2) == IDOK;
+                        if accepted
+                            && let Ok(mut app) = (*ptr).try_borrow_mut()
+                            && app.io_ticket == ticket
+                            && !app.settings.raw
+                        {
+                            app.pictures.request_web(&url);
+                            app.pictures_changed = true;
+                            app.invalidate();
+                        }
+                        return 0;
+                    }
                     Some(Hit::Link(url)) => {
                         if markdown::safe_web_link(&url) {
                             if MessageBoxW(
@@ -3414,7 +3466,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let clickable = app.mouse.is_some_and(|(x, y)| {
                 matches!(
                     app.hit(x, y),
-                    Some(Hit::Command(_) | Hit::Link(_) | Hit::Heading(_) | Hit::CopyBlock(_))
+                    Some(
+                        Hit::Command(_)
+                            | Hit::Link(_)
+                            | Hit::LoadImage(_)
+                            | Hit::Heading(_)
+                            | Hit::CopyBlock(_)
+                    )
                 )
             });
             // Source text is selectable by character.

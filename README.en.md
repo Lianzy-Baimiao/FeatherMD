@@ -42,7 +42,7 @@ The other screenshots in this README show the Simplified Chinese interface; ever
 
 Opening a Markdown file should not start a browser first.
 
-FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you turn on the automatic check or choose "Check for updates". The v0.1.9 Windows x64 EXE is about **1.04 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
+FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.10 Windows x64 EXE is about **1.05 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
 
 **Large files are not loaded whole before they show.** Only the nearby 128 KiB is read at a time; reading and searching run in the background and only visible lines are drawn. The file's total size does not decide how much memory the first page needs.
 
@@ -115,13 +115,19 @@ In a long code block the button keeps to the top of the visible part, so there i
 
 ![FeatherMD copy button on a code block](docs/copy-button.png)
 
-### Local images
+### Images
 
-**More → Settings… → Reading → Show images** is **off by default**. While it is off, an image shows as "[Image: alt text]" and FeatherMD reads no image file at all.
+**More → Settings… → Reading → Show images** is **off by default**. While it is off, local images show as "[Image: alt text]" and no images are read automatically.
 
-When it is on, only **images on this computer** are shown: relative paths start from the document's folder (so does `/assets/a.png`), and absolute drive paths and `file:///C:/…` work too. The format is recognised from the file's content (PNG, JPEG, GIF, BMP, TIFF, ICO), not its extension; JPEGs are turned upright from their EXIF orientation, transparent parts show the skin behind them, and a GIF shows its first frame. Images scale with the DPI in CSS pixels, `<img width="…" height="…">` sets their size, and they shrink to the text width and never grow taller than the reading area. Lines of only images (logos, screenshots, badges) and small icons inside a paragraph both show, and a linked image can be clicked.
+When it is on, **images on this computer** are shown automatically: relative paths start from the document's folder (so does `/assets/a.png`), and absolute drive paths and `file:///C:/…` work too. The format is recognised from the file's content (PNG, JPEG, GIF, BMP, TIFF, ICO), not its extension; JPEGs are turned upright from their EXIF orientation, transparent parts show the skin behind them, and a GIF shows its first frame. Images scale with the DPI in CSS pixels, `<img width="…" height="…">` sets their size, and they shrink to the text width and never grow taller than the reading area. Lines of only images (logos, screenshots, badges) and small icons inside a paragraph both show, and a linked image can be clicked.
 
-These are **never read**; their alt text and the reason show in their place instead: web images (http/https, `//host/…`, never downloaded), files behind a symbolic link or junction, network drives and shares, device paths, online-only OneDrive files that are not downloaded, missing files, unsupported formats such as SVG or WebP, and images over 32 MiB, 32 megapixels or 16384 px on a side.
+**Manual web images (v0.1.10):** Click an HTTP(S) image placeholder in the preview, check its URL and confirm to load that address only, even with "Show images" off. Failed loads offer a retry; repeated URLs share an in-memory result. Other images never download automatically. No cookies, credentials, referer or files are sent/saved; the image host receives your IP address. F5, reopening or restarting requires another confirmation. Only direct HTTP(S) raster-image URLs are supported: no redirects, SVG/WebP or images in table cells.
+
+![Web images stay as placeholders until you click and confirm.](docs/reading-web-images.png)
+
+![Web images stay as placeholders until you click and confirm.](docs/reading-web-images-loaded.png)
+
+These are **never read**; their alt text and the reason show in their place instead: addresses without an explicit HTTP(S) scheme (such as `//host/…`), files behind a symbolic link or junction, network drives and shares, device paths, online-only OneDrive files that are not downloaded, missing files, unsupported formats such as SVG or WebP, and images over 32 MiB, 32 megapixels or 16384 px on a side.
 
 Reading and decoding happen on a background thread, so the page never waits; a page shows at most 64 images, decoded images share a budget of about 160 MiB, and images of earlier pages go first. Turning the option off frees every image at once.
 
@@ -265,8 +271,8 @@ For portable settings, create an empty **FeatherMD.ini** next to the EXE; settin
 
 - Documents in UTF-8 / UTF-8 with BOM, in any Unicode the system fonts can show (any language). The interface is in Simplified Chinese, Traditional Chinese, English and Japanese.
 - Headings, bold, italic, strikethrough, inline code, code fences (common languages highlighted), quotes, lists, task lists, rules, web links, GitHub-style tables (laid out to the window width) and common HTML tags.
-- Images show their alternative text by default; with "Show images" on, only images on this computer are shown (rules above) and web images are never downloaded.
-- HTML only shapes the text: no scripts run and nothing external loads; unsupported tags and CSS are ignored. Only http/https links open, after a confirmation.
+- Images show alt text by default. "Show images" controls automatic local images only; web images require a click and confirmation per URL (rules above).
+- HTML only shapes the text: no scripts run and nothing external loads automatically; unsupported tags and CSS are ignored. Only http/https links open, after a confirmation.
 - **This is a low-memory, paged preview, not a complete CommonMark/GFM browser renderer.** Apart from tables it lays out physical lines, so emphasis across lines, Setext headings, complex nesting (such as a table inside a list), global reference links and the like may not follow the full specification.
 - A page that does not start at the beginning of the file does not scan the whole file to rebuild its state, so code-fence or list context across pages can be incomplete; the status bar says so. A page that starts in the middle of a table without its header shows that part as a table with no header. Switch to source view for the exact text.
 - A very long line is split into safe Unicode pieces of at most 4096 bytes, so one paragraph cannot block the UI.

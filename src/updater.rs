@@ -1,4 +1,4 @@
-//! The only network access in FeatherMD: an opt-in HTTPS GET of the public
+//! Opt-in update checks: an HTTPS GET of the public
 //! GitHub "latest release" record through the system WinHTTP component.
 //! Nothing is downloaded, installed or uploaded; documents and settings never
 //! leave the machine. Author / company / last editor: lianzy.

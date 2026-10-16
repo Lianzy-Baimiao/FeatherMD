@@ -366,7 +366,7 @@ impl App {
                     }
                     continue;
                 }
-                let color = if run.link.is_some() {
+                let color = if run.link.is_some() || run.load_image.is_some() {
                     p.accent
                 } else if let Some(token) = run.token {
                     p.token(token)
@@ -380,7 +380,7 @@ impl App {
                 SetTextColor(dc, color);
                 TextOutW(dc, x, text_y, run.text.as_ptr(), run.text.len() as i32);
                 SelectObject(dc, old);
-                if let Some(url) = &run.link {
+                if let Some(url) = run.load_image.as_ref().or(run.link.as_ref()) {
                     self.hits.push(HitBox {
                         rect: RECT {
                             left: x.max(left),
@@ -388,7 +388,11 @@ impl App {
                             right: (x + run.width).min(left + body_width),
                             bottom: y + row.height,
                         },
-                        action: Hit::Link(url.clone()),
+                        action: if run.load_image.is_some() {
+                            Hit::LoadImage(url.clone())
+                        } else {
+                            Hit::Link(url.clone())
+                        },
                     });
                 }
             }
