@@ -1,0 +1,36 @@
+name: Store listing screenshots
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  capture:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: FeatherMD-wack-reports
+          run-id: 39045802702
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: candidate
+      - name: Extract frozen candidate and capture actual reader
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem candidate -Recurse -Filter 'FeatherMD-1.0.10.0-x64.msix')
+          if ($files.Count -ne 1) { throw 'Expected the exact production MSIX' }
+          if ((Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'ba17aec5ba13880c794e767640104f8ae41771da0a60b751f9f013c7538cb80f') { throw 'Candidate hash mismatch' }
+          $payload = Join-Path $env:RUNNER_TEMP 'listing-payload'
+          [IO.Compression.ZipFile]::ExtractToDirectory($files[0].FullName,$payload)
+          $exe = @(Get-ChildItem -LiteralPath $payload -Recurse -Filter '*.exe')
+          if ($exe.Count -ne 1) { throw 'Unexpected executable count' }
+          ./scripts/store-listing-capture.ps1 -Exe $exe[0].FullName -Output "$env:RUNNER_TEMP/store-listing"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FeatherMD-store-listing
+          path: |
+            ${{ runner.temp }}/store-listing/*.png
+            ${{ runner.temp }}/store-listing/*.json
