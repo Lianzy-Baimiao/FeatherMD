@@ -2,3 +2,5 @@
 /dist/
 /test-artifacts/
 *.user
+__pycache__/
+/packaging/store-identity.local.json

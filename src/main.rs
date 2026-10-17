@@ -14,6 +14,15 @@ fn main() {
     {
         let path = std::env::args_os().nth(1).map(std::path::PathBuf::from);
         if let Err(error) = ui::run(path) {
+            if std::env::var_os("FEATHERMD_TEST_SECONDARY_MONITOR").is_some() {
+                if let Some(path) = std::env::var_os("FEATHERMD_TEST_SNAPSHOT") {
+                    let _ = std::fs::write(
+                        std::path::PathBuf::from(path).with_file_name("test-host-error.txt"),
+                        &error,
+                    );
+                }
+                return;
+            }
             let text: Vec<u16> = feathermd::i18n::trf("FeatherMD 启动失败：{}", &[&error])
                 .encode_utf16()
                 .chain(Some(0))

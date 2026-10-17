@@ -1,3 +1,4 @@
+pub mod distribution;
 pub mod document;
 pub mod highlight;
 pub mod html;

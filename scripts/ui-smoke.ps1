@@ -1,5 +1,6 @@
-param([string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Document = "$PSScriptRoot\..\docs\demo.md", [string]$Output = "$PSScriptRoot\..\test-artifacts")
+param([string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Document = "$PSScriptRoot\..\docs\demo.md", [string]$Output = "$PSScriptRoot\..\test-artifacts", [switch]$AllowDesktopUi, [switch]$SecondaryMonitor)
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot/require-ui-test-host.ps1" -AllowDesktopUi:$AllowDesktopUi -SecondaryMonitor:$SecondaryMonitor -Exe $Exe
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
@@ -118,3 +119,5 @@ try {
  Remove-Item -LiteralPath $ini -ErrorAction SilentlyContinue
  Remove-Item Env:\FEATHERMD_TEST_SNAPSHOT -ErrorAction SilentlyContinue
 }
+
+. "$PSScriptRoot/verify-ui-test-host.ps1" -Output $Output -SecondaryMonitor:$SecondaryMonitor

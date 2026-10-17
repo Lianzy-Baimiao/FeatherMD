@@ -207,6 +207,7 @@ fn notify_associations_changed() {
 }
 
 pub fn register(exe: &Path) -> io::Result<()> {
+    require_portable()?;
     Registry {
         root: HKEY_CURRENT_USER,
     }
@@ -216,12 +217,30 @@ pub fn register(exe: &Path) -> io::Result<()> {
 }
 
 pub fn unregister() -> io::Result<()> {
+    require_portable()?;
     Registry {
         root: HKEY_CURRENT_USER,
     }
     .unregister()?;
     notify_associations_changed();
     Ok(())
+}
+
+fn require_portable() -> io::Result<()> {
+    if feathermd::distribution::store() {
+        Err(io::Error::other(tr(
+            "文件关联由 Windows 随商店包管理，无需手动注册",
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "store"))]
+#[test]
+fn store_registry_entry_points_are_refused_before_any_write() {
+    assert!(register(Path::new("not-an-exe")).is_err());
+    assert!(unregister().is_err());
 }
 
 #[cfg(test)]

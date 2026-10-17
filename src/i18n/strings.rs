@@ -3,6 +3,24 @@
 //! integrity tests in tests/i18n.rs check every row.
 #[rustfmt::skip]
 pub(super) static TABLE: &[[&str; 4]] = &[
+    ["原生 Windows   ·   商店版   ·   本机阅读", "原生 Windows   ·   商店版   ·   本機閱讀", "Native Windows   ·   Store edition   ·   Local reading", "ネイティブ Windows   ·   ストア版   ·   ローカル閲覧"],
+    ["文件关联由 Windows 随商店包管理，无需手动注册", "檔案關聯由 Windows 隨商店套件管理，無需手動註冊", "Windows manages file associations with the Store package", "ファイルの関連付けは Windows がパッケージとともに管理します"],
+    ["商店更新", "商店更新", "Store updates", "ストアの更新"],
+    ["此版本由 Microsoft Store 安装和更新。", "此版本由 Microsoft Store 安裝和更新。", "This edition is installed and updated by Microsoft Store.", "この版は Microsoft Store でインストール・更新します。"],
+    ["打开 Microsoft Store(&C)", "開啟 Microsoft Store(&C)", "Open Microsoft Store (&C)", "Microsoft Store を開く(&C)"],
+    ["在商店的下载或库页面检查更新。", "在商店的下載或媒體櫃頁面檢查更新。", "Check for updates in the Store's Downloads or Library page.", "ストアのダウンロードまたはライブラリで更新を確認します。"],
+    ["不会检查 GitHub 版本，也不会下载绿色版替换此安装。", "不會檢查 GitHub 版本，也不會下載可攜版取代此安裝。", "No GitHub checks or portable-edition downloads.", "GitHub の確認やポータブル版のダウンロードは行いません。"],
+    ["网络图片仍需逐张确认；不会上传文档或设置。", "網路圖片仍需逐張確認；不會上傳文件或設定。", "Web images need individual consent. No document uploads.", "Web 画像は個別に確認します。文書や設定は送信しません。"],
+    ["无法打开 Microsoft Store，请从开始菜单打开商店检查更新。", "無法開啟 Microsoft Store，請從開始功能表開啟商店檢查更新。", "Could not open Microsoft Store. Open it from Start to check for updates.", "Microsoft Store を開けません。スタートから開いて更新を確認してください。"],
+    ["隐私说明…", "隱私說明…", "Privacy notice…", "プライバシー…"],
+    ["FeatherMD 隐私说明 · 2026-10-17", "FeatherMD 隱私說明 · 2026-10-17", "FeatherMD privacy notice · 2026-10-17", "FeatherMD プライバシー · 2026-10-17"],
+    ["文档在本机读取，不上传文档或设置；没有账户、广告、遥测或崩溃上报。设置仅保存在本机。", "文件在本機讀取，不上傳文件或設定；沒有帳戶、廣告、遙測或當機回報。設定僅儲存在本機。", "Documents and settings stay on your device. No accounts, ads, telemetry or crash reporting. Settings are stored locally.", "文書と設定は端末内に保存され、送信されません。アカウント、広告、テレメトリ、クラッシュ報告はありません。"],
+    ["网络图片仅在你逐张确认后请求。网站会收到 IP、图片地址（含查询参数）及应用版本；HTTP 地址不加密。", "網路圖片僅在你逐張確認後請求。網站會收到 IP、圖片位址（含查詢參數）及應用程式版本；HTTP 位址不加密。", "Each web image needs consent. Its host receives your IP, URL (including query) and app version. HTTP is not encrypted.", "Web 画像は個別の同意後に取得します。サイトには IP、URL（クエリを含む）、アプリの版が送信されます。HTTP は暗号化されません。"],
+    ["图片不发送 Cookie 或登录信息，仅缓存在内存中。F5、重新打开文档或退出会清除缓存与授权。", "圖片不傳送 Cookie 或登入資訊，僅暫存在記憶體中。F5、重新開啟文件或結束會清除暫存與授權。", "Image requests send no cookies or login details. Memory cache and consent clear on F5, reopen or exit.", "画像の取得で Cookie やログイン情報は送りません。キャッシュと同意は F5、開き直し、終了で消去します。"],
+    ["商店版由 Microsoft Store 管理安装与更新，不检查 GitHub。商店的数据处理适用 Microsoft 隐私政策。", "商店版由 Microsoft Store 管理安裝與更新，不檢查 GitHub。商店的資料處理適用 Microsoft 隱私權政策。", "Microsoft Store manages this edition's updates; no GitHub checks. Microsoft's privacy policy governs Store data.", "この版は Microsoft Store が更新します。GitHub の確認はしません。ストアには Microsoft のプライバシーポリシーが適用されます。"],
+    ["绿色版检查更新默认关闭；手动或启用后访问 GitHub，发送 IP 和应用版本，不自动下载安装。", "可攜版檢查更新預設關閉；手動或啟用後存取 GitHub，傳送 IP 和應用程式版本，不自動下載安裝。", "Portable update checks are off by default. Manual or enabled checks send IP and app version to GitHub; no update downloads.", "ポータブル版の更新確認は既定でオフです。手動または有効化後に IP とアプリの版を GitHub に送信します。自動取得はしません。"],
+    ["外部链接经确认后交给浏览器。赞赏完全自愿，不解锁功能；第三方网站和支付服务适用各自的隐私政策。", "外部連結經確認後交給瀏覽器。贊助完全自願，不解鎖功能；第三方網站和付款服務適用各自的隱私權政策。", "Confirmed links open in your browser. Support is optional and unlocks no features. Third-party sites and payments have their own privacy policies.", "外部リンクは確認後ブラウザーで開きます。支援は任意で機能の解放はありません。外部サイトや決済には各社のポリシーが適用されます。"],
+    ["反馈请到项目 Issues；这是公开页面，请勿提交私人文档或凭据。完整说明随包提供于 docs/PRIVACY.md。", "意見請到專案 Issues；這是公開頁面，請勿提交私人文件或憑證。完整說明隨套件提供於 docs/PRIVACY.md。", "Contact: project Issues (public; do not post private files or credentials). Full policy: docs/PRIVACY.md in the package.", "連絡先は公開の Issues です。私的な文書や認証情報は投稿しないでください。詳細は同梱の docs/PRIVACY.md にあります。"],
     // Brand and startup
     ["FeatherMD 羽读", "FeatherMD 羽讀", "FeatherMD", "FeatherMD"],
     ["FeatherMD 启动失败：{}", "FeatherMD 啟動失敗：{}", "FeatherMD could not start: {}", "FeatherMD を起動できませんでした：{}"],
@@ -270,7 +288,7 @@ pub(super) static TABLE: &[[&str; 4]] = &[
     ["隐私与安全", "隱私與安全", "Privacy and security", "プライバシーとセキュリティ"],
     ["只向 api.github.com 请求公开的最新版本信息，不上传文档或设置。", "只向 api.github.com 要求公開的最新版本資訊，不上傳文件或設定。", "Only reads public release info from api.github.com; uploads nothing.", "api.github.com の公開情報を読むだけで、何も送信しません。"],
     ["不会自动下载或安装；前往下载页前会再次确认。", "不會自動下載或安裝；前往下載頁面前會再次確認。", "Never downloads or installs; the download page asks first.", "自動でダウンロードやインストールはしません。開く前に確認します。"],
-    ["关闭自动检查且不点“立即检查”时，FeatherMD 不会联网。", "關閉自動檢查且不按「立即檢查」時，FeatherMD 不會連網。", "With auto-check off, FeatherMD goes online only for Check now.", "自動確認がオフで「今すぐ確認」も押さなければ、通信しません。"],
+    ["检查更新与网络图片分开控制；网络图片始终需要逐张确认。", "檢查更新與網路圖片分開控制；網路圖片始終需要逐張確認。", "Web images are separate and always need individual consent.", "更新と Web 画像は別設定です。画像は必ず個別に確認します。"],
     ["正在检查更新…", "正在檢查更新…", "Checking for updates…", "更新を確認しています…"],
     ["{}　发布于 {}", "{}　發布於 {}", "{} (released {})", "{}　{} 公開"],
     ["发现新版本 {}", "發現新版本 {}", "Update available: {}", "新しいバージョン {} があります"],

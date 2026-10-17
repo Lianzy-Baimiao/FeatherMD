@@ -196,8 +196,8 @@ pub struct Settings {
     pub update_latest: String,
     /// Interface language; `None` follows the Windows display language.
     pub language: Option<Lang>,
-    /// Show local images in the preview. Off by default; remote images are never
-    /// downloaded.
+    /// Automatically show local images. Off by default; remote images need
+    /// a separate confirmation for each URL.
     pub images: bool,
 }
 impl Default for Settings {
@@ -246,18 +246,21 @@ impl Settings {
             .unwrap_or_else(|| crate::i18n::current().reading_font())
     }
 
-    pub fn path() -> PathBuf {
+    pub fn path() -> io::Result<PathBuf> {
+        if crate::distribution::store() {
+            return crate::distribution::settings_path();
+        }
         if let Ok(exe) = std::env::current_exe() {
             let portable = exe.with_file_name("FeatherMD.ini");
             if portable.exists() {
-                return portable;
+                return Ok(portable);
             }
         }
-        std::env::var_os("APPDATA")
+        Ok(std::env::var_os("APPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir)
             .join("FeatherMD")
-            .join("settings.ini")
+            .join("settings.ini"))
     }
     pub fn load(path: &Path) -> Self {
         fs::read_to_string(path)

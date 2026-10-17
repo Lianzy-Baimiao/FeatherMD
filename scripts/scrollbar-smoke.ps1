@@ -1,5 +1,6 @@
-param([string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\scrollbar")
+param([string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\scrollbar", [switch]$AllowDesktopUi, [switch]$SecondaryMonitor)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/require-ui-test-host.ps1" -AllowDesktopUi:$AllowDesktopUi -SecondaryMonitor:$SecondaryMonitor -Exe $Exe
 Add-Type @"
 using System;
 using System.Reflection;
@@ -283,3 +284,5 @@ try {
   if ($oldDpiContext -ne [IntPtr]::Zero) { [void][ScrollbarSmoke]::SetThreadDpiAwarenessContext($oldDpiContext) }
  }
 }
+
+. "$PSScriptRoot/verify-ui-test-host.ps1" -Output $Output -SecondaryMonitor:$SecondaryMonitor

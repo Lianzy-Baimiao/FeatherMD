@@ -1,5 +1,6 @@
-﻿param([ValidateSet('light','dark','sepia','system')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\settings")
+﻿param([ValidateSet('light','dark','sepia','system')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\settings", [switch]$AllowDesktopUi, [switch]$SecondaryMonitor)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/require-ui-test-host.ps1" -AllowDesktopUi:$AllowDesktopUi -SecondaryMonitor:$SecondaryMonitor -Exe $Exe
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
@@ -223,3 +224,5 @@ try {
  if ($createdIni) { Remove-Item -LiteralPath $ini -ErrorAction SilentlyContinue }
  if ($oldDpi -ne [IntPtr]::Zero) { [void][SettingsSmoke]::SetThreadDpiAwarenessContext($oldDpi) }
 }
+
+. "$PSScriptRoot/verify-ui-test-host.ps1" -Output $Output -SecondaryMonitor:$SecondaryMonitor

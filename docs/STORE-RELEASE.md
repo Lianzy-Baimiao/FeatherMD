@@ -1,0 +1,140 @@
+# Microsoft Store build and submission
+
+Status: local adaptation, not a published Store product. Do not reuse LiteView's
+identity. Existing v0.1.10 portable releases remain unchanged.
+
+## Build
+
+Use the MSVC static-CRT toolchain, Python 3.11+ with Pillow, and Windows SDK
+MakeAppx. Keep machine-specific SDK paths outside the repository.
+
+```powershell
+cargo +stable-x86_64-pc-windows-msvc build --locked --release --features store --target-dir target/store
+python -m unittest discover -s packaging -p test_msix.py
+python packaging/msix.py --binary target/store/release/feathermd.exe --version 1.0.10.0 --test-identity --output dist/store-test-1 --makeappx makeappx.exe
+```
+
+The packer requires a new output directory, checks x64 PE and the Store-channel
+marker, rejects dynamically linked VC/GNU runtimes, generates icons from the
+existing ICO, and invokes MakeAppx with schema validation enabled. It verifies
+every archive file byte-for-byte against a strict layout. No settings, fixtures,
+certificates, dependencies or developer environment files are included.
+
+Output is **unsigned**. `-TEST.msix` uses `FeatherMD.StoreTest` and is never a
+submission candidate. No script here installs a certificate on the developer's
+computer. Local trust, installation, upgrade and uninstall must be tested in an
+explicitly disposable environment. MakeAppx success is not Store certification.
+
+## Runtime differences
+
+- `--features store` disables GitHub checks even when run outside a package.
+  Installed package identity also activates these safeguards in a normal build.
+  The packer nevertheless requires the Store build so an extracted EXE does not
+  accidentally switch channels.
+- AUMID is `<actual family>!FeatherMD`. Associations are declared for `.md`,
+  `.markdown`, `.mdown`, `.mkd`; Windows chooses defaults after user confirmation.
+  No UserChoice writes, administrative escalation or portable registry changes.
+- Packaged settings use unredirected LocalAppData + `Packages/<family>/LocalState`.
+  Failure to determine the identity/folder stops startup instead of writing to a
+  shared fallback. An unpackaged Store preview uses `FeatherMD/StorePreview` under
+  LocalAppData and ignores adjacent portable INIs.
+- The update page opens Microsoft Store's Downloads/Library URI. It cannot report
+  whether the Store installed an update. No invented product ID or GitHub upgrade.
+- Privacy notice is available offline under Settings > Updates. The full policy
+  is included in both ZIP and MSIX. Images retain the existing individually
+  confirmed HTTP(S) behavior; HTTP's cleartext risk is explicitly disclosed.
+- Native renderer, bounded file access, external-editor and local-image safety
+  remain unchanged. No new broad-file-system or internet capabilities.
+
+## Production identity and version
+
+After the user confirms reserving FeatherMD in Partner Center, copy this product's
+Identity Name, Publisher and display names to ignored
+`packaging/store-identity.local.json`, based on the example. Set
+`partner_center_verified` to true only after comparing them with Partner Center.
+
+Replace `--test-identity` with `--identity packaging/store-identity.local.json`.
+The packer verifies syntax and the explicit attestation, **not the account itself**.
+The Store signs accepted packages for distribution. GitHub portable EXEs remain
+unsigned unless separately signed with a trusted code-signing service/certificate.
+
+Keep Cargo/UI version 0.1.10 for this adaptation. Initial proposed MSIX version is
+1.0.10.0; increment the third component for each replacement candidate/upload,
+independent of Cargo's version. Components are <=65535, the first is nonzero and
+the fourth stays 0. Never overwrite/reuse an uploaded version.
+
+## Listing draft
+
+Name: **FeatherMD** (subject to availability and user confirmation).
+Category: Productivity / Utilities (select the closest available Partner Center
+category). Supported languages: Simplified/Traditional Chinese, English, Japanese.
+Architecture: x64. Package minimum: Windows 10 build 19041. This is a manifest
+target, not a claim of completed Windows 10 testing.
+
+中文简介：轻巧的 Markdown 阅读器。原生窗口、按需读取，打开长文档也不必先载入全文。
+
+中文描述：FeatherMD 羽读专注于阅读本机 Markdown 文件。支持目录导航、搜索、预览与源码切换、代码高亮、表格、20 款配色和阅读字体调整。文档只读；需要修改时，可交给你选择的编辑器。图片默认不自动显示，网络图片每张单独确认。商店版的安装和更新由 Windows 与 Microsoft Store 管理。部分复杂 Markdown、HTML 和图片格式不支持；正文与目录尚未提供完整屏幕阅读器语义。
+
+English: A lightweight native Markdown reader with bounded, on-demand file access.
+Read local files with outline navigation, search, preview/source modes, code
+highlighting, tables, 20 skins and adjustable fonts. Documents stay read-only;
+hand them to your chosen editor to make changes. Local images are off by default;
+remote images require individual consent. Microsoft Store manages this edition's
+installation and updates. Not every Markdown/HTML/image format is supported.
+Full screen-reader semantics for the document and outline are not yet provided.
+
+Privacy URL after publication:
+`https://github.com/Lianzy-Baimiao/FeatherMD/blob/main/docs/PRIVACY.md`
+This is a **proposed** public URL; verify HTTP 200 and actual content after pushing
+before entering it in Partner Center. Support URL: repository Issues.
+Do not claim all accessibility requirements are met. Do not reuse LiteView's IARC
+answers or screenshots. Complete the questionnaire for FeatherMD's actual behavior.
+
+## Reviewer notes draft
+
+FeatherMD is a native Rust Win32 desktop reader, `packagedClassicApp` / `mediumIL`.
+`runFullTrust` is required for its existing Win32 renderer, reading user-selected
+local files and launching a user-selected external editor. It does not request
+administrator elevation. No login or payment is required. Optional support links
+lead to third-party payments and do not unlock features.
+
+Test: launch from Start; open a local Markdown file containing Unicode/spaces in
+its path; navigate/search; switch language/theme; use the Windows Open With picker
+for each declared extension; save settings; restart; update/uninstall the package.
+Remote images require clicking and confirming a URL; F5 revokes that consent.
+Open Settings > Updates to find the Store update entry and offline privacy notice.
+
+## Remaining release gates
+
+- User-approved name reservation and verified FeatherMD identity/account status.
+- Publish and verify privacy URL; confirm voluntary-support site/payment terms.
+- Actual installed-package activation, settings persistence, upgrade/uninstall,
+  and portable coexistence in a disposable Windows environment.
+- WACK; real Store signing/delivery; Windows 10 and accessibility limitations.
+- Actual screenshots from the final build, listing, age rating and market choices.
+- Recheck Store policies at submission (7.20 becomes effective 2026-10-22).
+- User confirmation before submitting or publishing. No automatic Store submission.
+
+## Testing without interrupting the desktop
+
+All native smoke scripts refuse local execution by default. With current user
+permission and exactly one secondary monitor, pass `-SecondaryMonitor`. The EXE
+must contain the rebuilt test-host marker. A UI-thread-only CBT hook and window
+subclasses constrain top-level windows before display, suppress activation and
+record `test-host.txt`. Synthetic tests do not sample physical Ctrl/Shift state
+from a game on the primary screen. No global hooks, cursor movement or keyboard
+injection are used. If monitor discovery/containment fails, startup returns an
+error without opening another dialog.
+
+This mode **cannot validate real keyboard focus**. About's Tab/Enter test is
+explicitly deferred, not counted as covered. Run the unmodified active-focus
+path in the GitHub-hosted Windows CI job. `-AllowDesktopUi` bypasses the local
+restriction and requires separate user permission; never use it just to make a
+test pass.
+
+The manually dispatched `Store candidate validation` workflow prepares two test
+versions and runs GUI, Shell activation of all four extensions, installation,
+settings-preserving upgrade and uninstall on a disposable Windows 2025 runner.
+Its short-lived signing certificate/private key and signed packages are not
+uploaded. It is not WACK and not Store certification. The lifecycle script has
+only been syntax/interop-compile checked locally until that workflow actually runs.

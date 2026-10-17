@@ -24,7 +24,7 @@ $shots=@('reading-light.png','reading-dark.png','reading-outline-hidden.png','we
 $shots+=@('reading-web-images.png','reading-web-images-loaded.png')
 # Each translated README shows its own reading view, About window and language page.
 foreach($code in @('zh-TW','en','ja')){$shots+=@("reading-light.$code.png","about-light.$code.png","settings-language.$code.png")}
-foreach($name in $shots+@('PERFORMANCE.md','ARCHITECTURE.md','FILE_ASSOCIATIONS.md','sample.md')){Copy-Item -LiteralPath (Join-Path $root "docs\$name") -Destination (Join-Path $docs $name)}
+foreach($name in $shots+@('PERFORMANCE.md','ARCHITECTURE.md','FILE_ASSOCIATIONS.md','PRIVACY.md','sample.md')){Copy-Item -LiteralPath (Join-Path $root "docs\$name") -Destination (Join-Path $docs $name)}
 Compress-Archive -LiteralPath (@((Join-Path $dist 'FeatherMD.exe'),(Join-Path $dist 'LICENSE'),(Join-Path $dist 'THIRD_PARTY_NOTICES.md'))+@($readmes | ForEach-Object { Join-Path $dist $_ })+@($docs)) -DestinationPath $archive
 $hashes=foreach($path in @((Join-Path $dist 'FeatherMD.exe'),$archive)){$hash=Get-FileHash -LiteralPath $path -Algorithm SHA256;"$($hash.Hash.ToLower())  $([IO.Path]::GetFileName($path))"}
 $hashes | Set-Content -LiteralPath (Join-Path $dist 'SHA256SUMS.txt') -Encoding ascii

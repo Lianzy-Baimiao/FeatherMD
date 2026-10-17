@@ -1,5 +1,6 @@
-﻿param([ValidateSet('headings','wrapped')][string]$Shape = 'headings', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\navigation")
+﻿param([ValidateSet('headings','wrapped')][string]$Shape = 'headings', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\navigation", [switch]$AllowDesktopUi, [switch]$SecondaryMonitor)
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot/require-ui-test-host.ps1" -AllowDesktopUi:$AllowDesktopUi -SecondaryMonitor:$SecondaryMonitor -Exe $Exe
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -116,3 +117,5 @@ try {
   $env:FEATHERMD_TEST_SNAPSHOT=$oldSnapshot
  }
 }
+
+. "$PSScriptRoot/verify-ui-test-host.ps1" -Output $Output -SecondaryMonitor:$SecondaryMonitor

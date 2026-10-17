@@ -129,7 +129,11 @@ impl About {
             ),
             (
                 2005,
-                tr("原生 Windows   ·   轻量便携   ·   默认不联网"),
+                if distribution::store() {
+                    tr("原生 Windows   ·   商店版   ·   本机阅读")
+                } else {
+                    tr("原生 Windows   ·   轻量便携   ·   默认不联网")
+                },
                 [32, 204, 456, 24],
                 13,
                 false,

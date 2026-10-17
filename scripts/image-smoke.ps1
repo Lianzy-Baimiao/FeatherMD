@@ -1,8 +1,9 @@
-﻿param([ValidateSet('light','dark')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\image", [string]$Server = "$PSScriptRoot\..\target\release\examples\update_server.exe")
+﻿param([ValidateSet('light','dark')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\image", [string]$Server = "$PSScriptRoot\..\target\release\examples\update_server.exe", [switch]$AllowDesktopUi, [switch]$SecondaryMonitor)
 # Local images: off by default; when on, only local raster files are drawn (fitted,
 # EXIF-oriented, transparent where they are), everything else keeps a placeholder
 # that says why. Manual HTTP loads use generated fixtures on loopback only.
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/require-ui-test-host.ps1" -AllowDesktopUi:$AllowDesktopUi -SecondaryMonitor:$SecondaryMonitor -Exe $Exe
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
@@ -403,3 +404,5 @@ try {
   if ($oldDpi -ne [IntPtr]::Zero) { [void][ImageSmoke]::SetThreadDpiAwarenessContext($oldDpi) }
  }
 }
+
+. "$PSScriptRoot/verify-ui-test-host.ps1" -Output $Output -SecondaryMonitor:$SecondaryMonitor

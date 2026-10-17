@@ -1,5 +1,6 @@
-﻿param([ValidateSet('light','dark')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Server = "$PSScriptRoot\..\target\release\examples\update_server.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\update", [switch]$AllowNoPopup)
+﻿param([ValidateSet('light','dark')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Server = "$PSScriptRoot\..\target\release\examples\update_server.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\update", [switch]$AllowNoPopup, [switch]$AllowDesktopUi, [switch]$SecondaryMonitor)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/require-ui-test-host.ps1" -AllowDesktopUi:$AllowDesktopUi -SecondaryMonitor:$SecondaryMonitor -Exe $Exe
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
@@ -280,3 +281,5 @@ try {
  if ($createdIni) { Remove-Item -LiteralPath $ini -ErrorAction SilentlyContinue }
  if ($oldDpi -ne [IntPtr]::Zero) { [void][UpdateSmoke]::SetThreadDpiAwarenessContext($oldDpi) }
 }
+
+. "$PSScriptRoot/verify-ui-test-host.ps1" -Output $Output -SecondaryMonitor:$SecondaryMonitor

@@ -1,5 +1,6 @@
-﻿param([ValidateSet('light','dark','sepia','system')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\about")
+﻿param([ValidateSet('light','dark','sepia','system')][string]$Theme = 'light', [string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\about", [switch]$AllowDesktopUi, [switch]$SecondaryMonitor)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/require-ui-test-host.ps1" -AllowDesktopUi:$AllowDesktopUi -SecondaryMonitor:$SecondaryMonitor -Exe $Exe
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
@@ -136,6 +137,8 @@ try {
   WaitClosed $confirmation; $confirmation = [IntPtr]::Zero
   if (-not [AboutSmoke]::IsWindow($dialog) -or -not [AboutSmoke]::IsWindowEnabled($dialog)) { throw 'Cancelling a link closed or disabled About' }
  }
+ # Real focus requires activation; do not steal it from a game in passive mode.
+ if (-not $SecondaryMonitor) {
  # Navigate from the safe default action to GitHub with real Tab messages, then Enter.
  $githubButton = [AboutSmoke]::GetDlgItem($dialog, 1001)
  for ($i=0; $i -lt 7; $i++) {
@@ -147,6 +150,9 @@ try {
  $confirmation = WaitWindow '#32770' '打开外部链接'
  Post $confirmation 0x111 2; WaitClosed $confirmation; $confirmation = [IntPtr]::Zero
  Capture $dialog 'about-keyboard-focus.png'
+ } else {
+  Write-Output 'DEFERRED: Tab/Enter focus test requires an active desktop; run on the isolated runner.'
+ }
  Post ([AboutSmoke]::GetDlgItem($dialog, 2)) 0xf5 0
  WaitClosed $dialog; $dialog = [IntPtr]::Zero
  if (-not [AboutSmoke]::IsWindowEnabled($window)) { throw 'About did not re-enable reader' }
@@ -163,7 +169,7 @@ try {
  }
  $gdiAfter = [AboutSmoke]::GetGuiResources($process.Handle, 0)
  if ($gdiAfter -gt $gdiBefore + 2) { throw "About leaked GDI resources: $gdiBefore -> $gdiAfter" }
- $metrics = [ordered]@{ result='PASS'; theme=$Theme; about_links=2; details_expand_collapse=$true; escape_closes=$true; tab_and_enter_open_confirmation=$true; gdi_before=$gdiBefore; gdi_after=$gdiAfter; destinations_confirmed=$true; cancel_is_default=$true; cancel_keeps_about_open=$true; reader_responsive_during_about=$true; f1_reopens=$true; browser_launched=$false; limitations='Native messages and in-process GDI snapshots; browser handoff success and real pointer input are not exercised.' }
+ $metrics = [ordered]@{ result='PASS'; scope=$(if($SecondaryMonitor){'passive-secondary; keyboard focus deferred'}else{'native-ui'}); theme=$Theme; about_links=2; details_expand_collapse=$true; escape_closes=$true; tab_and_enter_open_confirmation=(-not $SecondaryMonitor); gdi_before=$gdiBefore; gdi_after=$gdiAfter; destinations_confirmed=$true; cancel_is_default=$true; cancel_keeps_about_open=$true; reader_responsive_during_about=$true; f1_reopens=$true; browser_launched=$false; limitations='Native messages and in-process GDI snapshots; browser handoff success and real pointer input are not exercised. Secondary mode cannot exercise active keyboard focus.' }
  $metrics | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Output 'about.json') -Encoding utf8
  $metrics | ConvertTo-Json
 } finally {
@@ -174,3 +180,5 @@ try {
  if ($createdIni) { Remove-Item -LiteralPath $ini -ErrorAction SilentlyContinue }
  if ($oldDpi -ne [IntPtr]::Zero) { [void][AboutSmoke]::SetThreadDpiAwarenessContext($oldDpi) }
 }
+
+. "$PSScriptRoot/verify-ui-test-host.ps1" -Output $Output -SecondaryMonitor:$SecondaryMonitor

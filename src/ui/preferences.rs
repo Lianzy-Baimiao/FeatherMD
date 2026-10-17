@@ -38,6 +38,7 @@ const UPDATE_OPEN: usize = 1162;
 const UPDATE_STATUS: usize = 1163;
 const UPDATE_DETAIL: usize = 1164;
 const UPDATE_LAST: usize = 1165;
+const PRIVACY: usize = 1166;
 const LANGUAGE_LIST: usize = 1170;
 /// Language list order; `None` follows the Windows display language.
 const LANGUAGES: [Option<Lang>; 5] = [
@@ -430,87 +431,135 @@ impl Prefs {
             );
         }
 
-        // Updates.
-        let page = Some(3);
-        self.label(tr("检查更新"), 1240, (page, [X0, 24, 400, 30]), TITLE);
-        self.label(
-            tr("更新源：GitHub Releases（Lianzy-Baimiao/FeatherMD）。"),
-            1241,
-            (page, [X0, 58, 480, 22]),
-            NOTE,
-        );
-        self.label(tr("当前版本"), 1242, (page, [X0, 98, 120, 22]), BODY);
-        self.label(
-            concat!("v", env!("CARGO_PKG_VERSION")),
-            1243,
-            (page, [X0 + 120, 98, 200, 22]),
-            Look(14, true, Tone::Accent),
-        );
-        let auto = self.add(
-            "BUTTON",
-            tr("打开时自动检查更新(&S)"),
-            AUTO_CHECK,
-            WS_TABSTOP | BS_AUTOCHECKBOX as u32,
-            (page, [X0, 134, 360, 26]),
-            BODY,
-        );
-        SendMessageW(
-            auto,
-            BM_SETCHECK,
-            if self.draft.update_check {
-                BST_CHECKED as usize
-            } else {
-                0
-            },
-            0,
-        );
-        self.label(
-            tr("默认关闭。开启后启动几秒在后台检查，每天最多一次，失败时不打扰。"),
-            1244,
-            (page, [X0 + 28, 162, 452, 20]),
-            Look(12, false, Tone::Muted),
-        );
-        self.button(tr("立即检查(&C)"), CHECK_NOW, (page, [X0, 198, 120, 32]));
-        let open = self.button(
-            tr("前往下载页…"),
-            UPDATE_OPEN,
-            (page, [X0 + 132, 198, 130, 32]),
-        );
-        ShowWindow(open, SW_HIDE);
-        self.label(
-            "",
-            UPDATE_STATUS,
-            (page, [X0, 242, 480, 24]),
-            Look(14, true, Tone::Text),
-        );
-        self.label("", UPDATE_DETAIL, (page, [X0, 268, 480, 22]), NOTE);
-        self.label(
-            "",
-            UPDATE_LAST,
-            (page, [X0, 292, 480, 20]),
-            Look(12, false, Tone::Muted),
-        );
-        self.label(
-            tr("隐私与安全"),
-            1245,
-            (page, [X0 + 20, 338, 440, 24]),
-            Look(14, true, Tone::Info),
-        );
-        for (i, text) in [
-            tr("只向 api.github.com 请求公开的最新版本信息，不上传文档或设置。"),
-            tr("不会自动下载或安装；前往下载页前会再次确认。"),
-            tr("关闭自动检查且不点“立即检查”时，FeatherMD 不会联网。"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        if distribution::store() {
+            let page = Some(3);
+            self.label(tr("商店更新"), 1240, (page, [X0, 24, 400, 30]), TITLE);
             self.label(
-                text,
-                1246 + i,
-                (page, [X0 + 20, 368 + i as i32 * 26, 440, 22]),
+                tr("此版本由 Microsoft Store 安装和更新。"),
+                1241,
+                (page, [X0, 58, 480, 22]),
+                NOTE,
+            );
+            self.label(tr("当前版本"), 1242, (page, [X0, 98, 120, 22]), BODY);
+            self.label(
+                concat!("v", env!("CARGO_PKG_VERSION")),
+                1243,
+                (page, [X0 + 120, 98, 200, 22]),
+                BODY,
+            );
+            self.button(
+                tr("打开 Microsoft Store(&C)"),
+                CHECK_NOW,
+                (page, [X0, 150, 280, 34]),
+            );
+            self.label(
+                tr("在商店的下载或库页面检查更新。"),
+                1244,
+                (page, [X0, 200, 480, 22]),
+                NOTE,
+            );
+            self.label(
+                tr("隐私与安全"),
+                1245,
+                (page, [X0 + 20, 338, 440, 24]),
+                Look(14, true, Tone::Info),
+            );
+            self.label(
+                tr("不会检查 GitHub 版本，也不会下载绿色版替换此安装。"),
+                1246,
+                (page, [X0 + 20, 368, 440, 40]),
                 Look(13, false, Tone::InfoMuted),
             );
+            self.label(
+                tr("网络图片仍需逐张确认；不会上传文档或设置。"),
+                1247,
+                (page, [X0 + 20, 410, 440, 40]),
+                Look(13, false, Tone::InfoMuted),
+            );
+        } else {
+            // Updates.
+            let page = Some(3);
+            self.label(tr("检查更新"), 1240, (page, [X0, 24, 400, 30]), TITLE);
+            self.label(
+                tr("更新源：GitHub Releases（Lianzy-Baimiao/FeatherMD）。"),
+                1241,
+                (page, [X0, 58, 480, 22]),
+                NOTE,
+            );
+            self.label(tr("当前版本"), 1242, (page, [X0, 98, 120, 22]), BODY);
+            self.label(
+                concat!("v", env!("CARGO_PKG_VERSION")),
+                1243,
+                (page, [X0 + 120, 98, 200, 22]),
+                Look(14, true, Tone::Accent),
+            );
+            let auto = self.add(
+                "BUTTON",
+                tr("打开时自动检查更新(&S)"),
+                AUTO_CHECK,
+                WS_TABSTOP | BS_AUTOCHECKBOX as u32,
+                (page, [X0, 134, 360, 26]),
+                BODY,
+            );
+            SendMessageW(
+                auto,
+                BM_SETCHECK,
+                if self.draft.update_check {
+                    BST_CHECKED as usize
+                } else {
+                    0
+                },
+                0,
+            );
+            self.label(
+                tr("默认关闭。开启后启动几秒在后台检查，每天最多一次，失败时不打扰。"),
+                1244,
+                (page, [X0 + 28, 162, 452, 20]),
+                Look(12, false, Tone::Muted),
+            );
+            self.button(tr("立即检查(&C)"), CHECK_NOW, (page, [X0, 198, 120, 32]));
+            let open = self.button(
+                tr("前往下载页…"),
+                UPDATE_OPEN,
+                (page, [X0 + 132, 198, 130, 32]),
+            );
+            ShowWindow(open, SW_HIDE);
+            self.label(
+                "",
+                UPDATE_STATUS,
+                (page, [X0, 242, 480, 24]),
+                Look(14, true, Tone::Text),
+            );
+            self.label("", UPDATE_DETAIL, (page, [X0, 268, 480, 22]), NOTE);
+            self.label(
+                "",
+                UPDATE_LAST,
+                (page, [X0, 292, 480, 20]),
+                Look(12, false, Tone::Muted),
+            );
+            self.label(
+                tr("隐私与安全"),
+                1245,
+                (page, [X0 + 20, 338, 440, 24]),
+                Look(14, true, Tone::Info),
+            );
+            for (i, text) in [
+                tr("只向 api.github.com 请求公开的最新版本信息，不上传文档或设置。"),
+                tr("不会自动下载或安装；前往下载页前会再次确认。"),
+                tr("检查更新与网络图片分开控制；网络图片始终需要逐张确认。"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                self.label(
+                    text,
+                    1246 + i,
+                    (page, [X0 + 20, 368 + i as i32 * 26, 440, 22]),
+                    Look(13, false, Tone::InfoMuted),
+                );
+            }
         }
+        self.button(tr("隐私说明…"), PRIVACY, (Some(3), [X0, 454, 220, 30]));
 
         // Interface language.
         let page = Some(4);
@@ -586,7 +635,7 @@ impl Prefs {
     }
     /// Starts a manual check; the result arrives through UPDATE_POLL.
     unsafe fn start_check(&mut self) {
-        if self.checking.is_some() {
+        if distribution::store() || self.checking.is_some() {
             return;
         }
         self.checking = Some(crate::updater::start());
@@ -595,6 +644,9 @@ impl Prefs {
     }
     /// Status line, detail, last-check time and button states for the update page.
     unsafe fn show_update(&mut self) {
+        if distribution::store() {
+            return;
+        }
         let current = feathermd::update::current();
         let latest = feathermd::update::Version::parse(&self.draft.update_latest);
         let (status, detail, tone) = if self.checking.is_some() {
@@ -1829,6 +1881,32 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         browse(ptr);
         return 1;
     }
+    if msg == WM_COMMAND && wp & 0xffff == PRIVACY {
+        privacy::show(hwnd);
+        return 1;
+    }
+    if msg == WM_COMMAND && wp & 0xffff == CHECK_NOW && distribution::store() {
+        let result = ShellExecuteW(
+            hwnd,
+            w("open").as_ptr(),
+            w(distribution::STORE_LIBRARY).as_ptr(),
+            null(),
+            null(),
+            SW_SHOWNORMAL,
+        ) as isize;
+        if result <= 32 {
+            MessageBoxW(
+                hwnd,
+                w(tr(
+                    "无法打开 Microsoft Store，请从开始菜单打开商店检查更新。",
+                ))
+                .as_ptr(),
+                w(tr("商店更新")).as_ptr(),
+                MB_OK | MB_ICONINFORMATION,
+            );
+        }
+        return 1;
+    }
     if msg == WM_COMMAND && wp & 0xffff == UPDATE_OPEN {
         // The link confirmation runs a modal loop; no Prefs borrow may cross it.
         let url = (*ptr).try_borrow().ok().and_then(|s| s.release_url());
@@ -1885,8 +1963,8 @@ unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
             } else if id == CHECK_NOW {
                 state.start_check();
             } else if id == AUTO_CHECK {
-                state.draft.update_check =
-                    SendDlgItemMessageW(hwnd, AUTO_CHECK as i32, BM_GETCHECK, 0, 0)
+                state.draft.update_check = !distribution::store()
+                    && SendDlgItemMessageW(hwnd, AUTO_CHECK as i32, BM_GETCHECK, 0, 0)
                         == BST_CHECKED as isize;
             } else if id == SHOW_IMAGES {
                 state.draft.images =

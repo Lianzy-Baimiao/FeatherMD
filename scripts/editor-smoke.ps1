@@ -1,5 +1,6 @@
-﻿param([string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Probe = "$PSScriptRoot\..\target\release\examples\editor_probe.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\editor", [switch]$AllowNoPopup)
+﻿param([string]$Exe = "$PSScriptRoot\..\target\release\feathermd.exe", [string]$Probe = "$PSScriptRoot\..\target\release\examples\editor_probe.exe", [string]$Output = "$PSScriptRoot\..\test-artifacts\editor", [switch]$AllowNoPopup, [switch]$AllowDesktopUi, [switch]$SecondaryMonitor)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/require-ui-test-host.ps1" -AllowDesktopUi:$AllowDesktopUi -SecondaryMonitor:$SecondaryMonitor -Exe $Exe
 Add-Type @"
 using System;
 using System.Text;
@@ -50,6 +51,8 @@ $lines = [string[]](0..5999 | ForEach-Object { '## Section {0:D4}' -f $_; ''; ('
 [IO.File]::WriteAllLines($document, $lines, [Text.UTF8Encoding]::new($false))
 $record = Join-Path $Output 'probe.txt'
 $oldProbe = $env:FEATHERMD_EDITOR_PROBE
+$oldSnapshot = $env:FEATHERMD_TEST_SNAPSHOT
+$env:FEATHERMD_TEST_SNAPSHOT = Join-Path $Output 'editor.bmp'
 $process = $null; $window = [IntPtr]::Zero; $createdIni = $false
 $oldDpi = [EditorSmoke]::SetThreadDpiAwarenessContext([IntPtr](-4))
 function Query([int]$id, [long]$lp = 0) { [EditorSmoke]::SendMessageW($window, 0x802a, [IntPtr]$id, [IntPtr]$lp).ToInt64() }
@@ -178,7 +181,10 @@ try {
 } finally {
  StopReader
  $env:FEATHERMD_EDITOR_PROBE = $oldProbe
+ $env:FEATHERMD_TEST_SNAPSHOT = $oldSnapshot
  if ($createdIni) { Remove-Item -LiteralPath $ini -ErrorAction SilentlyContinue }
  Remove-Item -LiteralPath $folder -Recurse -ErrorAction SilentlyContinue
  if ($oldDpi -ne [IntPtr]::Zero) { [void][EditorSmoke]::SetThreadDpiAwarenessContext($oldDpi) }
 }
+
+. "$PSScriptRoot/verify-ui-test-host.ps1" -Output $Output -SecondaryMonitor:$SecondaryMonitor

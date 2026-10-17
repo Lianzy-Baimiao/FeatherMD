@@ -1,0 +1,51 @@
+name: Store candidate validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  store:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install Pillow==12.3.0
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets --features store -- -D warnings
+      - run: cargo test --locked --features store
+      - run: cargo build --release --locked --features store --target-dir target/store
+      - run: python -m unittest discover -s packaging -p test_msix.py
+      - name: Build two unsigned test packages
+        shell: pwsh
+        run: |
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/makeappx.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $sdk) { throw 'MakeAppx not installed' }
+          python packaging/msix.py --binary target/store/release/feathermd.exe --version 1.0.10.0 --test-identity --output dist/store-test --makeappx $sdk.FullName
+          if ($LASTEXITCODE) { throw 'Initial packaging failed' }
+          python packaging/msix.py --binary target/store/release/feathermd.exe --version 1.0.11.0 --test-identity --output dist/store-upgrade --makeappx $sdk.FullName
+          if ($LASTEXITCODE) { throw 'Upgrade packaging failed' }
+      - name: Preview-channel GUI
+        shell: pwsh
+        run: ./scripts/store-smoke.ps1
+      - name: Disposable install, GUI, upgrade and uninstall
+        shell: pwsh
+        run: |
+          $sign = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $sign) { throw 'SignTool not installed' }
+          ./packaging/test_lifecycle.ps1 -Package dist/store-test/FeatherMD-1.0.10.0-x64-TEST.msix -Upgrade dist/store-upgrade/FeatherMD-1.0.11.0-x64-TEST.msix -SignTool $sign.FullName -Output "$env:RUNNER_TEMP/feathermd-lifecycle"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FeatherMD-store-test-only
+          path: |
+            dist/store-test/*.msix
+            dist/store-test/*.json
+            dist/store-test/SHA256SUMS.txt
+            test-artifacts/store/
+            ${{ runner.temp }}/feathermd-lifecycle/

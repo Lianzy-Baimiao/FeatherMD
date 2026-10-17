@@ -4,12 +4,15 @@ mod about;
 mod chrome;
 mod pictures;
 mod preferences;
+mod privacy;
 mod reading;
 mod select;
 mod smooth;
 mod snapshot;
+mod test_host;
 use crate::layout::{FontKey, Fonts, Layout, Picture, Row, Run, View};
 use feathermd::{
+    distribution,
     document::{Document, Page, SearchResult, human_size},
     i18n::{self, Lang, tr, trf},
     key, markdown,
@@ -633,9 +636,12 @@ struct App {
     painted_pictures: Vec<RECT>,
 }
 impl App {
-    fn new() -> Self {
-        let settings_path = Settings::path();
-        let settings = Settings::load(&settings_path);
+    fn new(settings_path: PathBuf) -> Self {
+        let mut settings = Settings::load(&settings_path);
+        if distribution::store() {
+            settings.update_check = false;
+            settings.update_latest.clear();
+        }
         // Before any font or string below is created.
         i18n::set(Lang::resolve(settings.language));
         Self {
@@ -707,11 +713,14 @@ impl App {
     }
     /// A newer published release recorded by the last successful check.
     fn update_available(&self) -> Option<&str> {
+        if distribution::store() {
+            return None;
+        }
         let latest = feathermd::update::Version::parse(&self.settings.update_latest)?;
         (latest > feathermd::update::current()).then_some(self.settings.update_latest.as_str())
     }
     unsafe fn start_update_check(&mut self) {
-        if self.update_check.is_none() {
+        if !distribution::store() && self.update_check.is_none() {
             self.update_check = Some(crate::updater::start());
             self.update_checks += 1;
         }
@@ -2001,6 +2010,10 @@ impl App {
             .saturating_sub(self.top)
     }
     unsafe fn register_open_with(&mut self) -> bool {
+        if distribution::store() {
+            self.status = tr("文件关联由 Windows 随商店包管理，无需手动注册").into();
+            return true;
+        }
         match std::env::current_exe().and_then(|path| crate::association::register(&path)) {
             Ok(()) => {
                 self.status = tr("已加入 Markdown 文件的右键打开方式").into();
@@ -2019,7 +2032,7 @@ impl App {
         // Opening Settings is not evidence that the default actually changed.
         // Windows owns the final per-user association choice.
         for uri in [
-            "ms-settings:defaultapps?registeredAppUser=FeatherMD",
+            &distribution::default_apps_uri(distribution::identity()),
             "ms-settings:defaultapps",
         ] {
             let result = ShellExecuteW(
@@ -2377,7 +2390,7 @@ impl App {
                 self.register_open_with();
             }
             DEFAULT_APP => self.choose_default_app(),
-            UNREGISTER => {
+            UNREGISTER if !distribution::store() => {
                 if MessageBoxW(
                     self.hwnd,
                     w(tr(
@@ -2419,7 +2432,7 @@ impl App {
                     0x28 | 0x09 => {
                         self.theme_menu = Some(
                             (index
-                                + if key == 0x09 && GetKeyState(VK_SHIFT as i32) < 0 {
+                                + if key == 0x09 && test_host::key_pressed(VK_SHIFT as i32) {
                                     rows - 1
                                 } else {
                                     1
@@ -2802,6 +2815,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             51 => app.update_checks as isize,
             52 => app.update_available().is_some() as isize,
             53 => app.update_check.is_some() as isize,
+            97 => distribution::store() as isize,
+            98 => matches!(distribution::identity(), distribution::Identity::Package(_)) as isize,
+            // Opt-in package smoke diagnostics; never redirect settings through a test variable.
+            99 => match std::env::var_os("FEATHERMD_TEST_SNAPSHOT") {
+                Some(path) => {
+                    let document = app
+                        .document
+                        .as_ref()
+                        .map(|d| d.path.display().to_string())
+                        .unwrap_or_default();
+                    let report = format!("{}\n{}\n", app.settings_path.display(), document);
+                    std::fs::write(
+                        PathBuf::from(path).with_file_name("distribution.txt"),
+                        report,
+                    )
+                    .map_or(-1, |_| 1)
+                }
+                None => -1,
+            },
             // Tables: right edge of the widest table, the reading width, visual table
             // lines, distinct table rows and the first table's column count.
             54 => app.layout.as_ref().map_or(0, |l| l.table_width as isize),
@@ -3151,7 +3183,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_KEYDOWN => {
-            if app.keyboard(wp, GetKeyState(VK_CONTROL as i32) < 0) {
+            if app.keyboard(wp, test_host::key_pressed(VK_CONTROL as i32)) {
                 0
             } else {
                 drop(app);
@@ -3176,9 +3208,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 app.scroll_outline(-steps * 3);
                 return 0;
             }
-            if GetKeyState(VK_CONTROL as i32) < 0 {
+            if test_host::key_pressed(VK_CONTROL as i32) {
                 app.command(if steps > 0 { ZOOM_IN } else { ZOOM_OUT });
-            } else if GetKeyState(VK_SHIFT as i32) < 0 {
+            } else if test_host::key_pressed(VK_SHIFT as i32) {
                 app.horizontal -= steps * app.s(60);
                 app.scrollbar();
                 app.invalidate();
@@ -3581,14 +3613,18 @@ unsafe fn menus() -> (HMENU, HMENU) {
     }
     AppendMenuW(settings, MF_SEPARATOR, 0, null());
     let associations = CreatePopupMenu();
-    add(associations, REGISTER, tr("加入 Markdown 右键打开方式"));
+    if !distribution::store() {
+        add(associations, REGISTER, tr("加入 Markdown 右键打开方式"));
+    }
     add(
         associations,
         DEFAULT_APP,
         tr("设为 .md 默认应用（系统确认）…"),
     );
-    AppendMenuW(associations, MF_SEPARATOR, 0, null());
-    add(associations, UNREGISTER, tr("移除打开方式注册…"));
+    if !distribution::store() {
+        AppendMenuW(associations, MF_SEPARATOR, 0, null());
+        add(associations, UNREGISTER, tr("移除打开方式注册…"));
+    }
     AppendMenuW(
         settings,
         MF_POPUP,
@@ -3609,6 +3645,8 @@ unsafe fn menus() -> (HMENU, HMENU) {
 }
 pub fn run(path: Option<PathBuf>) -> Result<(), String> {
     unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let _test_host = test_host::Host::start()?;
         let _graphics = smooth::Session::start()?;
         // ShellExecuteEx may use shell extensions that require an STA thread.
         let com = CoInitializeEx(
@@ -3633,7 +3671,9 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
         if RegisterClassExW(&wc) == 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
-        let app = Box::new(RefCell::new(App::new()));
+        let app = Box::new(RefCell::new(App::new(
+            Settings::path().map_err(|e| e.to_string())?,
+        )));
         let (menu, settings_menu) = menus();
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
@@ -3751,11 +3791,13 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
         // Opt-in startup check: after first paint, at most once a day.
         {
             let a = app.borrow();
-            if feathermd::update::due(
-                a.settings.update_check,
-                a.settings.update_checked,
-                feathermd::update::now(),
-            ) {
+            if !distribution::store()
+                && feathermd::update::due(
+                    a.settings.update_check,
+                    a.settings.update_checked,
+                    feathermd::update::now(),
+                )
+            {
                 SetTimer(hwnd, UPDATE_TIMER, UPDATE_DELAY_MS, None);
             }
         }
@@ -3782,7 +3824,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
                     a.submit();
                     continue;
                 }
-                if GetKeyState(VK_CONTROL as i32) < 0
+                if test_host::key_pressed(VK_CONTROL as i32)
                     && matches!(msg.wParam, 0x4f | 0x46 | 0x47 | 0x54 | 0x45 | 0xbc)
                 {
                     a.keyboard(msg.wParam, true);

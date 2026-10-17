@@ -42,11 +42,27 @@ impl Pending {
 }
 
 pub fn start() -> Pending {
+    if feathermd::distribution::store() {
+        let (tx, rx) = mpsc::channel();
+        let _ = tx.send(Err(tr("此版本由 Microsoft Store 安装和更新。").into()));
+        return Pending {
+            rx,
+            deadline: Instant::now(),
+        };
+    }
     let url = std::env::var(TEST_URL)
         .ok()
         .filter(|url| loopback(url))
         .unwrap_or_else(|| LATEST_API.to_string());
     start_at(url, DEADLINE)
+}
+
+#[cfg(all(test, feature = "store"))]
+#[test]
+fn store_update_entry_never_starts_a_worker() {
+    let pending = start();
+    assert!(pending.poll().unwrap().is_err());
+    assert!(pending.deadline <= Instant::now());
 }
 
 fn start_at(url: String, deadline: Duration) -> Pending {

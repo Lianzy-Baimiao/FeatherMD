@@ -1,5 +1,32 @@
 # Progress / continuation notes
 
+## 2026-10-17 — FeatherMD name reserved; cloud validation authorized
+
+- 用户确认预留名称、提交推送本次适配并启动云端验证。Partner Center 已成功创建独立 **FeatherMD** 产品，Store ID `9MW2CTPBSGX7`，状态为草稿；没有开始商店提交或修改 LiteView。
+- 实际产品标识页确认包名 `ice.FeatherMD`、PFN `ice.FeatherMD_rz8m2sa64m4em`；完整发布者字段已存入被 Git 忽略的 `packaging/store-identity.local.json`。这是逐项核对 FeatherMD 页面得到的值，不是从 LiteView 复制。预留成功截图：`test-artifacts/feathermd-name-reserved.jpg`。
+- 本轮将推送适配和测试保护，执行普通 Windows/Ubuntu CI 与手动 Store 生命周期验证；执行结果另记，不将成功派发当作通过。WACK 尚待补齐。所有真实安装/信任/窗口测试在隔离 runner 上，本机不再运行。
+
+## 2026-10-17 — Secondary-monitor regression complete; Store reservation pending
+
+- 用户明确允许必要窗口测试在副屏进行，主屏继续打游戏。新增 `-SecondaryMonitor` 路径，不使用本机 `-AllowDesktopUi` 绕过保护：EXE 必须包含测试标记，UI 线程 CBT hook / 窗口子类在显示前限制窗口位置、阻止激活；副屏发现或保护初始化失败直接退出，不另弹错误框。不注入全局键鼠，不改剪贴板，不打开系统设置或外部浏览器。
+- 最终同一轮副屏套件 **20/20 PASS**，证据 `test-artifacts/secondary-verified/results.json`。包括原 19 项回归和 Store 新套件（四语 × 浅深 8 个场景）；20 份 `test-host.txt` 共 69 个完成进程报告，边界/前台违规均为 0。DPI-aware 副屏工作区为 `3840,0–6400,1560`、120 DPI，主屏未作为测试目标。导航 headings 416/494、wrapped 251/280；i18n 105 个视图、8 次实时切换无截断；Store 设置隔离、禁用 GitHub 更新、无绿色版下载控件、离线隐私、About 和中文/空格路径通过。
+- 副屏模式是 **passive-secondary**，不能验证真实键盘焦点；About 的 Tab/Enter 部分明确记录 `keyboard focus deferred` 和 `tab_and_enter_open_confirmation=false`，不是已经通过。真正激活窗口的焦点测试保留在普通 GitHub Windows CI。安装、信任证书、Shell 激活、升级卸载仍只允许隔离 runner。
+- 保留失败证据而不覆盖：首轮 `secondary-final` 为 15/20（导航两项、About 两项、editor 未通过）；修正测试适配后 `secondary-recheck` 为 6/6，再跑上述完整 20/20。合成消息测试不再读取游戏期间物理 Ctrl/Shift；About 不用禁止激活的模式冒充焦点覆盖；editor 补齐必需快照环境；Store 脚本修正 PowerShell 空标题筛选。旧 footer-tooltip 本轮通过，未据此声称已找出历史间歇问题根因。
+- 最终静默验证：MSVC fmt；绿色版/Store strict all-targets Clippy；**107 / 109 项测试**；两种静态 CRT release；**5 项 Python 打包测试**；全部 PowerShell 语法检查；生命周期 COM/native C# 绑定仅编译、未执行；`git diff --check` 通过。测试后无 target 测试进程或临时 INI 遗留，用户 dist 程序未关闭。
+- 新未签名测试包 `dist/store-test-2/FeatherMD-1.0.10.0-x64-TEST.msix`，552,470 字节，SHA-256 `28de1034946b5c288d940a9c76313e37a24d8580a381670f9104179a2dd188e2`；MakeAppx 10.0.22000 schema 与逐字节包内容校验通过。Store EXE 1,082,880 字节，SHA-256 `a247d316af15900e027f45ddf31a8e7e1b2960733f03060cb5139e9aa22c8cc3`；绿色版候选 1,118,208 字节，SHA-256 `193b87a8403bd0b6a5f7c10e84ab27aea0a5668ff192b4d3777bdde77187f9ab`。已发布 v0.1.10 EXE 仍为 `c594dceb6bd76b66c6060b0acff1afdb5b024172d82123ed17b46d8bdb86b86b`，未覆盖。
+- 已在后台内置浏览器中使用现有 Partner Center 会话检查名称，**FeatherMD 名称可用，但未点击“保留产品名称”**；截图 `test-artifacts/feathermd-name-available.jpg`。LiteView 未修改。待用户确认后创建 FeatherMD 独立产品、读取实际包身份，并提交/推送代码启动隔离验证。
+- 仍未执行：GitHub 上本轮完整 CI、已编写的安装/实际 Shell 四扩展名激活/升级/卸载 workflow、WACK、真实 Store URI 打开、Windows 10 和完整辅助功能验证。当前 Store workflow **不含 WACK**。未签名、安装、提交 Git、推送、预留产品或提交商店；隐私 URL 尚未发布核验。不能将此记录当作提交就绪或保证过审。
+
+## 2026-10-17 — Store adaptation, local test candidate (not published)
+
+- 用户同意开始 FeatherMD 商店适配。未预留名称、登录 Partner Center、提交审核、提交 Git、推送或修改旧 Release。Cargo/UI 版本仍为 0.1.10；单独增加 Store feature 和 MSIX 版本。旧 dist 发布包保持原样。
+- `distribution` 使用 Windows 实际包身份，异常时不退回绿色版注册/共享设置。商店包设置使用该包 LocalState，未安装 Store 构建使用独立 StorePreview；绿色版保留原 INI 规则。商店更新入口转到 Microsoft Store，不调用 GitHub 检查；登记/删除关联入口被 UI 和底层双重限制，默认应用仍由系统和用户决定。四种语言均添加离线隐私说明，并修正原更新设置中“关闭检查就完全不联网”的错误说法。
+- 增加 `packaging/msix.py`、清单、图标构建、严格身份/版本/PE 检查、白名单内容核对；Test 身份不能作为正式包。双语隐私政策、Store listing/review/build 草稿、独立构建入口及手动隔离 Windows workflow 已编写。生命周期脚本未执行；不能当成安装/商店认证证据。
+- 本轮已通过：MSVC fmt、两种配置 strict all-targets Clippy；绿色版 **106 项测试**，Store **108 项测试**；两种静态 CRT release 及编辑/更新测试替身；Python **5 项打包测试**。MakeAppx 10.0.22000 正常 schema 校验通过，13 个 payload 文件逐字节核对（另有 2 个 MSIX 元数据文件）。测试包 `dist/store-test-1/FeatherMD-1.0.10.0-x64-TEST.msix`，未签名、未安装，不是提交包；哈希及 imports 在同目录 package-report.json / SHA256SUMS.txt。
+- **用户反馈窗口测试影响打游戏，已立即停止**本机测试父进程、子脚本及 target/release 测试程序；没有关闭用户的 dist 程序。现场检查无遗留测试进程。此前隐藏启动仍会使模态窗口短暂显示，因此新增全部 smoke 的默认本机保护，后续本机仅做静默校验，GUI 必须隔离 runner 或取得当次明确许可。
+- 被中断的 19 项 GUI 套件：12 PASS（ui、navigation 两种、scrollbar、typography 两种、about 两种、settings 两种、editor、update 浅色）；window FAIL（footer tooltip 不出现）；update 深色中断；table/image 浅深及 i18n 共 5 项未运行。证据 `test-artifacts/store-adaptation-regression/`，不能宣称全量通过。没有为了复现 tooltip 再打扰用户桌面。新 Store GUI smoke 尚未运行。
+- 未验证：安装后真实包设置路径、Shell 含中文/空格文件关联激活、共存/升级/卸载、Store URI 实际打开、WACK、Windows 10、完整辅助功能、第三方赞赏流程。正式名称/Identity/Publisher、公开隐私 URL、最终截图和提交仍待下一阶段确认。此记录不是“可以直接上架/一定过审”的结论。
+
 ## v0.1.10 publication record — 2026-10-16
 
 - 用户明确要求“提交、发布”。已发布并设为 Latest：https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.10 （北京时间 2026-10-16 21:19:48）。不是草稿或预发布。
