@@ -5,6 +5,7 @@
 - 用户确认预留名称、提交推送本次适配并启动云端验证。Partner Center 已成功创建独立 **FeatherMD** 产品，Store ID `9MW2CTPBSGX7`，状态为草稿；没有开始商店提交或修改 LiteView。
 - 实际产品标识页确认包名 `ice.FeatherMD`、PFN `ice.FeatherMD_rz8m2sa64m4em`；完整发布者字段已存入被 Git 忽略的 `packaging/store-identity.local.json`。这是逐项核对 FeatherMD 页面得到的值，不是从 LiteView 复制。预留成功截图：`test-artifacts/feathermd-name-reserved.jpg`。
 - 本轮将推送适配和测试保护，执行普通 Windows/Ubuntu CI 与手动 Store 生命周期验证；执行结果另记，不将成功派发当作通过。WACK 尚待补齐。所有真实安装/信任/窗口测试在隔离 runner 上，本机不再运行。
+- 适配已提交为 `c4abc2f`；直接连接 GitHub 的推送连续两次超时，尚未据此声称推送成功。另补独立手动 WACK workflow：仅隔离 Windows 2025 runner、测试身份、临时非导出签名、固定哈希且 Microsoft 签署的 SDK、原包完整性和报告保守判定。新增报告测试后 Python 共 **17 项通过**，PowerShell 语法检查通过；本机未执行 WACK。云端结果另记。
 
 ## 2026-10-17 — Secondary-monitor regression complete; Store reservation pending
 

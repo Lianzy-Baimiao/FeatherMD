@@ -21,7 +21,7 @@ jobs:
       - run: cargo test --locked
       - run: cargo clippy --all-targets --locked --features store -- -D warnings
       - run: cargo test --locked --features store
-      - run: python -m unittest discover -s packaging -p test_msix.py
+      - run: python -m unittest discover -s packaging -p "test_*.py"
       - run: cargo build --release --locked
       - name: Build stand-ins for the edit and update smoke tests
         if: runner.os == 'Windows'

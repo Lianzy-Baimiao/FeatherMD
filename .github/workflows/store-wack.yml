@@ -1,0 +1,35 @@
+name: Supplemental Store WACK
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wack:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install Pillow==12.3.0
+      - run: python -m unittest discover -s packaging -p "test_*.py"
+      - run: cargo build --locked --release --features store --target-dir target/store
+      - name: Build unsigned test package
+        shell: pwsh
+        run: |
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/makeappx.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $sdk) { throw 'MakeAppx not installed' }
+          python packaging/msix.py --binary target/store/release/feathermd.exe --version 1.0.10.0 --test-identity --output dist/wack-test --makeappx $sdk.FullName
+          if ($LASTEXITCODE) { throw 'Packaging failed' }
+      - name: Disposable supplemental WACK
+        shell: pwsh
+        run: ./packaging/test_wack.ps1 -Package dist/wack-test/FeatherMD-1.0.10.0-x64-TEST.msix -PackageReport dist/wack-test/package-report.json -Output "$env:RUNNER_TEMP/feathermd-wack"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FeatherMD-wack-reports
+          path: |
+            ${{ runner.temp }}/feathermd-wack/
+            dist/wack-test/package-report.json

@@ -65,7 +65,9 @@ the fourth stays 0. Never overwrite/reuse an uploaded version.
 
 ## Listing draft
 
-Name: **FeatherMD** (subject to availability and user confirmation).
+Name: **FeatherMD**, reserved with user confirmation on 2026-10-17.
+Store ID: `9MW2CTPBSGX7`; package name: `ice.FeatherMD`.
+The Partner Center product remains a draft; reservation is not publication.
 Category: Productivity / Utilities (select the closest available Partner Center
 category). Supported languages: Simplified/Traditional Chinese, English, Japanese.
 Architecture: x64. Package minimum: Windows 10 build 19041. This is a manifest
@@ -138,3 +140,19 @@ settings-preserving upgrade and uninstall on a disposable Windows 2025 runner.
 Its short-lived signing certificate/private key and signed packages are not
 uploaded. It is not WACK and not Store certification. The lifecycle script has
 only been syntax/interop-compile checked locally until that workflow actually runs.
+
+The separate manual `Supplemental Store WACK` workflow builds the same Store
+channel with a test identity on a fresh Windows 2025 runner. It verifies the
+package/binary hashes, obtains WACK from a hash-pinned Microsoft-signed SDK
+installer when needed, and tests a temporary signed copy. Signing keys are
+nonexportable and stay off the uploaded reports; trust is removed in cleanup.
+The original unsigned package must remain unchanged. Raw XML, command exit codes,
+environment, hashes and a conservative summary are retained. Missing, partial,
+unknown or not-run reports do not pass. Optional test failures remain visible and
+require manual review, even when WACK's overall result is PASS. The report parser
+and pinned SDK source reuse the previously inspected LiteView validation tooling,
+not LiteView's package identity or test results.
+
+This is supplemental testing on Windows Server with a test identity. It does not
+replace final-production-package checks, supported Windows client testing or
+Microsoft's certification. Local Python/PowerShell parsing is not a WACK run.
