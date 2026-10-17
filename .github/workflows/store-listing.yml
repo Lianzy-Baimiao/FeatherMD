@@ -19,6 +19,7 @@ jobs:
       - name: Extract frozen candidate and capture actual reader
         shell: pwsh
         run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
           $files = @(Get-ChildItem candidate -Recurse -Filter 'FeatherMD-1.0.10.0-x64.msix')
           if ($files.Count -ne 1) { throw 'Expected the exact production MSIX' }
           if ((Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'ba17aec5ba13880c794e767640104f8ae41771da0a60b751f9f013c7538cb80f') { throw 'Candidate hash mismatch' }
