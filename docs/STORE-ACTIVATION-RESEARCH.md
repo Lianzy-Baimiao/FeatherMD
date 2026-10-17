@@ -7,6 +7,15 @@ for this research.
 
 ## Likely diagnosis
 
+Cloud follow-up: run **39045655691**, source **0851b6b**, passed all four file
+extensions with the unchanged package manifest and `IAssocHandler::Invoke`.
+The exact handler AUMID was `FeatherMD.StoreTest_zhfp64hsjpefy!FeatherMD`;
+the new installed process retained package identity and loaded each Unicode/spaces
+document. Installed GUI, settings-preserving upgrade, uninstall and cleanup also
+passed. This confirms the original test-path mismatch for this package; it is
+not a universal assertion about all desktop applications. The initial hypothesis
+and primary-source reasoning are preserved below.
+
 The strongest hypothesis is an **activation-contract mismatch in the lifecycle
 test**, not a demonstrated broken file association. Confidence: medium-high;
 the unchanged package still needs a real Shell-handler invocation on the cloud

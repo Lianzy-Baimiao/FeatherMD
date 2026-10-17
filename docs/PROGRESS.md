@@ -1,5 +1,15 @@
 # Progress / continuation notes
 
+## 2026-10-17 — Cloud checks complete; production Store candidate frozen (not submitted)
+
+- 用户确认的名称预留、Git 提交/推送、云端验证均已完成。产品 **FeatherMD / 9MW2CTPBSGX7** 仍为 Partner Center 草稿；没有点击“开始提交”、上传包、填写评级或提交审核。LiteView 和现有 GitHub Release 均未修改；本机未运行原生窗口、安装或证书信任测试。
+- 已推送 `c4abc2f`（Store 适配）、`47a0ec0`（WACK）、`0851b6b`（正确 Shell 调用测试）、`fc67956`（正式身份 WACK）。最终普通 CI **39045802061** 在 Windows / Ubuntu 全部成功，Windows 真实焦点和原 19 项原生回归通过；本机 107/109 项应用测试、17 项 Python 打包/报告测试记录仍有效。工作流 Node 20 迁移警告是后续维护项，不影响本轮结果。
+- 生命周期对照 **39045655691** 成功：包清单不变，改用 `IAssocHandler::Invoke` 后，精确匹配测试包 AUMID，`.md` / `.markdown` / `.mdown` / `.mkd` 四种中文带空格文件均正确打开并保留包身份；安装后的四语 × 浅深 GUI 通过，升级保留 INI，卸载和临时证书清理通过。这确定了先前失败来自测试激活路径，而不是用改清单、直接启动 EXE 或抢默认关联掩盖问题。原失败 **39044834008** 保留。
+- 正式身份 WACK **39045802702**，源代码 `fc67956e58d54b76d386eb8212417d2c5b651567`：确认包名 `ice.FeatherMD`、`test_identity=false`；原包和签名测试副本的 EXE/manifest 完整性通过。WACK 10.0.26100.8249，退出 0，完整总体 PASS，**13 必选通过、10 可选通过、1 可选 Blocked executables 失败**，未跳过，无清理错误。可选信息仍为 ShellExecuteW/ExW、REG 文本，解释见上一节；不称为无告警或微软已认证。
+- 冻结交付路径：`dist/store-1.0.10.0-candidate/FeatherMD-1.0.10.0-x64.msix`，**551,084 字节**，SHA-256 **`ba17aec5ba13880c794e767640104f8ae41771da0a60b751f9f013c7538cb80f`**。包内 EXE SHA-256 **`c41056040d245f4e2a2afde62ff954514d48c01b92803684c65d22f0ba594c10`**。这是从正式身份 WACK run 下载后逐项核验并复制的原始未签名包，包含报告和哈希；不含测试证书、私钥、INI 或签名测试副本。后续优先上传此文件，勿用不同字节的本地早期候选代替。
+- 隐私 URL `https://github.com/Lianzy-Baimiao/FeatherMD/blob/main/docs/PRIVACY.md` 已验证 HTTP 200，内容 blob SHA `7c912fb145e31c214024a1c79b7b4d4cdf769a0b` 与提交一致。完整证据在 `test-artifacts/cloud-ci-39045802061/`、`cloud-store-39045655691/`、`cloud-wack-39045802702/` 及相应 GitHub Actions artifacts；预留/下一步入口截图 `test-artifacts/feathermd-store-draft-ready.jpg`。
+- 下一步需用户确认创建商店提交草稿、上传上述正式候选和公开资料，再完成 FeatherMD 自身的 IARC、市场、第三方自愿赞赏申报和受限能力说明。正式提交审核需要当时确认。隔离 Server 检查不等于真实 Windows 10 验证、完整辅助功能验收或 Store 签名/交付；这些限制必须如实保留，不能把产品预留称为已经上架。
+
 ## 2026-10-17 — FeatherMD name reserved; cloud validation authorized
 
 - 用户确认预留名称、提交推送本次适配并启动云端验证。Partner Center 已成功创建独立 **FeatherMD** 产品，Store ID `9MW2CTPBSGX7`，状态为草稿；没有开始商店提交或修改 LiteView。

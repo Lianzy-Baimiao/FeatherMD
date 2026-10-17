@@ -3,6 +3,12 @@
 作者：lianzy
 最后修改人：lianzy
 
+## 2026-10-17 商店关联测试：不要把 UWP 事件当成桌面打开方式
+
+- `IApplicationActivationManager::ActivateForFile` 请求 Windows.File 契约；接收命令行的 packagedClassicApp 不应仅凭此 API 报错就被判定为文件关联损坏。先核对官方契约和真实 Shell 路径，不盲目补 capability / open verb。
+- 保持清单不变，用 `SHAssocEnumHandlers` 精确匹配 AUMID 或安装路径，并通过 `IAssocHandler::Invoke` 传入单文件 IDataObject。该调用不返回 PID，需匹配新建的安装路径进程，再断言包身份与实际文档内容。不要改默认应用、仅按友好名称选择或改成直启 EXE 后冒充关联通过。
+- WACK 的总体 PASS 也可能有可选失败：保留原始 XML、退出码、必选/可选统计和源代码解释。最终上架包应来自已验证的同一 artifact 并核对哈希，不能把另一轮构建的结果当作逐字节测试证据。
+
 ## 2026-10-17 用户允许副屏测试，但不能打扰主屏游戏
 
 - 副屏测试不是先在主屏弹出再移动：必须在显示前限定所有顶层窗口与模态框的位置，并阻止激活；记录实际物理工作区与边界/前台违规。发现显示器或初始化约束失败时直接退出，不能另弹错误框。

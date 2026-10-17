@@ -1,7 +1,10 @@
 # Microsoft Store build and submission
 
-Status: local adaptation, not a published Store product. Do not reuse LiteView's
-identity. Existing v0.1.10 portable releases remain unchanged.
+Status: FeatherMD name reserved; code pushed; Windows/Ubuntu CI, test-identity
+lifecycle and production-identity supplemental WACK completed. Partner Center
+is still a draft, with no submission or package upload. Do not reuse LiteView's
+identity. Existing v0.1.10 portable releases remain unchanged. See PROGRESS.md
+for exact run IDs, hashes, the WACK optional warning and testing limitations.
 
 ## Build
 
@@ -85,10 +88,10 @@ remote images require individual consent. Microsoft Store manages this edition's
 installation and updates. Not every Markdown/HTML/image format is supported.
 Full screen-reader semantics for the document and outline are not yet provided.
 
-Privacy URL after publication:
+Verified public privacy URL:
 `https://github.com/Lianzy-Baimiao/FeatherMD/blob/main/docs/PRIVACY.md`
-This is a **proposed** public URL; verify HTTP 200 and actual content after pushing
-before entering it in Partner Center. Support URL: repository Issues.
+HTTP 200 and content equality were verified on 2026-10-17; check availability again
+before submitting. Support URL: repository Issues.
 Do not claim all accessibility requirements are met. Do not reuse LiteView's IARC
 answers or screenshots. Complete the questionnaire for FeatherMD's actual behavior.
 
@@ -108,11 +111,10 @@ Open Settings > Updates to find the Store update entry and offline privacy notic
 
 ## Remaining release gates
 
-- User-approved name reservation and verified FeatherMD identity/account status.
-- Publish and verify privacy URL; confirm voluntary-support site/payment terms.
-- Actual installed-package activation, settings persistence, upgrade/uninstall,
-  and portable coexistence in a disposable Windows environment.
-- WACK; real Store signing/delivery; Windows 10 and accessibility limitations.
+- User confirmation to create a submission and upload the verified candidate.
+- Confirm voluntary-support site/payment terms and declare third-party donations.
+- Preserve the recorded lifecycle and WACK evidence and optional-warning rationale.
+- Real Store signing/delivery; Windows 10 and accessibility limitations.
 - Actual screenshots from the final build, listing, age rating and market choices.
 - Recheck Store policies at submission (7.20 becomes effective 2026-10-22).
 - User confirmation before submitting or publishing. No automatic Store submission.
@@ -138,8 +140,8 @@ The manually dispatched `Store candidate validation` workflow prepares two test
 versions and runs GUI, Shell activation of all four extensions, installation,
 settings-preserving upgrade and uninstall on a disposable Windows 2025 runner.
 Its short-lived signing certificate/private key and signed packages are not
-uploaded. It is not WACK and not Store certification. The lifecycle script has
-only been syntax/interop-compile checked locally until that workflow actually runs.
+uploaded. It is not WACK and not Store certification. Run 39045655691 passed,
+including exact-AUMID Shell Open With activation rather than a UWP file contract.
 
 The separate manual `Supplemental Store WACK` workflow builds the same Store
 channel on a fresh Windows 2025 runner. Its default is a test identity. After
