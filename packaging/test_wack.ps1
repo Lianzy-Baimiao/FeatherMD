@@ -11,10 +11,17 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 $Package = (Resolve-Path -LiteralPath $Package).Path
 $PackageReport = (Resolve-Path -LiteralPath $PackageReport).Path
 $build = Get-Content -LiteralPath $PackageReport -Raw | ConvertFrom-Json
-$name = 'FeatherMD.StoreTest'
-$publisher = 'CN=FeatherMD Store Test'
-if ($build.test_only -ne $true -or $build.identity.name -ne $name -or $build.identity.publisher -ne $publisher) {
-    throw 'This supplemental workflow accepts only FeatherMD test-identity packages.'
+$name = $build.identity.name
+$publisher = $build.identity.publisher
+$testIdentity = $build.test_only -eq $true -and $name -eq 'FeatherMD.StoreTest' -and $publisher -eq 'CN=FeatherMD Store Test'
+# Production values were verified on FeatherMD's own Partner Center identity page.
+$productionIdentity = $build.test_only -eq $false -and $name -eq 'ice.FeatherMD' -and
+    $publisher -eq 'CN=56079E3F-5861-4D9C-B9C3-93F76224C42E'
+if (-not $testIdentity -and -not $productionIdentity) {
+    throw 'Only the FeatherMD test identity or verified FeatherMD production identity is allowed.'
+}
+if ($productionIdentity -and $build.identity.partner_center_verified -ne $true) {
+    throw 'Production metadata must be explicitly verified with Partner Center.'
 }
 if ($build.package_sha256 -notmatch '^[0-9a-f]{64}$' -or $build.binary_sha256 -notmatch '^[0-9a-f]{64}$') {
     throw 'Missing build integrity hashes.'
@@ -35,7 +42,8 @@ New-Item -ItemType Directory -Path $private | Out-Null
 $cert = $null
 $mayBeInstalled = $false
 $state = [ordered]@{ status='inconclusive'; stage='preflight'; error=$null; cleanup_errors=@()
-    scope='Supplemental Windows Server runner, test identity; not Windows 10/11 acceptance or Store certification'
+    scope='Supplemental Windows Server runner; not Windows 10/11 acceptance or Store certification'
+    identity_name=$name; test_identity=$testIdentity
     original_msix_sha256=$build.package_sha256; binary_sha256=$build.binary_sha256; signed_copy_sha256=$null }
 function Save-Json($Value, [string]$Name) {
     $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $Output $Name) -Encoding utf8

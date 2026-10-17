@@ -142,7 +142,11 @@ uploaded. It is not WACK and not Store certification. The lifecycle script has
 only been syntax/interop-compile checked locally until that workflow actually runs.
 
 The separate manual `Supplemental Store WACK` workflow builds the same Store
-channel with a test identity on a fresh Windows 2025 runner. It verifies the
+channel on a fresh Windows 2025 runner. Its default is a test identity. After
+verifying FeatherMD's own identity page, pass the local identity JSON as the
+`identity_json` dispatch input to build the production-identity candidate. This
+input is public package metadata, not signing credentials. The test script only
+accepts FeatherMD's test identity or its verified production name/publisher. It verifies the
 package/binary hashes, obtains WACK from a hash-pinned Microsoft-signed SDK
 installer when needed, and tests a temporary signed copy. Signing keys are
 nonexportable and stay off the uploaded reports; trust is removed in cleanup.
@@ -153,6 +157,8 @@ require manual review, even when WACK's overall result is PASS. The report parse
 and pinned SDK source reuse the previously inspected LiteView validation tooling,
 not LiteView's package identity or test results.
 
-This is supplemental testing on Windows Server with a test identity. It does not
-replace final-production-package checks, supported Windows client testing or
+The uploaded candidate is the original unsigned package, not the temporary
+self-signed test copy. Prefer the exact production candidate from a verified run
+for submission instead of rebuilding different bytes locally. This is still
+supplemental Windows Server testing, not supported Windows client testing or
 Microsoft's certification. Local Python/PowerShell parsing is not a WACK run.
