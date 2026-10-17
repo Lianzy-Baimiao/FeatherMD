@@ -38,7 +38,8 @@ jobs:
         run: |
           $sign = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $sign) { throw 'SignTool not installed' }
-          ./packaging/test_lifecycle.ps1 -Package dist/store-test/FeatherMD-1.0.10.0-x64-TEST.msix -Upgrade dist/store-upgrade/FeatherMD-1.0.11.0-x64-TEST.msix -SignTool $sign.FullName -Output "$env:RUNNER_TEMP/feathermd-lifecycle"
+          pwsh -STA -NoProfile -File ./packaging/test_lifecycle.ps1 -Package dist/store-test/FeatherMD-1.0.10.0-x64-TEST.msix -Upgrade dist/store-upgrade/FeatherMD-1.0.11.0-x64-TEST.msix -SignTool $sign.FullName -Output "$env:RUNNER_TEMP/feathermd-lifecycle"
+          if ($LASTEXITCODE) { throw 'Installed lifecycle validation failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

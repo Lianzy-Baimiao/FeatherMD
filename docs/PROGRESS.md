@@ -6,6 +6,10 @@
 - 实际产品标识页确认包名 `ice.FeatherMD`、PFN `ice.FeatherMD_rz8m2sa64m4em`；完整发布者字段已存入被 Git 忽略的 `packaging/store-identity.local.json`。这是逐项核对 FeatherMD 页面得到的值，不是从 LiteView 复制。预留成功截图：`test-artifacts/feathermd-name-reserved.jpg`。
 - 本轮将推送适配和测试保护，执行普通 Windows/Ubuntu CI 与手动 Store 生命周期验证；执行结果另记，不将成功派发当作通过。WACK 尚待补齐。所有真实安装/信任/窗口测试在隔离 runner 上，本机不再运行。
 - 适配已提交为 `c4abc2f`；直接连接 GitHub 的推送连续两次超时，尚未据此声称推送成功。另补独立手动 WACK workflow：仅隔离 Windows 2025 runner、测试身份、临时非导出签名、固定哈希且 Microsoft 签署的 SDK、原包完整性和报告保守判定。新增报告测试后 Python 共 **17 项通过**，PowerShell 语法检查通过；本机未执行 WACK。云端结果另记。
+- 使用本机已经配置的系统代理进行单次 Git 推送（未修改全局 Git 或系统设置）后，`c4abc2f` 和 WACK 提交 `47a0ec0` 已成功推送。普通 CI **39044833108** 在 Windows / Ubuntu 全部通过，含真实焦点原生回归。隐私页面 HTTP 200，公开内容 blob SHA 与本地提交一致。
+- Store run **39044834008**：构建、两版测试 MSIX、四语 Preview GUI 和安装成功，但 `IApplicationActivationManager::ActivateForFile` 返回不支持契约，生命周期未通过；清理完成。按 Microsoft 文档，该 API 请求 `Windows.File` 事件，而本程序接收桌面命令行参数。只改测试为真正“打开方式”的 `SHAssocEnumHandlers` + 精确 AUMID/EXE 匹配 + `IAssocHandler::Invoke`，不改包清单或默认关联；本机仅编译 interop 和解析脚本，等待云端对照。研究见 `docs/STORE-ACTIVATION-RESEARCH.md`。
+- WACK run **39044836701**：工具 10.0.26100.8249，退出 0、完整报告总体 PASS，**13 必选通过、10 可选通过、1 可选失败**；没有跳过/未知测试，清理无错误。可选 Blocked executables 指向 ShellExecuteW / ShellExecuteExW 和字符串 REG：源码中的 Shell 调用用于用户确认后的外链/编辑器/系统入口，`reg` 是 HTML `&reg;` 实体映射，未发现 reg.exe 启动代码。保留原始报告，不称为“所有测试通过”。这是测试身份的 Windows Server 补充检查，不是正式包已认证。证据 `test-artifacts/cloud-wack-39044836701/`。
+- 本地正式身份候选 `dist/store-production-1/FeatherMD-1.0.10.0-x64.msix` 已通过 MakeAppx/内容校验，SHA-256 `76a6f399076cec8d09b9a0331e2f5af5daab092fb52b5d30e5c3f83a574000c1`，仍未签名/安装/上传。候选不是上述 WACK 原包，不混称为逐字节验证过的同一包。
 
 ## 2026-10-17 — Secondary-monitor regression complete; Store reservation pending
 

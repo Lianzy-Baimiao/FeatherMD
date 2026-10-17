@@ -10,6 +10,9 @@ Set-StrictMode -Version Latest
 if($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
     throw 'Only run in a disposable GitHub-hosted Windows runner'
 }
+if([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
+    throw 'Shell handler tests require pwsh -STA.'
+}
 $Package=(Resolve-Path -LiteralPath $Package).Path
 $Upgrade=(Resolve-Path -LiteralPath $Upgrade).Path
 $SignTool=(Resolve-Path -LiteralPath $SignTool).Path
@@ -24,25 +27,36 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type @'
 using System;
 using System.Text;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IShellItem {}
-[ComImport, Guid("b63ea76d-1f85-456f-a19c-48159efa858b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IShellItemArray {}
-[ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IApplicationActivationManager {
- [PreserveSig] int ActivateApplication([MarshalAs(UnmanagedType.LPWStr)] string id,
-  [MarshalAs(UnmanagedType.LPWStr)] string args, uint options, out uint pid);
- [PreserveSig] int ActivateForFile([MarshalAs(UnmanagedType.LPWStr)] string id,
-  IShellItemArray items, [MarshalAs(UnmanagedType.LPWStr)] string verb, out uint pid);
+interface IShellItem {
+ [PreserveSig] int BindToHandler(IntPtr context, ref Guid handler, ref Guid iid, out IDataObject data);
 }
-[ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
-class ApplicationActivationManager {}
+[ComImport, Guid("F04061AC-1659-4A3F-A954-775AA57FC083"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAssocHandler {
+ [PreserveSig] int GetName([MarshalAs(UnmanagedType.LPWStr)] out string name);
+ [PreserveSig] int GetUIName([MarshalAs(UnmanagedType.LPWStr)] out string name);
+ [PreserveSig] int GetIconLocation([MarshalAs(UnmanagedType.LPWStr)] out string path, out int index);
+ [PreserveSig] int IsRecommended();
+ [PreserveSig] int MakeDefault([MarshalAs(UnmanagedType.LPWStr)] string description);
+ [PreserveSig] int Invoke(IDataObject data);
+}
+[ComImport, Guid("973810AE-9599-4B88-9E4D-6EE98C9552DA"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IEnumAssocHandlers {
+ [PreserveSig] int Next(uint count, out IAssocHandler handler, out uint fetched);
+}
+[ComImport, Guid("36db0196-9665-46d1-9ba7-d3709eecf9ed"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IObjectWithAppUserModelID {
+ [PreserveSig] int SetAppID([MarshalAs(UnmanagedType.LPWStr)] string id);
+ [PreserveSig] int GetAppID([MarshalAs(UnmanagedType.LPWStr)] out string id);
+}
 public static class PackageActivation {
  [DllImport("shell32.dll", CharSet=CharSet.Unicode, PreserveSig=false)]
  static extern void SHCreateItemFromParsingName(string path, IntPtr context, ref Guid iid, out IShellItem item);
- [DllImport("shell32.dll", PreserveSig=false)]
- static extern void SHCreateShellItemArrayFromShellItem(IShellItem item, ref Guid iid, out IShellItemArray array);
+ [DllImport("shell32.dll", CharSet=CharSet.Unicode, PreserveSig=false)]
+ static extern void SHAssocEnumHandlers(string extension, uint filter, out IEnumAssocHandlers handlers);
  public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
@@ -60,13 +74,32 @@ public static class PackageActivation {
   EnumWindows((h,d)=>{uint p;GetWindowThreadProcessId(h,out p);var s=new StringBuilder(128);GetClassNameW(h,s,s.Capacity);
    if(p==pid && s.ToString()=="FeatherMD.Native.Reader"){found=h;return false;}return true;},IntPtr.Zero);return found;
  }
- public static uint Open(string id,string path){
-  IShellItem item=null;IShellItemArray array=null;
-  var manager=(IApplicationActivationManager)new ApplicationActivationManager();
-  try {var itemId=typeof(IShellItem).GUID;SHCreateItemFromParsingName(path,IntPtr.Zero,ref itemId,out item);
-   var arrayId=typeof(IShellItemArray).GUID;SHCreateShellItemArrayFromShellItem(item,ref arrayId,out array);
-   uint pid;Marshal.ThrowExceptionForHR(manager.ActivateForFile(id,array,"open",out pid));return pid;
-  } finally {if(array!=null)Marshal.ReleaseComObject(array);if(item!=null)Marshal.ReleaseComObject(item);Marshal.ReleaseComObject(manager);}
+ public static string Open(string id,string exe,string path){
+  IShellItem item=null;IDataObject data=null;IEnumAssocHandlers handlers=null;IAssocHandler selected=null;
+  var candidates=new List<string>();string selectedName=null;
+  try {
+   SHAssocEnumHandlers(System.IO.Path.GetExtension(path),0,out handlers);
+   while(true){IAssocHandler handler;uint fetched;Marshal.ThrowExceptionForHR(handlers.Next(1,out handler,out fetched));
+    if(fetched==0)break;
+    try {string name,label,appId=null;Marshal.ThrowExceptionForHR(handler.GetName(out name));
+     Marshal.ThrowExceptionForHR(handler.GetUIName(out label));
+     var withId=handler as IObjectWithAppUserModelID;
+     if(withId!=null && withId.GetAppID(out appId)<0)appId=null;
+     string description=label+" | "+name+" | "+appId;candidates.Add(description);
+     if(String.Equals(appId,id,StringComparison.Ordinal) || String.Equals(name,id,StringComparison.Ordinal) ||
+        String.Equals(name,exe,StringComparison.OrdinalIgnoreCase)){
+      if(selected!=null)throw new Exception("Ambiguous packaged Shell handlers: "+String.Join("; ",candidates));
+      selected=handler;handler=null;selectedName=description;
+     }
+    } finally {if(handler!=null)Marshal.ReleaseComObject(handler);}
+   }
+   if(selected==null)throw new Exception("No exact packaged Shell handler: "+String.Join("; ",candidates));
+   var itemId=typeof(IShellItem).GUID;SHCreateItemFromParsingName(path,IntPtr.Zero,ref itemId,out item);
+   var bhid=new Guid("b8c0bd9f-ed24-455c-83e6-d5390c4fe8c4");var dataId=typeof(IDataObject).GUID;
+   Marshal.ThrowExceptionForHR(item.BindToHandler(IntPtr.Zero,ref bhid,ref dataId,out data));
+   Marshal.ThrowExceptionForHR(selected.Invoke(data));return selectedName;
+  } finally {if(data!=null)Marshal.ReleaseComObject(data);if(item!=null)Marshal.ReleaseComObject(item);
+   if(selected!=null)Marshal.ReleaseComObject(selected);if(handlers!=null)Marshal.ReleaseComObject(handlers);}
  }
 }
 '@
@@ -84,7 +117,8 @@ function Identity([string]$file) {
 $v1=Identity $Package; $v2=Identity $Upgrade
 if($v2 -le $v1){throw 'Upgrade version must increase'}
 $cert=$null; $installed=$false; $cleanupErrors=@()
-$result=[ordered]@{result='FAIL';stage='sign';installed_tested=$false;shell_activation_tested=$false;wack='not-run';cleanup_errors=@()}
+$result=[ordered]@{result='FAIL';stage='sign';installed_tested=$false;shell_activation_tested=$false
+    shell_activation_method='IAssocHandler::Invoke (Open With)';shell_handlers=@();wack='not-run';cleanup_errors=@()}
 function Sign([string]$inputFile,[string]$name) {
     $copy=Join-Path $private $name
     Copy-Item -LiteralPath $inputFile -Destination $copy
@@ -112,8 +146,18 @@ try {
     foreach($ext in @('.md','.markdown','.mdown','.mkd')) {
         $file=Join-Path $Output (([string][char]0x9605)+([string][char]0x8bfb)+' spaced file'+$ext)
         [IO.File]::WriteAllText($file,"# Shell activation`n`nUnicode and spaces.`n",[Text.UTF8Encoding]::new($false))
-        $processId=[PackageActivation]::Open("$family!FeatherMD",$file)
-        $process=[Diagnostics.Process]::GetProcessById($processId)
+        $before=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+        # Desktop FTAs receive command-line parameters, not a UWP Windows.File event.
+        $result.shell_handlers += [PackageActivation]::Open("$family!FeatherMD",$exe,$file)
+        $process=$null
+        for($i=0;$i -lt 400;$i++) {
+            $created=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $before -and $_.Path -eq $exe })
+            if($created.Count -gt 1){throw 'Shell created more than one matching reader'}
+            if($created.Count -eq 1){$process=$created[0];break}
+            Start-Sleep -Milliseconds 25
+        }
+        if(-not $process){throw 'Shell did not create the exact installed reader process'}
+        $processId=$process.Id
         $window=[IntPtr]::Zero
         try {
             for($i=0;$i -lt 400;$i++) {
