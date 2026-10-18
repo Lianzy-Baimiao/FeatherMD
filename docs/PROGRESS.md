@@ -1,5 +1,13 @@
 # Progress / continuation notes
 
+## 2026-10-18 — IARC preview generated; adult/terms attestation pending
+
+- 用户在明确的数据共享/生成并保存评级确认请求后回复“继续”。据此点击 FeatherMD 自身问卷的“预览分级”，没有修改既定答案，也没有使用 LiteView 的评级。
+- IARC **10.3** 返回实际预览：IARC / Microsoft Store / PEGI **3+**，ESRB **E（所有人）**，USK **Everyone**，巴西 **L**、智利 **TE**、俄罗斯 **0**。这是问卷生成结果，不是商店内容/技术认证通过。
+- 保存前页面新增复合声明：同意 IARC 使用条款，并确认已达到所在地法定成年年龄。此框保持**未勾选**，保存按钮禁用；没有替用户推定年龄，没有保存最终评级、提交认证或发布。下一步只需本人确认此声明，再勾选保存并复核实际总览状态，不重复询问已经同意的数据共享。
+- 定价页重新读取仍为全球 **240** 个市场、**CNY 0**、公开可发现；没有出现价格/时间表验证错误，保存按钮因无改动禁用。既有总览完成标记问题仍待评级保存后复核，不推测为已解决。
+- 证据：`test-artifacts/feathermd-iarc-preview-20261018.txt`、`test-artifacts/feathermd-iarc-age-attestation-20261018.jpg`。两个后台标签页保留；没有本机原生测试、安装、证书操作或包替换。
+
 ## 2026-10-18 — Store submission draft populated; IARC consent pending
 
 - 用户已确认创建商店提交草稿、上传正式候选和公开资料。FeatherMD **9MW2CTPBSGX7 / Submission 1 / 1152921505702158375** 已创建，仍为 **正在草拟**；没有点击“提交进行认证”，没有发布。用户本轮最终澄清为 **全球发布，不是仅中国区**。LiteView、旧 GitHub Release 和用户正在运行的程序未修改。

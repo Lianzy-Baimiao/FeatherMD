@@ -4,8 +4,9 @@ Status (2026-10-18): Submission 1 (`1152921505702158375`) is populated but has
 not been submitted for certification or published. The frozen production MSIX
 is uploaded and marked Validated. Properties, four localized listings and
 submission options are marked complete. Global free pricing is saved; its
-overview completion badge is still missing. IARC answers are prepared in the UI,
-but rating generation/data sharing awaits user confirmation. Do not reuse
+overview completion badge is still missing. IARC 10.3 rating preview is generated
+(IARC/Microsoft/PEGI 3+, ESRB E); saving awaits the user's adult/terms attestation.
+Data sharing and preview generation were authorized. Do not reuse
 LiteView's identity or ratings. Existing v0.1.10 portable releases remain
 unchanged. See PROGRESS.md for exact evidence and limitations.
 
@@ -125,12 +126,15 @@ answers or screenshots. Complete the questionnaire for FeatherMD's actual behavi
   submission. The 500-character restricted-capability field contains a saved
   454-character explanation. Full testing notes are saved separately and were
   verified after a page reload.
-- IARC answers are UI-only so far: Other apps; no packaged rating-sensitive
+- IARC answers: Other apps; no packaged rating-sensitive
   content, native user communication, curated online content, age-restricted
   commerce, location sharing, in-app digital purchases, redeemable rewards,
   browser/search-engine function, primary news/education function or physical
-  distribution. Do not click Preview ratings/generate/save before the user agrees
-  to Microsoft sharing the publisher display name and contact email with IARC.
+  distribution. The user authorized publisher-name/email sharing and rating
+  generation; Preview ratings returned IARC 10.3 with IARC/Microsoft/PEGI 3+,
+  ESRB E, USK Everyone, Brazil L, Chile TE and Russia 0. The mandatory checkbox
+  combines IARC terms acceptance with a declaration of legal adulthood. Leave it
+  unchecked until the user personally confirms; the rating is not yet saved.
 
 ## Reviewer notes
 
@@ -156,8 +160,9 @@ runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
 
 ## Remaining release gates
 
-- User confirmation for IARC publisher-name/email sharing, rating generation and
-  saving; then recheck pricing completion and actual regional requirements.
+- User confirmation of legal adulthood and IARC terms, then save the already
+  generated rating. Recheck pricing completion and actual regional requirements.
+  Do not ask again for publisher-name/email sharing already authorized.
 - Third-party support is declared. Its public page describes support for creative
   work, with no observed FeatherMD feature unlock. Actual payment security and
   transaction terms have not been audited; do not claim verified compliance.
