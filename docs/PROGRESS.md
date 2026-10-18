@@ -1,5 +1,13 @@
 # Progress / continuation notes
 
+## 2026-10-18 — Submitted to Microsoft Store certification
+
+- 用户对“正式送审 FeatherMD 1.0.10.0、全球免费、通过后暂不自动发布”的当时确认请求回复“确认”。已点击**提交进行认证**，并核对返回状态，不是只记录点击尝试。
+- Partner Center 产品 **FeatherMD / 9MW2CTPBSGX7 / Submission 1 / 1152921505702158375** 已从草稿变为**正在认证**。进度：**提交完成、预处理正在进行、认证未开始、发布未开始**；页面出现“取消认证”。这表示提交已受理，不表示审核通过或已经上架。
+- 页面明确显示“**单击‘立即发布’时，产品将开始发布**”，手动暂缓发布保持有效。已保存的全球 240 个现有市场、免费定价、四语 16 图、实际 IARC 结果和审核说明一并送审；冻结 MSIX 未重建或替换，仍为 SHA-256 `ba17aec5ba13880c794e767640104f8ae41771da0a60b751f9f013c7538cb80f`。
+- 页面预计认证通常数小时，某些情况最多 3 个工作日；这是微软显示的预估，不作通过或完成时间保证。等待真实审核结果；不得为补文档取消认证、重复提交、改包或提前发布。通过后正式发布仍需用户当时确认；若被拒，先读取实际报告再修复。
+- 受理证据：`test-artifacts/feathermd-submitted-20261018.txt`、`test-artifacts/feathermd-submitted-20261018.jpg`。后台状态页保留，无本机原生窗口、安装或证书操作。旧 GitHub Release 和 LiteView 未修改；没有创建自动监控或声称将自行收到后续结果。
+
 ## 2026-10-18 — IARC saved; certification submission enabled (not submitted)
 
 - 用户在明确的成年年龄与 IARC 条款确认问题后回复“你点就行了”。按此确认勾选声明并保存；页面从“年龄分级预览”变为“年龄分级”，新增“继续”，当前分级 ID 显示**待定**，未编造证书编号。既有 IARC 10.3 评级结果不变。

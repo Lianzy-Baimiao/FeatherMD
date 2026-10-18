@@ -1,16 +1,15 @@
 # Microsoft Store build and submission
 
-Status (2026-10-18): Submission 1 (`1152921505702158375`) is populated but has
-not been submitted for certification or published. The frozen production MSIX
-is uploaded and marked Validated. Properties, four localized listings and
-submission options are marked complete. Global free pricing and IARC 10.3 ratings
-(IARC/Microsoft/PEGI 3+, ESRB E) are saved. The user confirmed the adult/terms
-declaration. The overview's certification submission button is now enabled,
-although pricing and age-rating completion text is still absent. The rating ID
-is shown as pending. Final certification submission awaits action-time user
-confirmation. Do not reuse
-LiteView's identity or ratings. Existing v0.1.10 portable releases remain
-unchanged. See PROGRESS.md for exact evidence and limitations.
+Status (2026-10-18): Submission 1 (`1152921505702158375`) was formally submitted
+after action-time user confirmation. Partner Center shows **In certification**:
+submission complete, preprocessing in progress, certification and publishing not
+yet started. The frozen 1.0.10.0 MSIX, global free availability, four localized
+listings and saved IARC 10.3 ratings are included. The page confirms manual
+publication hold: publishing starts only when Publish now is selected. This is
+accepted submission, not certification approval or a live Store release. Do not
+cancel or resubmit merely to update documentation. Do not reuse LiteView's identity
+or ratings. Existing v0.1.10 portable releases remain unchanged. See PROGRESS.md
+for exact evidence and limitations.
 
 ## Build
 
@@ -76,7 +75,7 @@ the fourth stays 0. Never overwrite/reuse an uploaded version.
 
 Name: **FeatherMD**, reserved with user confirmation on 2026-10-17.
 Store ID: `9MW2CTPBSGX7`; package name: `ice.FeatherMD`.
-The Partner Center product remains a draft; upload is not certification.
+The Partner Center product is in certification; it is not yet published.
 Selected category: Productivity. Supported languages: Simplified/Traditional
 Chinese, English, Japanese.
 Architecture: x64. Package minimum: Windows 10 build 19041. This is a manifest
@@ -102,7 +101,7 @@ Issues.
 Do not claim all accessibility requirements are met. Do not reuse LiteView's IARC
 answers or screenshots. Complete the questionnaire for FeatherMD's actual behavior.
 
-## Saved draft and screenshots
+## Submitted materials and screenshots
 
 - Uploaded `dist/store-1.0.10.0-candidate/FeatherMD-1.0.10.0-x64.msix`, 551,084
   bytes, SHA-256 `ba17aec5ba13880c794e767640104f8ae41771da0a60b751f9f013c7538cb80f`.
@@ -121,12 +120,13 @@ answers or screenshots. Complete the questionnaire for FeatherMD's actual behavi
   All 240 current markets are selected and all 240 price-table rows were verified
   as zero. Base currency is CNY; public/discoverable, no trial or promotion.
   Automatic expansion to future markets is off. Values persist after reopening,
-  but the overview pricing section still lacks completion text after IARC was
-  saved. The certification button is enabled; do not infer a blocking error from
-  the missing text. Do not invent a Chinese ISBN or other approval
+  but the draft overview did not show pricing completion text after IARC was
+  saved. Submission was subsequently accepted; the missing text did not block
+  submission. Do not invent a Chinese ISBN or other approval
   from the market selector's generic label.
-- Release hold is manual: certification must not automatically publish this
-  submission. The 500-character restricted-capability field contains a saved
+- Release hold is manual and was confirmed again by the submitted status page:
+  certification must not automatically publish this submission. The
+  500-character restricted-capability field contains a saved
   454-character explanation. Full testing notes are saved separately and were
   verified after a page reload.
 - IARC answers: Other apps; no packaged rating-sensitive
@@ -164,17 +164,22 @@ runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
 
 ## Remaining release gates
 
-- Action-time user confirmation before clicking the now-enabled certification
-  submission button. Scope: frozen 1.0.10.0 MSIX, global free availability and
-  manual publication hold. Do not repeat completed IARC/age/data-sharing consent.
+- Wait for Microsoft's actual certification result. At acceptance the status page
+  showed preprocessing in progress and certification not yet started. Do not
+  describe this as approved or live, cancel it, or submit another copy.
+- If approved, obtain action-time user confirmation before manual publication.
+  If rejected, read the actual report before changing the frozen candidate.
+  Do not repeat completed IARC/age/data-sharing consent.
 - Third-party support is declared. Its public page describes support for creative
   work, with no observed FeatherMD feature unlock. Actual payment security and
   transaction terms have not been audited; do not claim verified compliance.
 - Preserve the recorded lifecycle and WACK evidence and optional-warning rationale.
 - Real Store signing/delivery; Windows 10 and accessibility limitations.
-- Final verification of saved listing/screenshots, age rating and global markets.
-- Recheck Store policies at submission (7.20 becomes effective 2026-10-22).
-- User confirmation before submitting or publishing. No automatic Store submission.
+- Verify final Store listing, age rating, target markets and delivered package
+  after approval/publication. Submission evidence is in
+  `test-artifacts/feathermd-submitted-20261018.txt` and the matching `.jpg`.
+- Recheck policies for any later resubmission (7.20 takes effect 2026-10-22).
+- No automatic publication or new monitoring task was configured.
 
 ## Testing without interrupting the desktop
 
