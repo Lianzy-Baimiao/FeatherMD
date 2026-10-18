@@ -1,5 +1,12 @@
 # Progress / continuation notes
 
+## 2026-10-18 — IARC saved; certification submission enabled (not submitted)
+
+- 用户在明确的成年年龄与 IARC 条款确认问题后回复“你点就行了”。按此确认勾选声明并保存；页面从“年龄分级预览”变为“年龄分级”，新增“继续”，当前分级 ID 显示**待定**，未编造证书编号。既有 IARC 10.3 评级结果不变。
+- 点击“继续”返回 FeatherMD 总览后，**“提交进行认证”按钮已启用**（UI 和 `isEnabled()` 均确认），产品仍显示**处于草稿状态 / 正在草拟**。年龄分级和定价两行仍未显示“完成”文字，不能据此再断言无法提交，也不编造已查明的页面显示原因。全球 240 市场免费、手动暂缓发布等已保存选项未改动。
+- **尚未点击最终“提交进行认证”或发布**。下一步向用户确认把冻结的 `1.0.10.0` MSIX 正式送微软审核，全球免费，通过后仍手动发布；得到当时确认后再操作，不再次询问已经完成的 IARC/成年声明。
+- 证据：`test-artifacts/feathermd-certification-ready-20261018.txt` 和同名 `.jpg`。未重建或替换 MSIX，未运行本机窗口/安装/证书测试，既有 WACK 可选告警、Windows 10/辅助功能及第三方付款流程验证边界继续保留。
+
 ## 2026-10-18 — IARC preview generated; adult/terms attestation pending
 
 - 用户在明确的数据共享/生成并保存评级确认请求后回复“继续”。据此点击 FeatherMD 自身问卷的“预览分级”，没有修改既定答案，也没有使用 LiteView 的评级。
