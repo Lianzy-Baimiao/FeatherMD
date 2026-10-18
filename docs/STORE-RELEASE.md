@@ -1,10 +1,13 @@
 # Microsoft Store build and submission
 
-Status: FeatherMD name reserved; code pushed; Windows/Ubuntu CI, test-identity
-lifecycle and production-identity supplemental WACK completed. Partner Center
-is still a draft, with no submission or package upload. Do not reuse LiteView's
-identity. Existing v0.1.10 portable releases remain unchanged. See PROGRESS.md
-for exact run IDs, hashes, the WACK optional warning and testing limitations.
+Status (2026-10-18): Submission 1 (`1152921505702158375`) is populated but has
+not been submitted for certification or published. The frozen production MSIX
+is uploaded and marked Validated. Properties, four localized listings and
+submission options are marked complete. Global free pricing is saved; its
+overview completion badge is still missing. IARC answers are prepared in the UI,
+but rating generation/data sharing awaits user confirmation. Do not reuse
+LiteView's identity or ratings. Existing v0.1.10 portable releases remain
+unchanged. See PROGRESS.md for exact evidence and limitations.
 
 ## Build
 
@@ -70,9 +73,9 @@ the fourth stays 0. Never overwrite/reuse an uploaded version.
 
 Name: **FeatherMD**, reserved with user confirmation on 2026-10-17.
 Store ID: `9MW2CTPBSGX7`; package name: `ice.FeatherMD`.
-The Partner Center product remains a draft; reservation is not publication.
-Category: Productivity / Utilities (select the closest available Partner Center
-category). Supported languages: Simplified/Traditional Chinese, English, Japanese.
+The Partner Center product remains a draft; upload is not certification.
+Selected category: Productivity. Supported languages: Simplified/Traditional
+Chinese, English, Japanese.
 Architecture: x64. Package minimum: Windows 10 build 19041. This is a manifest
 target, not a claim of completed Windows 10 testing.
 
@@ -90,12 +93,49 @@ Full screen-reader semantics for the document and outline are not yet provided.
 
 Verified public privacy URL:
 `https://github.com/Lianzy-Baimiao/FeatherMD/blob/main/docs/PRIVACY.md`
-HTTP 200 and content equality were verified on 2026-10-17; check availability again
-before submitting. Support URL: repository Issues.
+HTTP 200 and content equality were verified on 2026-10-17; HTTP 200 was rechecked
+on 2026-10-18. Check availability again before submitting. Support URL: repository
+Issues.
 Do not claim all accessibility requirements are met. Do not reuse LiteView's IARC
 answers or screenshots. Complete the questionnaire for FeatherMD's actual behavior.
 
-## Reviewer notes draft
+## Saved draft and screenshots
+
+- Uploaded `dist/store-1.0.10.0-candidate/FeatherMD-1.0.10.0-x64.msix`, 551,084
+  bytes, SHA-256 `ba17aec5ba13880c794e767640104f8ae41771da0a60b751f9f013c7538cb80f`.
+  Desktop only; future device-family expansion is disabled. Do not replace these
+  verified bytes casually.
+- Four localized listings (zh-CN, zh-TW, en-US, ja-JP) each have four desktop
+  screenshots and five feature bullets. Capture output is
+  `test-artifacts/store-listing-39047863992/`: light, dark, source and tables for
+  each language, with hashes in `provenance.json`. All are 1600x1000 real native
+  captures of the frozen WACK executable, not mockups or a newer build.
+- `scripts/store-listing-capture.ps1` and `.github/workflows/store-listing.yml`
+  capture on a disposable Windows runner only. Run 39047863992 passed; the prior
+  run 39047719721 failed on the runner's limited display resolution. The fix
+  changes only the disposable display before capture. No local GUI is launched.
+- User's final market instruction is worldwide, including China, not China-only.
+  All 240 current markets are selected and all 240 price-table rows were verified
+  as zero. Base currency is CNY; public/discoverable, no trial or promotion.
+  Automatic expansion to future markets is off. Values persist after reopening,
+  but the overview pricing section is not yet marked complete; recheck after
+  IARC rather than assume a cause. Do not invent a Chinese ISBN or other approval
+  from the market selector's generic label.
+- Release hold is manual: certification must not automatically publish this
+  submission. The 500-character restricted-capability field contains a saved
+  454-character explanation. Full testing notes are saved separately and were
+  verified after a page reload.
+- IARC answers are UI-only so far: Other apps; no packaged rating-sensitive
+  content, native user communication, curated online content, age-restricted
+  commerce, location sharing, in-app digital purchases, redeemable rewards,
+  browser/search-engine function, primary news/education function or physical
+  distribution. Do not click Preview ratings/generate/save before the user agrees
+  to Microsoft sharing the publisher display name and contact email with IARC.
+
+## Reviewer notes
+
+These core notes, test steps and supplemental-test limitations are saved in
+Partner Center's Additional Testing Info. They are not evidence of approval.
 
 FeatherMD is a native Rust Win32 desktop reader, `packagedClassicApp` / `mediumIL`.
 `runFullTrust` is required for its existing Win32 renderer, reading user-selected
@@ -109,13 +149,21 @@ for each declared extension; save settings; restart; update/uninstall the packag
 Remote images require clicking and confirming a URL; F5 revokes that consent.
 Open Settings > Updates to find the Store update entry and offline privacy notice.
 
+The saved notes also preserve the production WACK overall PASS with one optional
+Blocked executables FAIL, the ShellExecuteW/ExW and REG explanation, and links to
+runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
+10 validation, full accessibility or prior Microsoft certification.
+
 ## Remaining release gates
 
-- User confirmation to create a submission and upload the verified candidate.
-- Confirm voluntary-support site/payment terms and declare third-party donations.
+- User confirmation for IARC publisher-name/email sharing, rating generation and
+  saving; then recheck pricing completion and actual regional requirements.
+- Third-party support is declared. Its public page describes support for creative
+  work, with no observed FeatherMD feature unlock. Actual payment security and
+  transaction terms have not been audited; do not claim verified compliance.
 - Preserve the recorded lifecycle and WACK evidence and optional-warning rationale.
 - Real Store signing/delivery; Windows 10 and accessibility limitations.
-- Actual screenshots from the final build, listing, age rating and market choices.
+- Final verification of saved listing/screenshots, age rating and global markets.
 - Recheck Store policies at submission (7.20 becomes effective 2026-10-22).
 - User confirmation before submitting or publishing. No automatic Store submission.
 

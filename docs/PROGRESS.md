@@ -1,5 +1,17 @@
 # Progress / continuation notes
 
+## 2026-10-18 — Store submission draft populated; IARC consent pending
+
+- 用户已确认创建商店提交草稿、上传正式候选和公开资料。FeatherMD **9MW2CTPBSGX7 / Submission 1 / 1152921505702158375** 已创建，仍为 **正在草拟**；没有点击“提交进行认证”，没有发布。用户本轮最终澄清为 **全球发布，不是仅中国区**。LiteView、旧 GitHub Release 和用户正在运行的程序未修改。
+- 已上传冻结的 `dist/store-1.0.10.0-candidate/FeatherMD-1.0.10.0-x64.msix`，Partner Center 显示 **Validated / 完成**。本轮重新核对 SHA-256 仍为 **ba17aec5ba13880c794e767640104f8ae41771da0a60b751f9f013c7538cb80f**；不是重建包、测试签名副本或旧 `store-production-1`。仅选择 Desktop，不允许自动扩展到未来设备系列。`runFullTrust` 仍需微软批准，不能将上传校验称为认证通过。
+- 属性已保存并显示完成：生产率分类、公开隐私/网站/Issues 支持地址，申报第三方赞赏；不虚报完全无个人信息或无障碍达标。隐私 URL 于本轮再次验证 HTTP 200。未提交私人地址、电话、支付凭据或历史 API 密钥。
+- 简体中文、繁体中文、英文、日文四个 Store 一览均显示完成，最终各 **4 张真实截图、5 条功能说明**。截图来自已成功的隔离采集 **39047863992**，使用正式 WACK run **39045802702** 的冻结 EXE，不重新编译、不合成 UI；16 张均为 1600×1000，哈希及来源见 `test-artifacts/store-listing-39047863992/provenance.json`。采集脚本/示例文档提交为 `3f6937d`、`201898b`。首轮采集 **39047719721** 因 runner 默认显示分辨率不足失败，后续仅调整隔离 runner 分辨率后通过，未改用户桌面。
+- 定价草稿已保存：**全球全部 240 个现有市场、CNY 基价 0、公开且可发现、无试用或促销**；逐行核对市场价格表 240 行均为零，包含中国。未来新增市场自动扩展关闭。重新打开页面仍保留这些值，但总览的“定价和可用性”**尚未显示完成**；不要猜测根因或称全部提交项已就绪。市场列表将中国标注为“需要 ISBN”，未据此编造 ISBN、移除中国或把非游戏应用判为已获当地许可；完成 IARC 后应复核适用要求和状态。
+- 提交选项已保存并显示完成：**除非手动选择立即发布，否则不发布**；填写 454 字符的 `runFullTrust` 说明，解释原生 Win32/GDI、用户打开的文件和所选编辑器、中完整性级别、无管理员/服务/抢默认、逐图确认与 Store 更新路径。认证人员的实际测试步骤、无需登录/付费、可选赞赏、WACK 的 **13 必选通过 / 10 可选通过 / 1 可选失败** 及 ShellExecute/REG 说明已保存，重新加载确认存在。
+- FeatherMD 自身的 IARC 问卷已在浏览器中填写：其他所有应用类型；包内敏感内容、原生用户交流、推荐联机内容、年龄限制商品、共享精确位置、应用内数字商品、可兑换奖励、浏览器/搜索引擎、主要新闻/教育产品和实体分发均按实际行为选否。数字商品帮助明确指应用内购买；未将可选浏览器赞赏误报成付费功能。**未点击“预览分级”、未生成/保存评级**，因为页面明确将发布者显示名及联系邮箱共享给 IARC，待用户对此步骤确认；不是沿用 LiteView 证书。草稿答案保留在后台标签页和被忽略的 `test-artifacts/feathermd-iarc-draft-20261018.txt`。
+- 只读检查公开爱发电页面：展示支持创作的赞赏方案，未看到 FeatherMD 功能解锁说明。未登录、未进入实际付款、未核验支付安全资质，因此不称第三方付款链路已审计通过。证据 `test-artifacts/feathermd-support-public-20261018.jpg`。
+- 本轮全部网页操作在后台；没有本机原生窗口、安装或证书测试。证据包括 `test-artifacts/feathermd-store-overview-20261018.jpg`、`feathermd-global-market-draft-20261018.jpg`、`feathermd-iarc-consent-pending-20261018.jpg`。下一步：获得 IARC 数据共享/生成评级确认，处理实际评级结果并复核定价状态、地区条件和支持支付边界；最终提交认证、发布仍需当时确认。真实 Windows 10、完整辅助功能、Store 签名交付等既有验证限制保留。
+
 ## 2026-10-17 — Cloud checks complete; production Store candidate frozen (not submitted)
 
 - 用户确认的名称预留、Git 提交/推送、云端验证均已完成。产品 **FeatherMD / 9MW2CTPBSGX7** 仍为 Partner Center 草稿；没有点击“开始提交”、上传包、填写评级或提交审核。LiteView 和现有 GitHub Release 均未修改；本机未运行原生窗口、安装或证书信任测试。
