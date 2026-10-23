@@ -35,6 +35,10 @@ impl Palette {
         let sum = |c: u32| (c & 255) + ((c >> 8) & 255) + ((c >> 16) & 255);
         sum(self.bg) < sum(self.fg)
     }
+    /// The faint background of every other table body row.
+    pub(super) fn stripe(&self) -> u32 {
+        mix(self.page, self.code, 55)
+    }
 }
 
 impl App {
@@ -50,7 +54,8 @@ impl App {
         };
         let soft = |a: u32, b: u32, percent: u32| mix(a, b, percent);
         let bar_color = soft(p.edge, p.muted, 35);
-        let stripe = soft(p.page, p.code, 55);
+        let stripe = p.stripe();
+        let table_pad = self.reading_fonts.scale(crate::layout::CELL_PAD_Y);
         // Code boxes: one rounded sheet behind each visible run of code rows. A box
         // that continues off screen extends past the clip so its corners stay hidden.
         if !raw {
@@ -98,24 +103,34 @@ impl App {
                 right: left + body_width,
                 bottom: y + row.height,
             };
-            // Preview selection: the units of this row it covers. Table rows are
-            // selected whole; other rows highlight only the selected characters.
-            let cover = preview.and_then(|(from, to)| select::covered(row, from, to));
-            let selected = cover.is_some() && row.table.is_some();
+            // Preview selection: the units of this row it covers; only the selected
+            // characters are highlighted, in tables too.
             let found = self.found.is_some_and(|n| n >= row.start && n < row.end);
+            let cover = preview
+                .and_then(|(from, to)| select::covered(row, from, to))
+                .filter(|_| !found);
             let shift = self.shift(row);
-            if selected || found {
+            if found {
                 Self::fill(dc, &rect, p.selection);
             } else if raw {
                 Self::fill(dc, &rect, p.code);
             }
-            let cover = cover.filter(|_| row.table.is_none() && !found);
+            // In a table the highlight stays off the cell padding, so the rules
+            // between rows stay visible.
+            let band_rect = match &row.table {
+                Some(_) => RECT {
+                    top: rect.top + if row.first { table_pad } else { 0 },
+                    bottom: rect.bottom - if row.last { table_pad } else { 0 },
+                    ..rect
+                },
+                None => rect,
+            };
             if let Some(table) = &row.table {
                 let (x0, x1) = (
                     left + table.edges[0] - shift,
                     left + table.edges[table.edges.len() - 1] - shift,
                 );
-                if !selected && !found && (table.header || table.stripe) {
+                if !found && (table.header || table.stripe) {
                     Self::fill(
                         dc,
                         &RECT {
@@ -210,11 +225,8 @@ impl App {
             });
             let quoted = row.kind == markdown::Kind::Quote;
             let muted_heading = row.kind == markdown::Kind::Heading(6);
-            let mut unit = row.unit;
-            for run in &row.runs {
+            for (first, run) in select::runs(row) {
                 let x = left + run.x - shift;
-                let first = unit;
-                unit += run.text.len();
                 // Selected characters: one band per run, over chips, under glyphs.
                 let band = cover.and_then(|range| {
                     let fonts = &mut self.reading_fonts;
@@ -263,7 +275,7 @@ impl App {
                     continue;
                 }
                 let text_y = y + row.baseline - run.ascent - run.rise;
-                let plain = !selected && !found;
+                let plain = !found;
                 if (run.code || run.kbd) && plain {
                     let chip = RECT {
                         left: left + run.chip.0 - shift,
@@ -310,7 +322,7 @@ impl App {
                         &RECT {
                             left: left + a - shift,
                             right: left + b - shift,
-                            ..rect
+                            ..band_rect
                         },
                         p.text_highlight(),
                     );

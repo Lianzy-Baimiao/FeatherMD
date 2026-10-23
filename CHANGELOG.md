@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.11 — 2026-10-24
+
+### Added
+- Settings → Updates has "Privacy notice…": the privacy notice in all four interface languages, shown offline. The full policy ships in the ZIP as docs/PRIVACY.md.
+- A separately built Microsoft Store edition (`--features store`) that uses its package identity and Store updates; it is not part of this download, and the portable EXE behaves as before.
+
+### Changed
+- Text in preview table cells selects by character, like paragraphs: drag inside a cell, from one cell into the next (a tab between them) or across rows (CRLF), double-click a word in a cell, Shift+click and select all. A drag only lands in the cell under the pointer, so it never jumps into the next column. Whole rows still copy as tab-separated cells. Previously a table row was one piece, and a drag inside one cell selected nothing.
+
+### Fixed
+- Double-clicking the right half of the last character of a paragraph or table cell selects its word instead of nothing.
+- The Updates page and README no longer say that FeatherMD never goes online with update checks off: that only covers GitHub, and web images are confirmed one by one separately.
+
+### Tests
+- Unit tests for table cell selection: copy inside a wrapped cell, across cells and rows, painted extents per visual line, hit testing that stays in the pointer's column, and double-click inside a cell; a windowless GDI test lays out a wrapped table for real and checks every run against the row's selection text and every boundary round trip through hit testing. The selection highlight is checked against paragraph and striped table rows in all 20 skins (at least 1.4:1). table-smoke drags inside a cell, from its padding, across cells and rows, through a long cell, and double-clicks a word in a cell.
+- Native smoke scripts refuse to open windows on a developer desktop unless run on a disposable runner or, with the user's permission, confined to a secondary monitor (`-SecondaryMonitor`), where windows are placed before they show and never take the foreground.
+
 ## 0.1.10 — 2026-10-16
 
 ### Added

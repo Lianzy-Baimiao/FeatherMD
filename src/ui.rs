@@ -1784,22 +1784,14 @@ impl App {
         let (a, b) = self.selection?;
         (a != b).then(|| (a.min(b), a.max(b)))
     }
-    /// Preview position at client `x` on layout row `index`. A table row is one
-    /// piece: its left half is before it, its right half after it.
+    /// Preview position at client `x` on layout row `index`; in a table, inside the
+    /// cell under the pointer.
     unsafe fn spot_at(&mut self, index: usize, x: i32) -> Option<Spot> {
         let origin = {
             let row = self.layout.as_ref()?.rows.get(index)?;
             self.left() - self.shift(row)
         };
         let row = self.layout.as_ref()?.rows.get(index)?;
-        if let Some(table) = &row.table {
-            let middle = table.edges.last().copied().unwrap_or(0) / 2;
-            let unit = usize::from(x - origin >= middle);
-            return Some(Spot {
-                block: row.start,
-                unit,
-            });
-        }
         let dc = GetDC(self.hwnd);
         let fonts = &mut self.reading_fonts;
         let unit = select::nearest(row, x - origin, |run| pens(dc, fonts, run));
@@ -3333,17 +3325,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 } else if let Some(spot) = app.spot_at(row, x) {
                     // The preview selects characters too, as shown on screen.
                     if msg == WM_LBUTTONDBLCLK {
-                        let table = app
-                            .layout
-                            .as_ref()
-                            .and_then(|l| l.rows.get(row))
-                            .is_some_and(|r| r.table.is_some());
-                        app.selection = Some(if table {
-                            (Spot { unit: 0, ..spot }, Spot { unit: 1, ..spot })
-                        } else {
-                            let rows = app.layout.as_ref().map_or(&[][..], |l| &l.rows[..]);
-                            select::word(rows, spot.block, spot.unit)
-                        });
+                        let rows = app.layout.as_ref().map_or(&[][..], |l| &l.rows[..]);
+                        app.selection = Some(select::word(rows, spot.block, spot.unit));
                     } else {
                         let anchor = match app.selection {
                             Some((anchor, _)) if wp & MK_SHIFT != 0 => anchor,
@@ -3890,6 +3873,14 @@ mod tests {
                 "{name} selection on code rows"
             );
             assert!(contrast(p.fg, mark) >= 4.5, "{name} selected source text");
+            // The preview uses it on paragraphs, table headers (code colour) and
+            // striped rows too: measured 1.59-2.20:1 and 1.51-2.03:1 in 2026-10.
+            for (surface, background) in [("page", p.page), ("table stripe", p.stripe())] {
+                assert!(
+                    contrast(mark, background) >= 1.4,
+                    "{name} selection on the {surface}"
+                );
+            }
         }
     }
     #[test]

@@ -42,7 +42,7 @@ The other screenshots in this README show the Simplified Chinese interface; ever
 
 Opening a Markdown file should not start a browser first.
 
-FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.10 Windows x64 EXE is about **1.05 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
+FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.11 Windows x64 EXE is about **1.07 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
 
 **Large files are not loaded whole before they show.** Only the nearby 128 KiB is read at a time; reading and searching run in the background and only visible lines are drawn. The file's total size does not decide how much memory the first page needs.
 
@@ -155,12 +155,14 @@ When there are too many columns for even the narrowest readable width (about six
 
 Both the preview and source view (Ctrl+R) select by character with the mouse: double-click selects a word, Shift+click extends the selection, and dragging past the top or bottom of the text scrolls and keeps selecting. Ctrl+A selects the loaded page, Esc clears the selection, and Ctrl+C or right-click "Copy selected text" copies it; without a selection, Copy takes what is visible.
 
-- **The preview** copies the text as shown: the wrapped lines of one paragraph join into one line (with the spaces taken out at the wraps put back), paragraphs are separated by CRLF, table rows are selected whole and copy as tab-separated cells, and an image copies its alt text. Zooming, resizing or images arriving keep the same characters selected.
+- **The preview** copies the text as shown: the wrapped lines of one paragraph join into one line (with the spaces taken out at the wraps put back), paragraphs are separated by CRLF, text in table cells selects by character too (double-click selects a word in its cell) with a tab between cells and CRLF between rows, so whole rows copy as tab-separated cells, and an image copies its alt text. Zooming, resizing or images arriving keep the same characters selected.
 - **Source view** copies the **source** in the file: tabs stay tabs, CJK and emoji are never cut, lines are joined with CRLF, and a very long line split on screen gets no extra breaks.
 
 A selection reaching past the cached page (about 128 KiB) copies only the loaded part, and the status bar says so. To copy one code block, quote or table, its Copy button is quicker.
 
 ![FeatherMD character selection in the preview](docs/preview-selection.png)
+
+![FeatherMD character selection inside a table cell](docs/table-selection.png)
 
 ![FeatherMD character selection in source view](docs/source-selection.png)
 
@@ -172,7 +174,7 @@ The update source is this project's [GitHub Releases](https://github.com/Lianzy-
 - **Check at startup**: tick it on the "Updates" page and save; it is **off by default**. When on, FeatherMD checks in the background about 3 seconds after starting, at most once every 24 hours; a failed check stays quiet and is retried on a later start.
 - **When a newer release exists**, the More button gets a small dot and the menu entry reads "Update available: vX.Y.Z…"; both go away once you upgrade. "Download page…" asks first, then opens that release page in your default browser.
 
-The check is one HTTPS request for the public release information on `api.github.com`, made with Windows' own WinHTTP and using the system proxy settings and certificate validation. No documents, settings or other data are sent, and nothing is **downloaded or installed automatically**. With the automatic check off and without "Check now", FeatherMD never goes online.
+The check is one HTTPS request for the public release information on `api.github.com`, made with Windows' own WinHTTP and using the system proxy settings and certificate validation. No documents, settings or other data are sent, and nothing is **downloaded or installed automatically**. With the automatic check off and without "Check now", FeatherMD never contacts GitHub; web images are controlled separately and always need your confirmation one by one. "Privacy notice…" on the "Updates" page shows the full privacy notice offline (also shipped as docs/PRIVACY.md).
 
 ![FeatherMD update settings](docs/settings-update.png)
 
@@ -259,7 +261,7 @@ The outline lists `#` to `######` headings and skips code fences. To keep large 
 | Interface language | More → Language… |
 | Help | F1 |
 
-Mouse selection is **by character** in both the preview and source view (double-click selects a word, Shift+click extends); preview tables select whole rows. With word wrap off, or for a table that is too wide, use the bottom scrollbar or the left/right arrow keys.
+Mouse selection is **by character** in both the preview and source view (double-click selects a word, Shift+click extends), table cells in the preview included. With word wrap off, or for a table that is too wide, use the bottom scrollbar or the left/right arrow keys.
 
 ### Settings file
 

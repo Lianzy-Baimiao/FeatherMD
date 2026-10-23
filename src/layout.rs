@@ -11,7 +11,7 @@ use feathermd::{
 use std::{collections::BTreeMap, rc::Rc};
 /// Logical padding inside table cells.
 const CELL_PAD_X: i32 = 10;
-const CELL_PAD_Y: i32 = 4;
+pub const CELL_PAD_Y: i32 = 4;
 /// Logical padding of inline code and keyboard chips.
 const CHIP_PAD: i32 = 4;
 /// Logical room above an image and below the text line it stands on.
@@ -243,6 +243,13 @@ pub struct TableLine {
     pub stripe: bool,
     /// The row's cells as tab-separated text, for copying.
     pub copy: Rc<str>,
+    /// The row's displayed cells joined by tabs: the units a selection counts in,
+    /// shared by all visual lines of the row.
+    pub text: Rc<[u16]>,
+    /// First unit of each cell in `text`.
+    pub cells: Rc<[usize]>,
+    /// Unit of `text` where each run of this visual line starts.
+    pub starts: Vec<usize>,
 }
 impl feathermd::viewport::RowHeight for Row {
     fn height(&self) -> i32 {
@@ -957,6 +964,17 @@ unsafe fn layout_table(
             .collect::<Vec<_>>()
             .join("\t")
             .into();
+        // Selection units: the displayed cells joined by tabs.
+        let mut text = Vec::new();
+        let mut starts_of = Vec::with_capacity(cells.len());
+        for cell in cells.iter().take(columns) {
+            if !starts_of.is_empty() {
+                text.push(u16::from(b'\t'));
+            }
+            starts_of.push(text.len());
+            text.extend_from_slice(&cell.units);
+        }
+        let (text, cell_starts): (Rc<[u16]>, Rc<[usize]>) = (text.into(), starts_of.into());
         let stripe = !row.header && {
             body += 1;
             body % 2 == 0
@@ -989,28 +1007,7 @@ unsafe fn layout_table(
             let first = line == 0;
             let last = line + 1 == count;
             let inset = if first { pad_y } else { 0 };
-            let mut out = Row {
-                start: block.start,
-                end: block.end,
-                runs: Vec::new(),
-                height: band + if first { pad_y } else { 0 } + if last { pad_y } else { 0 },
-                kind: Kind::Table,
-                unit: 0,
-                table: Some(TableLine {
-                    edges: edges.clone(),
-                    header: row.header,
-                    first,
-                    close: last && r + 1 == table.len(),
-                    stripe,
-                    copy: copy.clone(),
-                }),
-                baseline: inset + baseline(band, base_metrics),
-                first,
-                last,
-                indent: 0,
-                bar: None,
-                boxed: false,
-            };
+            let (mut runs, mut starts) = (Vec::new(), Vec::new());
             for (c, cell) in cells.iter().enumerate().take(columns) {
                 let Some(&(a, b)) = lines.get(c).and_then(|l| l.get(line)) else {
                     continue;
@@ -1030,7 +1027,8 @@ unsafe fn layout_table(
                     if from >= to {
                         continue;
                     }
-                    out.runs.push(Run {
+                    starts.push(cell_starts[c] + from);
+                    runs.push(Run {
                         text: cell.units[from..to].to_vec(),
                         x: origin + at(from),
                         width: at(to) - at(from),
@@ -1047,7 +1045,31 @@ unsafe fn layout_table(
                     });
                 }
             }
-            rows.push(out);
+            rows.push(Row {
+                start: block.start,
+                end: block.end,
+                runs,
+                height: band + if first { pad_y } else { 0 } + if last { pad_y } else { 0 },
+                kind: Kind::Table,
+                unit: 0,
+                table: Some(TableLine {
+                    edges: edges.clone(),
+                    header: row.header,
+                    first,
+                    close: last && r + 1 == table.len(),
+                    stripe,
+                    copy: copy.clone(),
+                    text: text.clone(),
+                    cells: cell_starts.clone(),
+                    starts,
+                }),
+                baseline: inset + baseline(band, base_metrics),
+                first,
+                last,
+                indent: 0,
+                bar: None,
+                boxed: false,
+            });
         }
     }
     right

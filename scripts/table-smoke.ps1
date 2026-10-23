@@ -128,6 +128,8 @@ function Row([int]$index) {
  if ($r.Y -lt 0) { throw "Layout row $index is not on screen" }
  return $r
 }
+# Client x of the boundary before $unit of layout row $row (preview, query 91).
+function UnitX([int]$row, [int]$unit) { return [int](Query 91 (($unit -shl 16) -bor $row)) }
 function PointerDown([int]$x, [int]$y, [int]$keys = 1) { Send 0x201 $keys ([TableSmoke]::Point($x, $y)) }
 function PointerMove([int]$x, [int]$y) { Send 0x200 1 ([TableSmoke]::Point($x, $y)) }
 function PointerUp([int]$x, [int]$y) { Send 0x202 0 ([TableSmoke]::Point($x, $y)) }
@@ -214,6 +216,37 @@ try {
  if (-not $copied.Contains('表格之后的正文。')) { throw 'Copied text lost the paragraph after the table' }
  Send 0x100 0x1b ([IntPtr]::Zero)
  Resize (Scale 1080) (Scale 820)
+ Capture
+ # Table cells select by character: inside one cell, from one cell into the next
+ # (a tab), into the next row (CRLF), and a double-click takes one cell's word.
+ # Header units: 快捷键 0-3, tab, 功能 4-6, tab, 说明 7-9.
+ $headRow = Query 64 0
+ $head = Row $headRow
+ if ((Query 61 ($headRow + 1)) -lt 0) { throw 'The first table body row is not on screen' }
+ PointerDown (UnitX $headRow 1) $head.Y; PointerMove (UnitX $headRow 3) $head.Y; PointerUp (UnitX $headRow 3) $head.Y
+ if ((Copied) -cne '捷键') { throw "Drag inside a table cell copied '$(Copied)'" }
+ # From the cell's padding (10 px) into its text; the old whole-row hit test put both
+ # ends in the row's left half and selected nothing.
+ PointerDown ($head.Left - (Scale 6)) $head.Y; PointerMove (UnitX $headRow 2) $head.Y; PointerUp (UnitX $headRow 2) $head.Y
+ if ((Copied) -cne '快捷') { throw "Drag from a cell's padding copied '$(Copied)'" }
+ PointerDown (UnitX $headRow 1) $head.Y; PointerMove (UnitX $headRow 5) $head.Y; PointerUp (UnitX $headRow 5) $head.Y
+ if ((Copied) -cne "捷键`t功") { throw "Drag across table cells copied '$(Copied)'" }
+ Capture ('table-selection' + $suffix)
+ $bodyY = (Row ($headRow + 1)).Y
+ PointerDown (UnitX $headRow 7) $head.Y; PointerMove (UnitX ($headRow + 1) 4) $bodyY; PointerUp (UnitX ($headRow + 1) 4) $bodyY
+ if ((Copied) -cne "说明`r`nCtrl") { throw "Drag across table rows copied '$(Copied)'" }
+ Capture ('table-selection-rows' + $suffix)
+ $x = [int](((UnitX $headRow 4) + (UnitX $headRow 5)) / 2)
+ PointerDown $x $head.Y; PointerUp $x $head.Y
+ Send 0x203 1 ([TableSmoke]::Point($x, $head.Y)); PointerUp $x $head.Y
+ if ((Copied) -cne '功能') { throw "Double-click in a table cell selected '$(Copied)'" }
+ # A phrase inside a long body cell (units 10-20 sit on its first visual line at any
+ # tested width); Copy updates the status line the capture shows.
+ PointerDown (UnitX ($headRow + 1) 10) $bodyY; PointerMove (UnitX ($headRow + 1) 20) $bodyY; PointerUp (UnitX ($headRow + 1) 20) $bodyY
+ if ((Copied) -cne '在整份文档中后台查找') { throw "Drag inside a long table cell copied '$(Copied)'" }
+ Send 0x111 105 ([IntPtr]::Zero)
+ Capture ('table-selection-cell' + $suffix)
+ Send 0x100 0x1b ([IntPtr]::Zero)
  $tableGdi = StableGdi
  StopReader
 
@@ -280,7 +313,6 @@ try {
  # positions come from the reader: query 91 is the x of a unit boundary).
  StartReader $source "theme=$Theme`nfont_size=18`nwrap=true`n"
  Capture
- function UnitX([int]$row, [int]$unit) { return [int](Query 91 (($unit -shl 16) -bor $row)) }
  PointerDown (UnitX 0 6) (Row 0).Y
  PointerMove (UnitX 1 3) (Row 1).Y
  PointerMove (UnitX 2 4) (Row 2).Y
@@ -375,13 +407,14 @@ try {
   tables = 2; reading_width = $body; fit_table_right = $fitRight; wide_table_right = $wideRight
   fit_table_lines = $wideLines; narrow_reading_width = $narrowBody; narrow_table_lines = $narrowLines
   wide_table_scrolls_alone = $true; unwrapped_tables_natural_width = $true; table_copy_tab_separated = $true
+  table_cell_drag = $true; table_cell_padding_drag = $true; table_cells_tab = $true; table_rows_crlf = $true; table_cell_double_click = $true; table_long_cell_drag = $true
   source_drag_exact = $true; source_double_click_word = $true; source_shift_click_cjk_emoji = $true
   source_select_all_and_esc = $true; source_drag_autoscroll_rows = $scrolled; source_autoscroll_copied_lines = $copiedLines.Count
   copy_boxes = 5; copy_fenced_without_fences = $true; copy_indented_dedented = $true; copy_quote_as_shown = $true
   copy_table_tab_separated = $true; copy_button_sticky_top = $true; copy_long_block_lines = $copiedLong.Count
   copy_check_mark_clears = $true; copy_gdi_before = $copyGdiBefore; copy_gdi_after = $copyGdiAfter
   table_gdi = $tableGdi; gdi_before = $gdiBefore; gdi_after = $gdiAfter
-  screenshots = @("table-wide$suffix.png", "table-scrolled$suffix.png", "table-narrow$suffix.png", "copy-hover$suffix.png", "copy-done$suffix.png", "copy-table$suffix.png", "source-selection$suffix.png")
+  screenshots = @("table-wide$suffix.png", "table-scrolled$suffix.png", "table-narrow$suffix.png", "table-selection$suffix.png", "table-selection-rows$suffix.png", "table-selection-cell$suffix.png", "copy-hover$suffix.png", "copy-done$suffix.png", "copy-table$suffix.png", "source-selection$suffix.png")
   limitations = 'Hidden window with synthetic mouse messages; real pointer input and the system clipboard are not exercised (Copy is read through the test seam).'
   exe_bytes = (Get-Item -LiteralPath $Exe).Length
  }
