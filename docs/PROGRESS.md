@@ -1,5 +1,14 @@
 # Progress / continuation notes
 
+## v0.1.11 publication record — 2026-10-24
+
+- 用户：“跑吧，不用改了，跑完了没问题直接提交发布”。已发布并设为 Latest：https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.11 （2026-10-24T00:08:31Z，北京时间 08:08），标题“FeatherMD 羽读 v0.1.11 · 表格文字按字符选择”，非草稿、非预发布；说明见 `dist/RELEASE-v0.1.11.md`。
+- 源代码 **75df2753dac7ba5f0bf6ef7522b13083304f7c2e**，annotated tag v0.1.11 指向它。main CI **40042221544** 与 tag CI **40042932590** 均在 Windows / Ubuntu 一次通过：Windows 上 111 / 113 项测试、17 项 Python 打包测试和全部 19 项原生回归（96 DPI，1024×720；table-smoke 浅 / 深的新表格选择段含长单元格拖选均为 true）。推送与标签推送都直接成功，没有强推。
+- 附件：FeatherMD.exe **1,121,280** 字节，SHA-256 **f9321154da4aaa05a0edb9ba2c462ac6ee5c4a3ff62cb745be4044f5388b149d**；FeatherMD-0.1.11-windows-x64.zip **2,631,084** 字节，SHA-256 **b7aee6db302c0e9873fea2c08d58f7b412e2bd94e5f85d5f8c22ef7f103f2c48**；SHA256SUMS.txt **181** 字节，SHA-256 **0eb8807cbb1a7b594d2c87159fe60302ebeae3c959941f4f7309c0b578d092e3**。三个附件重新下载后逐字节与本地交付一致，与 GitHub asset digest 和校验清单相符。EXE 版本 0.1.11，与按提交树 `--locked` 重新构建的 target/release 相同。
+- ZIP 共 49 个文件：44 个与标签源码逐字节相同，四份 README 仅 CRLF / LF 不同（与 v0.1.10 相同），新增 `docs/table-selection.png` 与 `docs/PRIVACY.md`。说明中的图片地址 v0.1.11/docs/table-selection.png 返回 HTTP 200，与标签中的文件相同。releases/latest 返回 v0.1.11；v0.1.10 三个附件的 digest 未变。
+- 交付 EXE 在副屏（`-SecondaryMonitor`，120 DPI）上 table-smoke 浅色 / 深色各一次 PASS，各 5 个测试进程、0 违规；深色实图同样检查了选区、横线与行内代码。证据在被忽略的 `test-artifacts/table-cells/final-light`、`final-dark`。实网 GUI 更新检查未运行（未获窗口测试以外的许可）；改用临时示例以发布的解析代码读取实际 latest 响应：v0.1.11、发布日期 2026-10-24，比 0.1.10 新、不比 0.1.11 新，示例已删除。
+- 本地交付：**dist/release-0.1.11/**。正在运行的旧版 `dist/FeatherMD.exe` 与旧包未改动。遗留：About 截图仍显示 v0.1.10、`settings-update.png` 未含“隐私说明…”，需另行获准运行 about / settings smoke 后重新生成。Store 提交的 1.0.10.0 候选不含此版修改；本轮未查看 Partner Center。
+
 ## 2026-10-24 — v0.1.11 release candidate: table cells select by character
 
 - 用户反馈：“表格里的文字，我都不能复制啊……选中文字什么的”。根因：v0.1.9 的预览选择把表格一行当作一个整体，命中只分左半 / 右半两个位置，在同一单元格里拖选两端落在同一半，选区为空；跨过中线则整行高亮、复制整行。

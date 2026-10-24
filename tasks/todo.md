@@ -11,7 +11,7 @@
 - [x] fmt、两种配置 strict Clippy、111 / 113 项测试（含内存 DC 真实排版测试）、release 与测试替身构建；四语 README、CHANGELOG、ARCHITECTURE、PROGRESS。
 - [x] 用户许可后在副屏运行 table-smoke（浅色，开发构建与 0.1.11 候选各一次 PASS，0 违规）；实图检查选区、横线与行内代码；新增 docs/table-selection.png。
 - [x] 版本 0.1.11；CHANGELOG 收录 v0.1.10 之后 main 上的隐私说明与更新页措辞更正；README 体积与联网说明更正。
-- [ ] 用户要求“直接提交发布”：提交并推送 main，等 CI 通过后打标签发布 v0.1.11，重新下载核对哈希。
+- [x] 用户要求“直接提交发布”：提交 75df275 推送 main，main / tag CI（40042221544 / 40042932590）通过后发布 [v0.1.11](https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.11)；三个附件重新下载后哈希一致。
 - [ ] 后续：About 截图仍显示 v0.1.10、settings-update.png 未含“隐私说明…”，需另行获准运行 about / settings smoke 后重新生成；Store 提交的 1.0.10.0 候选不含此修改。
 
 ## Microsoft Store 适配（2026-10-17，未发布）
