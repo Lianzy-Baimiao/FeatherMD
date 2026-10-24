@@ -1,15 +1,14 @@
 # Microsoft Store build and submission
 
-Status (2026-10-18): Submission 1 (`1152921505702158375`) was formally submitted
-after action-time user confirmation. Partner Center shows **In certification**:
-submission complete, preprocessing in progress, certification and publishing not
-yet started. The frozen 1.0.10.0 MSIX, global free availability, four localized
-listings and saved IARC 10.3 ratings are included. The page confirms manual
-publication hold: publishing starts only when Publish now is selected. This is
-accepted submission, not certification approval or a live Store release. Do not
-cancel or resubmit merely to update documentation. Do not reuse LiteView's identity
-or ratings. Existing v0.1.10 portable releases remain unchanged. See PROGRESS.md
-for exact evidence and limitations.
+Status (2026-10-24): Submission 1 (`1152921505702158375`, the frozen 1.0.10.0
+MSIX) passed certification and is published. The public display catalog lists
+`ice.FeatherMD_1.0.10.0_x64__rz8m2sa64m4em`, free, publisher 白描ice, released
+2026-10-20 02:58 UTC; the Store page answers HTTP 200. The publication step itself
+was not recorded by this tooling; the catalog is the evidence. The next package is
+**1.0.11.0** (Cargo 0.1.11: table cells select by character), built and validated
+by the disposable workflows below and uploaded as a new submission. Never reuse an
+uploaded version. Do not reuse LiteView's identity or ratings. See PROGRESS.md for
+exact evidence and limitations.
 
 ## Build
 
@@ -66,16 +65,17 @@ The packer verifies syntax and the explicit attestation, **not the account itsel
 The Store signs accepted packages for distribution. GitHub portable EXEs remain
 unsigned unless separately signed with a trusted code-signing service/certificate.
 
-Keep Cargo/UI version 0.1.10 for this adaptation. Initial proposed MSIX version is
-1.0.10.0; increment the third component for each replacement candidate/upload,
-independent of Cargo's version. Components are <=65535, the first is nonzero and
-the fourth stays 0. Never overwrite/reuse an uploaded version.
+MSIX versions: 1.0.10.0 was the first upload (Cargo 0.1.10); 1.0.11.0 carries
+Cargo 0.1.11. Increment the third component for each new candidate/upload,
+independent of Cargo's version: a replacement candidate for the same Cargo version
+still takes the next number. Components are <=65535, the first is nonzero and the
+fourth stays 0. Never overwrite/reuse an uploaded version.
 
 ## Listing draft
 
 Name: **FeatherMD**, reserved with user confirmation on 2026-10-17.
 Store ID: `9MW2CTPBSGX7`; package name: `ice.FeatherMD`.
-The Partner Center product is in certification; it is not yet published.
+The product is published (1.0.10.0 since 2026-10-20).
 Selected category: Productivity. Supported languages: Simplified/Traditional
 Chinese, English, Japanese.
 Architecture: x64. Package minimum: Windows 10 build 19041. This is a manifest
@@ -164,12 +164,12 @@ runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
 
 ## Remaining release gates
 
-- Wait for Microsoft's actual certification result. At acceptance the status page
-  showed preprocessing in progress and certification not yet started. Do not
-  describe this as approved or live, cancel it, or submit another copy.
-- If approved, obtain action-time user confirmation before manual publication.
-  If rejected, read the actual report before changing the frozen candidate.
-  Do not repeat completed IARC/age/data-sharing consent.
+- 1.0.10.0 passed certification and is live. For 1.0.11.0, upload the frozen
+  candidate as a new submission and update "What's new"; keep the listing, pricing,
+  markets and age rating unless the owner asks otherwise. Confirm the publication
+  timing with the owner when the submission is made. If certification rejects it,
+  read the actual report before changing the frozen candidate. Do not repeat
+  completed IARC/age/data-sharing consent.
 - Third-party support is declared. Its public page describes support for creative
   work, with no observed FeatherMD feature unlock. Actual payment security and
   transaction terms have not been audited; do not claim verified compliance.
@@ -178,7 +178,10 @@ runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
 - Verify final Store listing, age rating, target markets and delivered package
   after approval/publication. Submission evidence is in
   `test-artifacts/feathermd-submitted-20261018.txt` and the matching `.jpg`.
-- Recheck policies for any later resubmission (7.20 takes effect 2026-10-22).
+- Policies were rechecked on 2026-10-24 for 1.0.11.0: version 7.20 (published
+  2026-09-15, in effect from 2026-10-22) changes XBOX branding and game rules,
+  age-rating accuracy (11.11) and game-mod UGC moderation (11.12). Nothing new
+  applies to this update, and the content behind the age rating is unchanged.
 - No automatic publication or new monitoring task was configured.
 
 ## Testing without interrupting the desktop
