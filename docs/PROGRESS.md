@@ -1,5 +1,12 @@
 # Progress / continuation notes
 
+## v0.1.12 publication record and Store 1.0.12.0 candidate — 2026-10-24
+
+- GitHub：已发布并设为 Latest：https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.12 （2026-10-24T01:19:49Z），标题“FeatherMD 羽读 v0.1.12 · 设置页隐私按钮间距”，非草稿、非预发布；说明见 `dist/RELEASE-v0.1.12.md`。源代码 **6fe4f38538ba33b209713f10ad8317f6adab4021**，annotated tag v0.1.12 指向它。main CI **40048137266** 与 tag CI **40048749172** 在 Windows / Ubuntu 均通过（Windows：112 / 114 项测试、19 项原生回归）。推送 main 与标签各遇一次 GitHub 443 连接超时，重试成功，未改目标、未强推。
+- 附件：FeatherMD.exe **1,121,792** 字节，SHA-256 **0eee742fa06152b2a78fb5525b7f69fee62aefe15a5ab76809461b9d7c93dcfd**；FeatherMD-0.1.12-windows-x64.zip **2,632,254** 字节，SHA-256 **18784abe5cb31f59cb6cb73b4c2f65db7eb0d2fdd14b47cf3ca1037faf4cc0f3**；SHA256SUMS.txt **181** 字节，SHA-256 **0c7b3a5b51d0b0bb3c1956e3bfdc51ba385db6b95cd881a9c147a463282b89b4**。重新下载后三者与本地交付逐字节一致，校验清单通过；ZIP 49 个文件中 44 个与标签逐字节相同，四份 README 仅 CRLF / LF 不同。releases/latest 返回 v0.1.12；说明图片 v0.1.12/docs/settings-update.png HTTP 200 且与标签相同；v0.1.11 附件 digest 未变。交付 EXE 在副屏上 update 浅 / 深与 i18n 各一次 PASS、0 违规。本地交付 `dist/release-0.1.12/`。
+- 商店候选：正式身份 WACK **40048542912**（源代码 6fe4f38，Windows Server 2025 26100，WACK 10.0.26100.9457）退出 0、总体 PASS，**13 必选通过、10 可选通过、1 可选 Blocked executables 失败**（ShellExecuteW/ExW 与 REG 文本，与 1.0.10.0 相同，审核说明已有解释）。生命周期 **40048545728**（测试身份的安装、四扩展名打开方式、升级、卸载）通过。冻结 `dist/store-1.0.12.0-candidate/FeatherMD-1.0.12.0-x64.msix`，**552,862** 字节，SHA-256 **9c4eb44c631a0785628b405675449099ecaec6bd2622333ce5138d134a384ed1**，身份 ice.FeatherMD、非测试身份、商店通道标记在内；包内 EXE 1,086,464 字节，SHA-256 31b31ef6df0b53201927d5b1e5ff72cd122709f7b7ff1db55fe9ed103987bdda。报告原件在被忽略的 `test-artifacts/cloud-wack-40048542912/`。
+- Partner Center：本会话没有可用的浏览器工具；用专用的 Playwright Edge 配置（`%LOCALAPPDATA%\FeatherMD-PartnerCenter-Automation`，不是用户自己的浏览器配置，也未读取其他应用的会话）无头打开产品页，被 Partner Center 的 Akamai 返回 Access Denied。没有读取或复制用户 Edge / 其他应用的 Cookie。上传与提交待在同一专用配置中由用户登录一次后继续，结果另记。
+
 ## 2026-10-24 — v0.1.12 release candidate: privacy button spacing, Store 1.0.12.0
 
 - 用户：“都更新，商店也更新”。按此在副屏重新生成截图时发现：设置 → 更新页的“隐私说明…”按钮上贴隐私卡片、下贴页脚横线（像素测量 0 px 间距），四种语言与商店版（线上 1.0.10.0 同样）都有；商店版两行说明之间还有一段空白。v0.1.11 / Store 1.0.10.0 均已带此问题发布。询问后用户选择“发 v0.1.12（推荐）”，商店上传与提交选择“你全权操作，不用和我确认”。
