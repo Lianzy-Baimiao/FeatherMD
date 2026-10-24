@@ -42,7 +42,7 @@ The other screenshots in this README show the Simplified Chinese interface; ever
 
 Opening a Markdown file should not start a browser first.
 
-FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.11 Windows x64 EXE is about **1.07 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
+FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.12 Windows x64 EXE is about **1.07 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
 
 **Large files are not loaded whole before they show.** Only the nearby 128 KiB is read at a time; reading and searching run in the background and only visible lines are drawn. The file's total size does not decide how much memory the first page needs.
 

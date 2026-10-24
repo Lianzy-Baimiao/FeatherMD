@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.12 — 2026-10-24
+
+### Fixed
+- Settings → Updates: the "Privacy notice…" button no longer touches the privacy card above it or the rule above the footer buttons; the card fits its lines, with 8 px around the button. In the Store edition the two notes no longer leave a gap between them.
+
+### Tests
+- A unit test keeps the privacy card below the last-check line, its text inside it and the button clear of both the card and the footer rule, for both editions.
+
 ## 0.1.11 — 2026-10-24
 
 ### Added

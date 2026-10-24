@@ -42,7 +42,7 @@
 
 開啟一份 Markdown，不應該先啟動一個瀏覽器。
 
-FeatherMD 使用 Win32 + GDI/GDI+，沒有 Electron、WebView、JavaScript 或遙測，預設不連網；更新檢查只在主動開啟或手動檢查時存取 GitHub Releases；網路圖片只有逐張點選並確認後才下載。v0.1.11 的 Windows x64 EXE 約 **1.07 MiB**（含四種介面語言、程式碼醒目提示與本機圖片解碼），無須安裝 .NET、VC++ 執行階段或其他第三方執行環境。
+FeatherMD 使用 Win32 + GDI/GDI+，沒有 Electron、WebView、JavaScript 或遙測，預設不連網；更新檢查只在主動開啟或手動檢查時存取 GitHub Releases；網路圖片只有逐張點選並確認後才下載。v0.1.12 的 Windows x64 EXE 約 **1.07 MiB**（含四種介面語言、程式碼醒目提示與本機圖片解碼），無須安裝 .NET、VC++ 執行階段或其他第三方執行環境。
 
 **大檔案不是先全部載入再顯示：** 每次只讀取附近 128 KiB，在背景讀取與搜尋，前景只繪製可見的行。檔案總長度不決定第一頁需要配置的記憶體。
 

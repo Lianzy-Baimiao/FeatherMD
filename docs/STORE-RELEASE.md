@@ -5,8 +5,11 @@ MSIX) passed certification and is published. The public display catalog lists
 `ice.FeatherMD_1.0.10.0_x64__rz8m2sa64m4em`, free, publisher 白描ice, released
 2026-10-20 02:58 UTC; the Store page answers HTTP 200. The publication step itself
 was not recorded by this tooling; the catalog is the evidence. The next package is
-**1.0.11.0** (Cargo 0.1.11: table cells select by character), built and validated
-by the disposable workflows below and uploaded as a new submission. Never reuse an
+**1.0.12.0** (Cargo 0.1.12: table cells select by character from 0.1.11, and the
+Updates-page privacy button no longer touching the card and footer rule), built and
+validated by the disposable workflows below and uploaded as a new submission. A
+1.0.11.0 candidate passed WACK (run 40044912773) and lifecycle (run 40044915701) but
+was never uploaded, because the button layout defect was found first. Never reuse an
 uploaded version. Do not reuse LiteView's identity or ratings. See PROGRESS.md for
 exact evidence and limitations.
 
@@ -65,8 +68,8 @@ The packer verifies syntax and the explicit attestation, **not the account itsel
 The Store signs accepted packages for distribution. GitHub portable EXEs remain
 unsigned unless separately signed with a trusted code-signing service/certificate.
 
-MSIX versions: 1.0.10.0 was the first upload (Cargo 0.1.10); 1.0.11.0 carries
-Cargo 0.1.11. Increment the third component for each new candidate/upload,
+MSIX versions: 1.0.10.0 was the first upload (Cargo 0.1.10); 1.0.12.0 carries
+Cargo 0.1.12 (1.0.11.0 was built but never uploaded). Increment the third component for each new candidate/upload,
 independent of Cargo's version: a replacement candidate for the same Cargo version
 still takes the next number. Components are <=65535, the first is nonzero and the
 fourth stays 0. Never overwrite/reuse an uploaded version.
@@ -164,7 +167,7 @@ runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
 
 ## Remaining release gates
 
-- 1.0.10.0 passed certification and is live. For 1.0.11.0, upload the frozen
+- 1.0.10.0 passed certification and is live. For 1.0.12.0, upload the frozen
   candidate as a new submission and update "What's new"; keep the listing, pricing,
   markets and age rating unless the owner asks otherwise. Confirm the publication
   timing with the owner when the submission is made. If certification rejects it,
@@ -178,7 +181,7 @@ runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
 - Verify final Store listing, age rating, target markets and delivered package
   after approval/publication. Submission evidence is in
   `test-artifacts/feathermd-submitted-20261018.txt` and the matching `.jpg`.
-- Policies were rechecked on 2026-10-24 for 1.0.11.0: version 7.20 (published
+- Policies were rechecked on 2026-10-24 for this update: version 7.20 (published
   2026-09-15, in effect from 2026-10-22) changes XBOX branding and game rules,
   age-rating accuracy (11.11) and game-mod UGC moderation (11.12). Nothing new
   applies to this update, and the content behind the age rating is unchanged.

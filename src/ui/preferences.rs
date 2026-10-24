@@ -55,6 +55,34 @@ const HEIGHT: i32 = 552;
 const NAV_WIDTH: i32 = 184;
 /// Content column origin.
 const X0: i32 = 212;
+/// The rule above the footer buttons.
+const FOOTER_RULE: i32 = 484;
+/// Updates page: the privacy card starts here, below the last-check line (which ends
+/// at 312), and the privacy notice button follows it with this gap above (and at
+/// least as much below, before the footer rule).
+const PRIVACY_TOP: i32 = 322;
+const PRIVACY_GAP: i32 = 8;
+/// Top and height of the privacy card holding a title and `lines` notes: 10 px
+/// padding, a 24 px title, 22 px notes 24 px apart from 4 px below it, 8 px below
+/// the last.
+const fn privacy_card(lines: i32) -> (i32, i32) {
+    (PRIVACY_TOP, 10 + 24 + 4 + (lines - 1) * 24 + 22 + 8)
+}
+/// The notes in this edition's privacy card on the Updates page.
+fn privacy_notes() -> Vec<&'static str> {
+    if distribution::store() {
+        vec![
+            tr("不会检查 GitHub 版本，也不会下载绿色版替换此安装。"),
+            tr("网络图片仍需逐张确认；不会上传文档或设置。"),
+        ]
+    } else {
+        vec![
+            tr("只向 api.github.com 请求公开的最新版本信息，不上传文档或设置。"),
+            tr("不会自动下载或安装；前往下载页前会再次确认。"),
+            tr("检查更新与网络图片分开控制；网络图片始终需要逐张确认。"),
+        ]
+    }
+}
 const PAGES: [(&str, usize); 5] = [
     (key!("外观(&A)"), smooth::PALETTE),
     (key!("阅读(&R)"), smooth::BOOK),
@@ -458,24 +486,6 @@ impl Prefs {
                 (page, [X0, 200, 480, 22]),
                 NOTE,
             );
-            self.label(
-                tr("隐私与安全"),
-                1245,
-                (page, [X0 + 20, 338, 440, 24]),
-                Look(14, true, Tone::Info),
-            );
-            self.label(
-                tr("不会检查 GitHub 版本，也不会下载绿色版替换此安装。"),
-                1246,
-                (page, [X0 + 20, 368, 440, 40]),
-                Look(13, false, Tone::InfoMuted),
-            );
-            self.label(
-                tr("网络图片仍需逐张确认；不会上传文档或设置。"),
-                1247,
-                (page, [X0 + 20, 410, 440, 40]),
-                Look(13, false, Tone::InfoMuted),
-            );
         } else {
             // Updates.
             let page = Some(3);
@@ -537,29 +547,30 @@ impl Prefs {
                 (page, [X0, 292, 480, 20]),
                 Look(12, false, Tone::Muted),
             );
-            self.label(
-                tr("隐私与安全"),
-                1245,
-                (page, [X0 + 20, 338, 440, 24]),
-                Look(14, true, Tone::Info),
-            );
-            for (i, text) in [
-                tr("只向 api.github.com 请求公开的最新版本信息，不上传文档或设置。"),
-                tr("不会自动下载或安装；前往下载页前会再次确认。"),
-                tr("检查更新与网络图片分开控制；网络图片始终需要逐张确认。"),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                self.label(
-                    text,
-                    1246 + i,
-                    (page, [X0 + 20, 368 + i as i32 * 26, 440, 22]),
-                    Look(13, false, Tone::InfoMuted),
-                );
-            }
         }
-        self.button(tr("隐私说明…"), PRIVACY, (Some(3), [X0, 454, 220, 30]));
+        // Both editions: the privacy card, then the full notice below it.
+        let page = Some(3);
+        let notes = privacy_notes();
+        let (top, height) = privacy_card(notes.len() as i32);
+        self.label(
+            tr("隐私与安全"),
+            1245,
+            (page, [X0 + 20, top + 10, 440, 24]),
+            Look(14, true, Tone::Info),
+        );
+        for (i, text) in notes.into_iter().enumerate() {
+            self.label(
+                text,
+                1246 + i,
+                (page, [X0 + 20, top + 38 + i as i32 * 24, 440, 22]),
+                Look(13, false, Tone::InfoMuted),
+            );
+        }
+        self.button(
+            tr("隐私说明…"),
+            PRIVACY,
+            (page, [X0, top + height + PRIVACY_GAP, 220, 30]),
+        );
 
         // Interface language.
         let page = Some(4);
@@ -1076,7 +1087,7 @@ impl Prefs {
             },
             p.edge,
         );
-        Self::fill(dc, &self.rect(X0, 484, WIDTH - X0 - 28, 1), p.edge);
+        Self::fill(dc, &self.rect(X0, FOOTER_RULE, WIDTH - X0 - 28, 1), p.edge);
         match self.page {
             1 => {
                 chrome::chrome_round(dc, self.rect(X0, 196, 480, 100), p.panel, self.s(14));
@@ -1106,7 +1117,10 @@ impl Prefs {
                 }
             }
             2 => chrome::chrome_round(dc, self.rect(X0, 222, 480, 140), p.code, self.s(12)),
-            3 => chrome::chrome_round(dc, self.rect(X0, 326, 480, 128), p.code, self.s(12)),
+            3 => {
+                let (top, height) = privacy_card(privacy_notes().len() as i32);
+                chrome::chrome_round(dc, self.rect(X0, top, 480, height), p.code, self.s(12));
+            }
             4 => chrome::chrome_round(dc, self.rect(X0, 182, 480, 132), p.code, self.s(12)),
             _ => {}
         }
@@ -2156,5 +2170,27 @@ mod tests {
         }
         assert_eq!(std::mem::offset_of!(EmptyDialog, menu), 18);
         assert_eq!(PAGES.len(), NAV.len());
+    }
+    #[test]
+    fn privacy_notice_button_clears_its_card_and_the_footer_rule() {
+        // Store edition: two notes; portable: three. v0.1.11 had the button touch
+        // both the card and the rule.
+        for lines in [2, 3] {
+            let (top, height) = privacy_card(lines);
+            assert!(
+                top >= 312 + PRIVACY_GAP,
+                "{lines} notes: card under the last-check line"
+            );
+            let last_note = top + 38 + (lines - 1) * 24 + 22;
+            assert!(
+                last_note <= top + height,
+                "{lines} notes: text inside the card"
+            );
+            let button = top + height + PRIVACY_GAP;
+            assert!(
+                button + 30 + PRIVACY_GAP <= FOOTER_RULE,
+                "{lines} notes: button above the rule"
+            );
+        }
     }
 }

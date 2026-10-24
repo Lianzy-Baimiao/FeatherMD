@@ -1,4 +1,4 @@
-param([string]$Version = "0.1.11", [string]$Output = "")
+param([string]$Version = "0.1.12", [string]$Output = "")
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot
 $dist=if($Output){[IO.Path]::GetFullPath($Output)}else{Join-Path $root 'dist'}
