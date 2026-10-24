@@ -1,5 +1,12 @@
 # Progress / continuation notes
 
+## 2026-10-24 — Store Submission 2 (1.0.12.0) submitted for certification
+
+- 用户：“你全权操作，不用和我确认”。本会话没有浏览器工具；无头 Playwright 被 Partner Center 的 Akamai 拒绝（Access Denied）。改为另起一个 Edge 实例：专用用户数据目录 `%LOCALAPPDATA%\FeatherMD-PartnerCenter`、仅本机 DevTools 端口、窗口在副屏。Edge 用 Windows 账户自动登录 Microsoft 帐户并开启同步，拉入了用户的扩展（自动打开扩展欢迎页）。没有读取或复制用户自己的 Edge 或其他应用的 Cookie / 密码，也没有在该配置里改扩展、收藏或设置（避免同步回其他设备）。用 Playwright 经 CDP 逐步操作，每步截图与无障碍树核对。
+- 从概述“开始更新”创建 **Submission 2（1152921505702218732）**，各部分复制自 Submission 1。**包**：上传冻结的 `FeatherMD-1.0.12.0-x64.msix`（SHA-256 9c4eb44c…），显示 Validated，只有 runFullTrust 受限功能提示（与 1.0.10.0 相同）；保存后 1.0.10.0 因有覆盖同一客户群的更高版本而移除。**Store 一览**：四种语言的“此版本的新增功能”（表格按字符选择、隐私按钮间距）已填写，重新打开逐一核对；说明、截图、功能列表、简短描述未改。**提交选项**：发布暂缓改为“在此提交通过认证后立即予以发布”，重新打开确认；runFullTrust 说明未改。**其他测试信息**：认证说明中的 WACK / 生命周期链接改为 40048542912 / 40048545728，加一句表格选择说明，重新打开逐字节核对（该文本框需用原生 setter 并触发 input / keyup / change / blur，Angular 才登记修改）。定价和可用性、属性、年龄分级未改。
+- 已点击“提交进行认证”：概述显示“正在认证更新”，进度为提交完成、预处理进行中、认证与发布未开始，并注明“产品在通过认证后立即开始发布”，提供“取消认证”。Submission 1（1.0.10.0）仍是商店现有版本。这是已受理，不是审核通过或已上线。证据：`test-artifacts/feathermd-submission2-20261024.png` / `.txt`。
+- 之后关闭专用 Edge 实例（用户自己的 Edge 未受影响），删除专用配置目录。没有设置自动监控；认证结果需之后在 Partner Center 或邮件中查看。
+
 ## v0.1.12 publication record and Store 1.0.12.0 candidate — 2026-10-24
 
 - GitHub：已发布并设为 Latest：https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.12 （2026-10-24T01:19:49Z），标题“FeatherMD 羽读 v0.1.12 · 设置页隐私按钮间距”，非草稿、非预发布；说明见 `dist/RELEASE-v0.1.12.md`。源代码 **6fe4f38538ba33b209713f10ad8317f6adab4021**，annotated tag v0.1.12 指向它。main CI **40048137266** 与 tag CI **40048749172** 在 Windows / Ubuntu 均通过（Windows：112 / 114 项测试、19 项原生回归）。推送 main 与标签各遇一次 GitHub 443 连接超时，重试成功，未改目标、未强推。

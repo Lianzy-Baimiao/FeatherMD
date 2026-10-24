@@ -4,7 +4,10 @@ Status (2026-10-24): Submission 1 (`1152921505702158375`, the frozen 1.0.10.0
 MSIX) passed certification and is published. The public display catalog lists
 `ice.FeatherMD_1.0.10.0_x64__rz8m2sa64m4em`, free, publisher 白描ice, released
 2026-10-20 02:58 UTC; the Store page answers HTTP 200. The publication step itself
-was not recorded by this tooling; the catalog is the evidence. The next package is
+was not recorded by this tooling; the catalog is the evidence. **Submission 2**
+(`1152921505702218732`) with the frozen 1.0.12.0 MSIX was submitted for
+certification on 2026-10-24 and publishes automatically when it passes (the owner
+gave full authority for this update); it was accepted, not yet certified. The package is
 **1.0.12.0** (Cargo 0.1.12: table cells select by character from 0.1.11, and the
 Updates-page privacy button no longer touching the card and footer rule), built and
 validated by the disposable workflows below and uploaded as a new submission. A
@@ -167,12 +170,16 @@ runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
 
 ## Remaining release gates
 
-- 1.0.10.0 passed certification and is live. For 1.0.12.0, upload the frozen
-  candidate as a new submission and update "What's new"; keep the listing, pricing,
-  markets and age rating unless the owner asks otherwise. Confirm the publication
-  timing with the owner when the submission is made. If certification rejects it,
-  read the actual report before changing the frozen candidate. Do not repeat
-  completed IARC/age/data-sharing consent.
+- 1.0.10.0 passed certification and is live. 1.0.12.0 is in certification as
+  Submission 2 with "What's new" in all four listings and automatic publication;
+  listing, pricing, markets and age rating are unchanged. Check the actual result.
+  If certification rejects it, read the actual report before changing the frozen
+  candidate; a fix needs a new version number. Do not repeat completed
+  IARC/age/data-sharing consent.
+- Partner Center from this machine: headless browsers get Akamai "Access Denied".
+  A separate Edge instance with its own user-data folder signs in through the
+  Windows account; drive it over a local DevTools port. Its sync pulls the owner's
+  extensions, so change nothing in that profile and delete it afterwards.
 - Third-party support is declared. Its public page describes support for creative
   work, with no observed FeatherMD feature unlock. Actual payment security and
   transaction terms have not been audited; do not claim verified compliance.
