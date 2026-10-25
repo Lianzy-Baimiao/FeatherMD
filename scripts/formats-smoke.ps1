@@ -210,18 +210,24 @@ try {
  StopReader
 
  # A GBK novel: decoded through the system's Chinese code page (GB18030) where that
- # is the legacy page; elsewhere it must still open.
+ # is the legacy page; elsewhere it opens in the system's own page, as in Notepad.
  $acp = [FormatsSmoke]::GetACP()
  StartReader $gbkNovel
  if ((Query 100) -ne 1) { throw 'novel-gbk.txt not read as text' }
- $gbkChapters = 0
+ $gbkEncoding = Query 103
+ $entries = Outline
+ if ((Query 101) -ne 1) { throw "novel-gbk.txt outline kind $(Query 101), not chapters" }
  if ($acp -eq 936) {
-  if ((Query 103) -ne 54936) { throw "GBK novel encoding $(Query 103), not GB18030" }
-  $entries = Outline
+  if ($gbkEncoding -ne 54936) { throw "GBK novel encoding $gbkEncoding, not GB18030" }
   Expect 'GBK novel chapters' $entries @("1`t0`t0`t第一卷 风起", "2`t0`t0`t第一章 少年", "2`t0`t0`t第二章：重逢", "1`t0`t0`t第二卷", "2`t0`t0`t第三章", "2`t0`t0`tChapter 4: The Storm")
   if (-not (Copied).Contains($indent + '他走出了家门')) { throw 'GBK novel did not decode' }
-  $gbkChapters = $entries.Count
+ } else {
+  # The Chinese is garbled there (UTF-8 when that is the system page), but the
+  # outline still finishes and finds the ASCII chapter.
+  if ($gbkEncoding -ne $acp -and $gbkEncoding -ne 0) { throw "GBK novel encoding $gbkEncoding on code page $acp" }
+  if (-not ($entries | Where-Object { $_ -clike "*`tChapter 4: The Storm" })) { throw "GBK novel lost its ASCII chapter: $($entries -join ' | ')" }
  }
+ $gbkChapters = @($entries).Count
  Capture ('formats-gbk' + $suffix)
  StopReader
 
@@ -229,9 +235,9 @@ try {
   result = 'PASS'; theme = $Theme; author = 'lianzy'; dpi = $dpi; system_code_page = $acp
   novel_chapters = 6; novel_numbering_dropped = $true; novel_indent_kept = $true; chapter_seek = $chapter
   log_time_entries = 6; log_errors_per_day = '0,2'; log_range_seek = $range; log_source_keeps_tab = $true
-  txt_sniffed_as_log = $true; build_log_error_lines = 3; gbk_chapters = $gbkChapters
+  txt_sniffed_as_log = $true; build_log_error_lines = 3; gbk_encoding = $gbkEncoding; gbk_chapters = $gbkChapters
   screenshots = @("formats-novel$suffix.png", "formats-log$suffix.png", "formats-log-source$suffix.png", "formats-build$suffix.png", "formats-gbk$suffix.png")
-  limitations = 'Hidden window with synthetic messages; GBK decoding is checked only where the system code page is 936.'
+  limitations = 'Hidden window with synthetic messages; GBK decoding is checked only where the system code page is 936, elsewhere only that the file opens in the system page and its ASCII chapter is found.'
   exe_bytes = (Get-Item -LiteralPath $Exe).Length
  }
  $metrics | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Output 'formats.json') -Encoding utf8
