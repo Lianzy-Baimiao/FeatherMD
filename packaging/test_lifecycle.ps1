@@ -143,7 +143,9 @@ try {
     $exe=Join-Path $app.InstallLocation 'FeatherMD.exe'
     $result.stage='shell-file-activation'
     $activated=@()
-    foreach($ext in @('.md','.markdown','.mdown','.mkd')) {
+    # Both declared groups, and the format each opens as (0 Markdown, 1 text, 2 log).
+    $formats=[ordered]@{'.md'=0;'.markdown'=0;'.mdown'=0;'.mkd'=0;'.txt'=1;'.text'=1;'.log'=2}
+    foreach($ext in $formats.Keys) {
         $file=Join-Path $Output (([string][char]0x9605)+([string][char]0x8bfb)+' spaced file'+$ext)
         [IO.File]::WriteAllText($file,"# Shell activation`n`nUnicode and spaces.`n",[Text.UTF8Encoding]::new($false))
         $before=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
@@ -168,6 +170,7 @@ try {
             }
             if($i -eq 400){throw "File activation did not load $ext"}
             if([PackageActivation]::Query($window,97) -ne 1 -or [PackageActivation]::Query($window,98) -ne 1){throw 'Shell activation lost Store/package identity'}
+            if([PackageActivation]::Query($window,100) -ne $formats[$ext]){throw "Shell-activated $ext opened as format $([PackageActivation]::Query($window,100))"}
             if(-not [PackageActivation]::Title($window).StartsWith([IO.Path]::GetFileName($file))){throw 'Shell activation lost the Unicode file name'}
             $activated+=$ext
         } finally {
