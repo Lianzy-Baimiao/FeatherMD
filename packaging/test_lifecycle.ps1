@@ -125,13 +125,82 @@ $v1=Identity $Package; $v2=Identity $Upgrade
 if($v2 -le $v1){throw 'Upgrade version must increase'}
 $cert=$null; $installed=$false; $cleanupErrors=@()
 $result=[ordered]@{result='FAIL';stage='sign';installed_tested=$false;shell_activation_tested=$false
-    shell_activation_method='IAssocHandler::Invoke (Open With)';shell_handlers=@();wack='not-run';cleanup_errors=@()}
+    shell_activation_method='IAssocHandler::Invoke (Open With); where Windows shows its Select an app picker, FeatherMD + Just once';shell_handlers=@();wack='not-run';cleanup_errors=@()}
 function Sign([string]$inputFile,[string]$name) {
     $copy=Join-Path $private $name
     Copy-Item -LiteralPath $inputFile -Destination $copy
     & $SignTool sign /fd SHA256 /sha1 $cert.Thumbprint /s My $copy | Out-Host
     if($LASTEXITCODE){throw 'Test signing failed'}
     return $copy
+}
+# Each extension's current default (UserChoice ProgId), or 'none'.
+function Defaults([string[]]$extensions) {
+    $found=[ordered]@{}
+    foreach($ext in $extensions){
+        $key="Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext\UserChoice"
+        $found[$ext]=try{[string](Get-ItemProperty -LiteralPath $key -ErrorAction Stop).ProgId}catch{'none'}
+    }
+    return $found
+}
+# An automation subtree as text (type | name | automation id), for failure evidence.
+function Tree($element,[int]$limit=200) {
+    $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $lines=[Collections.Generic.List[string]]::new()
+    $visit={param($node,[int]$depth)
+        if($lines.Count -ge $limit){return}
+        $lines.Add(('  '*$depth)+"$($node.Current.ControlType.ProgrammaticName) | $($node.Current.Name) | $($node.Current.AutomationId)")
+        $child=$walker.GetFirstChild($node)
+        while($child -and $lines.Count -lt $limit){& $visit $child ($depth+1);$child=$walker.GetNextSibling($child)}
+    }
+    & $visit $element 0
+    return ($lines -join "`n")
+}
+# Where a type already has a default app (.txt: Notepad), Windows answers Open With
+# with its own "Select an app" picker listing FeatherMD. Choose FeatherMD and "Just
+# once", as a user would: this opens the file without changing the default (checked
+# afterwards). Returns a note; throws with the picker's tree when it cannot.
+function Pick([Diagnostics.Process]$openWith) {
+    Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+    $root=[System.Windows.Automation.AutomationElement]::RootElement
+    $button=New-Object System.Windows.Automation.AndCondition(
+        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Button)),
+        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'Just once')))
+    $owned=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$openWith.Id)
+    $dialog=$null
+    for($i=0;$i -lt 40 -and -not $dialog;$i++) {
+        if($openWith.HasExited){return 'picker closed before it was found'}
+        $dialog=$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$owned)
+        if(-not $dialog){
+            foreach($top in $root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)){
+                if($top.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$button)){$dialog=$top;break}
+            }
+        }
+        if(-not $dialog){Start-Sleep -Milliseconds 200}
+    }
+    if(-not $dialog){
+        $tops=@(foreach($top in $root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)){"$($top.Current.ProcessId) | $($top.Current.ClassName) | $($top.Current.Name)"})
+        throw "No Open With picker found; top-level elements: $($tops -join '; ')"
+    }
+    $item=$null
+    for($i=0;$i -lt 25 -and -not $item;$i++) {
+        $item=@($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.Name -like 'FeatherMD (Test)*' -and $_.Current.ControlType -ne [System.Windows.Automation.ControlType]::Text } | Select-Object -First 1)
+        if($item.Count -eq 0){$item=$null;Start-Sleep -Milliseconds 200}else{$item=$item[0]}
+    }
+    if(-not $item){throw "FeatherMD is not listed in the Open With picker:`n$(Tree $dialog)"}
+    $pattern=$null
+    if($item.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)){
+        $pattern.Select()
+        $note="selected $($item.Current.ControlType.ProgrammaticName) '$($item.Current.Name)' (selected=$($pattern.Current.IsSelected))"
+    } elseif($item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){
+        $pattern.Invoke()
+        $note="invoked $($item.Current.ControlType.ProgrammaticName) '$($item.Current.Name)'"
+    } else {throw "FeatherMD's picker entry can be neither selected nor invoked:`n$(Tree $dialog)"}
+    Start-Sleep -Milliseconds 300
+    if($openWith.HasExited){return "$note; picker closed"}
+    $once=$dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$button)
+    if(-not $once){throw "No 'Just once' button in the Open With picker:`n$(Tree $dialog)"}
+    $once.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    return "$note; pressed 'Just once'"
 }
 # What followed an activation that did not open the reader: new processes (also
 # late ones), visible windows, AppModel and application events, the extension's
@@ -218,12 +287,16 @@ try {
     # Interleaved, and every extension is tried, so a failure shows whether it
     # follows the extension, its group or the number of activations.
     $formats=[ordered]@{'.md'=0;'.txt'=1;'.markdown'=0;'.log'=2;'.mdown'=0;'.text'=1;'.mkd'=0}
+    $defaults=Defaults @($formats.Keys)
+    $result.defaults=$defaults
+    $result.picker_extensions=@(); $result.picker_notes=[ordered]@{}
     foreach($ext in $formats.Keys) {
         $file=Join-Path $Output (([string][char]0x9605)+([string][char]0x8bfb)+' spaced file'+$ext)
         [IO.File]::WriteAllText($file,"# Shell activation`n`nUnicode and spaces.`n",[Text.UTF8Encoding]::new($false))
         $before=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+        $pickers=@(Get-Process -Name OpenWith -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
         $since=(Get-Date).AddSeconds(-1)
-        $process=$null; $window=[IntPtr]::Zero
+        $process=$null; $window=[IntPtr]::Zero; $picked=$null
         try {
             # Desktop FTAs receive command-line parameters, not a UWP Windows.File event.
             $result.shell_handlers += [PackageActivation]::Open("$family!FeatherMD",$exe,$file)
@@ -231,9 +304,16 @@ try {
                 $created=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $before -and $_.Path -eq $exe })
                 if($created.Count -gt 1){throw 'Shell created more than one matching reader'}
                 if($created.Count -eq 1){$process=$created[0];break}
+                $picker=@(Get-Process -Name OpenWith -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $pickers })
+                if(-not $picked -and $picker.Count -and $i -ge 20){
+                    $picked=Pick $picker[0]
+                    $result.picker_extensions += $ext
+                    $result.picker_notes[$ext]=$picked
+                    $i=0
+                }
                 Start-Sleep -Milliseconds 25
             }
-            if(-not $process){throw 'Shell did not create the exact installed reader process'}
+            if(-not $process){throw "Shell did not create the exact installed reader process$(if($picked){" (picker: $picked)"})"}
             $processId=$process.Id
             for($i=0;$i -lt 400;$i++) {
                 if($process.HasExited){throw 'Shell-activated reader exited early'}
@@ -254,9 +334,15 @@ try {
                 if(-not $process.WaitForExit(5000)){$process.Kill();$failures["$ext close"]='Shell-activated process failed to close'}
                 $process.Dispose()
             }
+            # A picker left open would answer the next activation.
+            Get-Process -Name OpenWith -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $pickers } | Stop-Process -Force -ErrorAction SilentlyContinue
         }
     }
     $result.activated_extensions=$activated
+    # "Just once" must leave every default as it was.
+    $after=Defaults @($formats.Keys)
+    $result.default_changes=@(foreach($ext in $formats.Keys){if($defaults[$ext] -ne $after[$ext]){"$ext $($defaults[$ext]) -> $($after[$ext])"}})
+    if($result.default_changes.Count){$failures['defaults']=$result.default_changes -join '; '}
     if($failures.Count){
         $result.shell_failures=$failures
         throw "Shell activation failed for $(@($failures.Keys) -join ', '); opened $($activated -join ', ')"
