@@ -31,6 +31,8 @@ pub struct SearchRequest {
 pub struct OutlineRequest {
     pub document: Arc<Document>,
     pub ticket: u64,
+    /// Bytes scanned so far, for the reader's progress line.
+    pub progress: Arc<AtomicU64>,
 }
 pub struct Workers {
     pub io: mpsc::Sender<Request>,
@@ -66,8 +68,10 @@ impl Workers {
                     Request::Open(path, ticket) => Reply::Opened(
                         ticket,
                         Document::open(path)
-                            .and_then(|d| {
+                            .and_then(|mut d| {
                                 let p = d.page(0)?;
+                                // Plain text that starts like a log is read as one.
+                                d.format = crate::plain::sniff(d.format, &p.lines);
                                 Ok((Arc::new(d), p))
                             })
                             .map_err(|e| e.to_string()),
@@ -100,12 +104,16 @@ impl Workers {
                 while let Ok(newest) = ox.try_recv() {
                     request = newest;
                 }
-                let result =
-                    match outline::scan(&request.document, &worker_outline_epoch, request.ticket) {
-                        Ok(Some(outline)) => Ok(outline),
-                        Ok(None) => continue,
-                        Err(error) => Err(error.to_string()),
-                    };
+                let result = match outline::scan(
+                    &request.document,
+                    &worker_outline_epoch,
+                    request.ticket,
+                    &request.progress,
+                ) {
+                    Ok(Some(outline)) => Ok(outline),
+                    Ok(None) => continue,
+                    Err(error) => Err(error.to_string()),
+                };
                 if worker_outline_epoch.load(Ordering::Relaxed) == request.ticket
                     && outline_tx
                         .send(Reply::Outline(request.ticket, result))

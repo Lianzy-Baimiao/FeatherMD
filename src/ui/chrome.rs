@@ -1,6 +1,29 @@
 //! Custom window chrome and quiet reading controls.
 use super::*;
 
+/// The outline's count line for what it lists.
+fn outline_count(kind: OutlineKind, total: usize) -> String {
+    let (none, one, many) = match kind {
+        OutlineKind::Headings => (key!("文档暂无标题"), key!("1 个标题"), key!("{} 个标题")),
+        OutlineKind::Chapters => (key!("未识别到章节"), key!("1 个章节"), key!("{} 个章节")),
+        OutlineKind::Time => (
+            key!("没有时间戳，也没有错误行"),
+            key!("1 个时间段"),
+            key!("{} 个时间段"),
+        ),
+        OutlineKind::Problems => (
+            key!("没有时间戳，也没有错误行"),
+            key!("1 处错误"),
+            key!("{} 处错误"),
+        ),
+    };
+    match total {
+        0 => tr(none).to_string(),
+        1 => tr(one).to_string(),
+        _ => trf(many, &[&total]),
+    }
+}
+
 /// Title-bar glyphs shrink with the header (34 px, formerly 40 px).
 const HEADER_ICON: f32 = 0.86;
 /// Caption buttons keep the familiar Windows width; only their height shrank.
@@ -606,7 +629,19 @@ impl App {
                 .enumerate()
                 .skip(first)
                 .take(visible)
-                .map(|(index, heading)| (index, heading.level, heading.text.clone()))
+                .map(|(index, heading)| {
+                    // A log time entry says how many error and warning lines it holds.
+                    let mut text = heading.text.clone();
+                    if heading.errors > 0 && outline.kind == OutlineKind::Time {
+                        text.push_str(" · ");
+                        text.push_str(&trf("{} 错误", &[&heading.errors]));
+                    }
+                    if heading.warnings > 0 {
+                        text.push_str(" · ");
+                        text.push_str(&trf("{} 警告", &[&heading.warnings]));
+                    }
+                    (index, heading.level, text, heading.errors > 0)
+                })
                 .collect();
             (entries, outline.headings.len(), outline.limited)
         } else {
@@ -615,7 +650,8 @@ impl App {
         let bottom = self.height - self.s(62);
         let saved = SaveDC(dc);
         IntersectClipRect(dc, 1, self.s(OUTLINE_ROWS_TOP), width - 1, bottom);
-        for (row, (index, level, text)) in entries.into_iter().enumerate() {
+        let error_tone = p.token(feathermd::highlight::Token::Deleted);
+        for (row, (index, level, text, errors)) in entries.into_iter().enumerate() {
             let top = self.s(OUTLINE_ROWS_TOP + row as i32 * 30);
             if top >= bottom {
                 break;
@@ -651,6 +687,8 @@ impl App {
                 selected || level == 1,
                 if selected {
                     p.accent
+                } else if errors {
+                    error_tone
                 } else if level <= 2 {
                     p.fg
                 } else {
@@ -665,23 +703,30 @@ impl App {
         }
         RestoreDC(dc, saved);
 
+        let format = self.format();
+        let kind = self.outline.as_ref().map(|o| o.kind);
         let status = if let Some(error) = &self.outline_error {
             trf("目录读取失败：{}", &[error])
         } else if limited {
             tr("目录已达显示上限").to_string()
         } else if self.outline_loading {
-            tr("正在提取标题…").to_string()
-        } else if total == 0 {
-            if self.document.is_none() {
-                tr("打开文档后显示目录")
-            } else {
-                tr("文档暂无标题")
+            match format {
+                Format::Markdown => tr("正在提取标题…").to_string(),
+                Format::Text => tr("正在识别章节…").to_string(),
+                // A large log takes a while: say how far the index has come.
+                Format::Log => match self.outline_percent.filter(|_| {
+                    self.page
+                        .as_ref()
+                        .is_some_and(|p| p.size > 32 * 1024 * 1024)
+                }) {
+                    Some(percent) => trf("正在建立时间索引… {}%", &[&percent]),
+                    None => tr("正在建立时间索引…").to_string(),
+                },
             }
-            .to_string()
-        } else if total == 1 {
-            tr("1 个标题").to_string()
+        } else if self.document.is_none() {
+            tr("打开文档后显示目录").to_string()
         } else {
-            trf("{} 个标题", &[&total])
+            outline_count(kind.unwrap_or_default(), total)
         };
         let status_top = if total == 0 {
             self.s(OUTLINE_ROWS_TOP + 8)
@@ -845,7 +890,7 @@ impl App {
         );
         self.label(
             dc,
-            tr("或拖入 .md / .markdown / .txt 文件"),
+            tr("或拖入 .md / .txt / .log 文件"),
             chrome_rect(
                 center - self.s(230),
                 top + self.s(286),
@@ -861,6 +906,7 @@ impl App {
 
     pub(super) unsafe fn paint_footer(&mut self, dc: HDC, p: Palette) {
         let top = self.height - self.s(30);
+        let format = self.format();
         Self::fill(
             dc,
             &chrome_rect(1, top, self.width - 1, self.height - 1),
@@ -879,15 +925,22 @@ impl App {
         };
         if let Some(page) = &self.page {
             metadata = format!(
-                "{}  ·  UTF-8{}",
+                "{}  ·  {}{}",
                 human_size(page.size),
+                page.encoding.name(),
                 if page.invalid_utf8 { "*" } else { "" }
             );
+            match format {
+                Format::Markdown => {}
+                Format::Text => metadata.push_str(&format!("  ·  {}", tr("文本"))),
+                Format::Log => metadata.push_str(&format!("  ·  {}", tr("日志"))),
+            }
             let mut warnings = Vec::new();
             if page.invalid_utf8 {
                 warnings.push(tr("已替换无效字符"));
             }
-            if page.partial_context && !self.settings.raw {
+            // Only Markdown has syntax that a page starting mid-file can cut.
+            if page.partial_context && !self.settings.raw && format == Format::Markdown {
                 warnings.push(tr("语法上下文不完整"));
             }
             if !warnings.is_empty() {

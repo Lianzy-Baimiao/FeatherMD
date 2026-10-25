@@ -4,6 +4,15 @@
 最后修改人：lianzy
 日期：2026-10-12
 
+## v0.1.13：纯文本、日志与旧编码（2026-10-24）
+
+- [x] 按文件名与内容判定 Markdown / 纯文本 / 日志；纯文本保留原样行与缩进，日志等宽并按级别着色。
+- [x] 目录按格式：Markdown 标题；纯文本章节（卷 / 章 / 回 / 节 / 話、序章番外、Chapter / Part、下划线标题、公文编号）；日志时间索引（按日 → 时间段，错误 / 警告数，读完整文件、显示进度）或无时间戳日志的错误行。
+- [x] 非 UTF-8 文件按系统旧代码页读取（GB18030 / Big5 / Shift-JIS），搜索与目录同编码；UTF-8 路径不变。
+- [x] 打开方式与商店包加入 .txt / .text / .log（不设默认）；四语 README、CHANGELOG、ARCHITECTURE、PERFORMANCE、FILE_ASSOCIATIONS、AGENTS。
+- [x] fmt、Clippy、128 / 130 项测试、基准；新增 formats-smoke 加入 CI。
+- [ ] CI（含 formats-smoke 与全部原生回归）通过后打标签发布 v0.1.13；商店 1.0.13.0 WACK / 生命周期 / Partner Center 更新。
+
 ## v0.1.12：隐私按钮间距与商店更新（2026-10-24）
 
 - [x] 设置 → 更新页“隐私说明…”按钮不再紧贴卡片与页脚横线（两种版本，单元测试防回归）；副屏 update / i18n / store 通过并实图检查。

@@ -30,7 +30,7 @@ impl Fixture {
         Document::open(&self.0).unwrap()
     }
     fn outline(&self) -> Outline {
-        outline::scan(&self.doc(), &AtomicU64::new(0), 0)
+        outline::scan(&self.doc(), &AtomicU64::new(0), 0, &AtomicU64::new(0))
             .unwrap()
             .unwrap()
     }
@@ -161,12 +161,12 @@ fn cancellation_empty_and_external_truncation() {
     let fixture = Fixture::new(b"# original\n");
     let document = fixture.doc();
     assert!(
-        outline::scan(&document, &AtomicU64::new(2), 1)
+        outline::scan(&document, &AtomicU64::new(2), 1, &AtomicU64::new(0))
             .unwrap()
             .is_none()
     );
     fs::write(&fixture.0, "# 新\n").unwrap();
-    let result = outline::scan(&document, &AtomicU64::new(0), 0)
+    let result = outline::scan(&document, &AtomicU64::new(0), 0, &AtomicU64::new(0))
         .unwrap()
         .unwrap();
     assert!(result.complete);
@@ -191,11 +191,16 @@ fn worker_returns_only_current_outline_and_keeps_page_io_independent() {
         .send(OutlineRequest {
             document: document.clone(),
             ticket: ticket - 1,
+            progress: Arc::default(),
         })
         .unwrap();
     workers
         .outline
-        .send(OutlineRequest { document, ticket })
+        .send(OutlineRequest {
+            document,
+            ticket,
+            progress: Arc::default(),
+        })
         .unwrap();
     workers
         .io

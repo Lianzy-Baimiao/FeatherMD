@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Output,
-    [string]$Version = '1.0.12.0',
+    [string]$Version = '1.0.13.0',
     [string]$Identity = '',
     [switch]$TestIdentity,
     [string]$MakeAppx = 'makeappx.exe',

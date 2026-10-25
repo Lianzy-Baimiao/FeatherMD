@@ -309,6 +309,14 @@ fn metrics(block: &Block, settings: &Settings, previous: Option<Kind>) -> Metric
         }
         Kind::Spacer => plain(f, 4),
         Kind::Rule => plain(f, line(f)),
+        // Logs read densely, like code; plain text like body text, a blank line a
+        // whole line high as in the file.
+        Kind::Log if settings.raw => plain(f, line(f)),
+        Kind::Log => {
+            let size = code_size(f);
+            plain(size, (size * 3 + 1) / 2)
+        }
+        Kind::Text => plain(f, line(f)),
         // A blank line is a paragraph gap, shorter than a text line.
         Kind::Paragraph | Kind::Quote if block.spans.is_empty() => plain(f, (f * 3 + 2) / 4),
         _ => plain(f, line(f)),
@@ -400,11 +408,13 @@ unsafe fn flow(
     let settings = view.settings;
     let heading = matches!(block.kind, Kind::Heading(_));
     let code_block = matches!(block.kind, Kind::Code | Kind::Fence);
+    // Log lines are monospace like code, without the code box's inset.
+    let mono = code_block || block.kind == Kind::Log;
     let indent = fonts.scale(block.indent + if code_block { 16 } else { 0 });
     let base = FontKey {
         size: m.size,
         bold: heading,
-        mono: code_block,
+        mono,
         ..FontKey::default()
     };
     let base_metrics = fonts.metrics(dc, base);
@@ -420,7 +430,7 @@ unsafe fn flow(
             breaks.push(units.len());
             continue;
         }
-        let chip = (span.code || span.kbd) && !code_block;
+        let chip = (span.code || span.kbd) && !mono;
         let size = if span.code || span.kbd {
             code_size(m.size)
         } else if span.script != 0 {
@@ -432,7 +442,7 @@ unsafe fn flow(
             size,
             bold: span.bold || heading,
             italic: span.italic,
-            mono: span.code || span.kbd || code_block,
+            mono: span.code || span.kbd || mono,
             strike: span.strike,
             underline: span.underline,
         };
@@ -579,8 +589,9 @@ unsafe fn flow(
         } else {
             rest_room
         };
-        // Code keeps the spaces that open its line; prose drops them.
-        let keep = if code_block && lines.is_empty() {
+        // Code, logs and plain text keep the spaces that open their line; Markdown
+        // prose drops them.
+        let keep = if (mono || block.kind == Kind::Text) && lines.is_empty() {
             units[from..cut].iter().take_while(|&&u| u == 32).count()
         } else {
             0

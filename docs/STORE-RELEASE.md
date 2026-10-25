@@ -45,7 +45,8 @@ explicitly disposable environment. MakeAppx success is not Store certification.
   The packer nevertheless requires the Store build so an extracted EXE does not
   accidentally switch channels.
 - AUMID is `<actual family>!FeatherMD`. Associations are declared for `.md`,
-  `.markdown`, `.mdown`, `.mkd`; Windows chooses defaults after user confirmation.
+  `.markdown`, `.mdown`, `.mkd` and, from 1.0.13.0, a second group for `.txt`,
+  `.text`, `.log`; Windows chooses defaults after user confirmation.
   No UserChoice writes, administrative escalation or portable registry changes.
 - Packaged settings use unredirected LocalAppData + `Packages/<family>/LocalState`.
   Failure to determine the identity/folder stops startup instead of writing to a
@@ -72,7 +73,8 @@ The Store signs accepted packages for distribution. GitHub portable EXEs remain
 unsigned unless separately signed with a trusted code-signing service/certificate.
 
 MSIX versions: 1.0.10.0 was the first upload (Cargo 0.1.10); 1.0.12.0 carries
-Cargo 0.1.12 (1.0.11.0 was built but never uploaded). Increment the third component for each new candidate/upload,
+Cargo 0.1.12 (1.0.11.0 was built but never uploaded); 1.0.13.0 carries Cargo 0.1.13
+(plain text and logs). Increment the third component for each new candidate/upload,
 independent of Cargo's version: a replacement candidate for the same Cargo version
 still takes the next number. Components are <=65535, the first is nonzero and the
 fourth stays 0. Never overwrite/reuse an uploaded version.

@@ -33,7 +33,7 @@
 
 ## 注册与测试
 
-注册 `FeatherMD.Document` 的启动命令、图标和应用名称，添加 `.md`、`.markdown`、`.mdown`、`.mkd` 的 `OpenWithProgids`，并维护 `RegisteredApplications` 与 Capabilities。命令中的 EXE 和 `%1` 都带引号，支持中文和空格路径。
+注册 `FeatherMD.Document` 的启动命令、图标和应用名称，添加 `.md`、`.markdown`、`.mdown`、`.mkd`、`.txt`、`.text`、`.log`（v0.1.13 起）的 `OpenWithProgids`，并维护 `RegisteredApplications` 与 Capabilities。命令中的 EXE 和 `%1` 都带引号，支持中文和空格路径。`.txt` / `.log` 同样只加入“打开方式”列表，不改变记事本等现有默认应用；“设为 .md 默认应用”仍只针对 `.md`。商店版在包清单中声明同样的两组文件类型（Markdown、文本与日志）。
 
 Windows 集成测试使用 HKCU 下专用唯一测试子树，调用相同的内部注册逻辑；不覆盖预定义根键、不发送关联更改通知、不写真实 Classes 或 Explorer 默认配置。测试不能代替各版本 Explorer 的实际列表显示和系统设置中的最终人工确认。
 

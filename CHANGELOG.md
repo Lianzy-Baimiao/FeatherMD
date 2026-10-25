@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.13 — 2026-10-24
+
+### Added
+- Plain text and logs. A file is read as Markdown, plain text or a log from its name (`.log`, rotated `app.log.1`, `.out` are logs); a `.txt` whose lines mostly start with timestamps or level words is read as a log. Plain text keeps every line as written, leading and full-width indents included; logs are monospace with timestamps muted, errors red and warnings amber, without ANSI escapes.
+- The outline follows the format: Markdown headings as before; plain-text chapters (`第三卷`, `第十二章`, `第3回`, `第3話`, `序章`, `番外`, `Chapter 12`, `Part One`, underlined titles, or `一、` / `（一）` numbering in a document without chapters); for a log, a time index of days and time ranges (1 minute to 1 week, at most 240) with their error and warning counts, red where errors occur, or the error lines of a log without timestamps. A log's index reads the whole file in cancellable 256 KiB chunks in the background and shows its progress on large files; a 1 GiB log took about 1.9 s here.
+- Files that are clearly not UTF-8 are read with the system's legacy code page (GB18030 for GBK, Big5, Shift-JIS…); the status bar names the encoding and search uses it. UTF-8 files are read exactly as before.
+- Open With: the portable entry and the Store package also offer `.txt`, `.text` and `.log`, never as the default app.
+
+### Changed
+- The open dialog lists Markdown, text and log files; the status bar shows the encoding and, for text and logs, the format; the welcome page mentions `.log`.
+- `examples/bench` parses pages in the file's own format and times one outline scan.
+
+### Tests
+- Unit tests for format detection, timestamps of nine log formats, level words versus prose, chapter and numbering lines, text and log blocks, text and log outlines (coarsening, counts, error lines, whole-file scan with progress), GB18030 boundaries, decoding, long-line resync and trail-byte-safe search, and a windowless GDI layout of text and log pages. New formats-smoke (light / dark) checks formats, outlines, outline clicks, source view and a GBK novel.
+
 ## 0.1.12 — 2026-10-24
 
 ### Fixed

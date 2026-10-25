@@ -1,5 +1,13 @@
 # Progress / continuation notes
 
+## 2026-10-24 — v0.1.13 candidate: plain text, logs and legacy encodings
+
+- 用户：“上传完商店，做下一个需求：扩大阅读范围，txt、log大数据日志类，注意区分不同格式下的目录功能。”随后：“都开发完之后记得发布，无人值守哈”“我说的发布是连着微软商城一起哦”。
+- 实现：`src/plain.rs`（按文件名 + 首页内容判定 Markdown / 纯文本 / 日志；日志时间戳 9 类、级别词；纯文本章节、下划线标题、公文编号；文本与日志的预览块）、`src/outline.rs`（目录按格式：Markdown 标题 16 MiB；纯文本章节 256 MiB；日志时间索引读完整个文件，时间段 1 分钟至 1 周、最多 240 段、按日分组、每段错误 / 警告数；无时间戳日志列错误行最多 1000；每请求一个进度计数）、`src/encoding.rs`（前 64 KiB 明显不是 UTF-8 时用系统旧代码页，936 → GB18030；按字符从行首切段，跨长行从不可续接字节后恢复；搜索按该编码并只接受字符边界匹配）。布局新增 `Kind::Text`（保留行首缩进）与 `Kind::Log`（等宽、无代码框）。界面：目录状态与进度、日志条目附错误 / 警告数并对有错误的条目标红、状态栏显示编码与格式、打开对话框与欢迎页、文件关联（绿色版打开方式与商店包清单加入 .txt / .text / .log，仍不设默认）。测试接缝查询 100–103。
+- 验证（MSVC）：fmt、两种配置 strict Clippy、**128 / 130** 项测试（新增 tests/plain.rs、tests/encoding.rs、outline 内部测试 5 项、真实 GDI 排版测试），17 项 Python 打包测试，release 与测试替身。基准（暖缓存，见 PERFORMANCE §9）：1 GiB 日志时间索引 1851 ms，25 MB 小说章节 21.6 ms，8 MB GBK 小说 74.0 ms 且识别为 GB18030。
+- 新增 `scripts/formats-smoke.ps1`（浅 / 深）并加入 CI 与 AGENTS.md 发布前测试。**本机未运行原生窗口测试**：此时只剩一台显示器（`\\.\DISPLAY2` 成为主屏），`-SecondaryMonitor` 按设计拒绝启动，按 AGENTS.md 不自动传 `-AllowDesktopUi`。全部原生回归（含新 formats-smoke）以 GitHub Windows CI 隔离 runner 的结果为准，结果另记。
+- 版本 0.1.13 / MSIX 1.0.13.0。发布流程：提交推送、CI、标签、GitHub Release；商店在 Partner Center 处理 Submission 2（1.0.12.0）后以 1.0.13.0 更新。
+
 ## 2026-10-24 — Store Submission 2 (1.0.12.0) submitted for certification
 
 - 用户：“你全权操作，不用和我确认”。本会话没有浏览器工具；无头 Playwright 被 Partner Center 的 Akamai 拒绝（Access Denied）。改为另起一个 Edge 实例：专用用户数据目录 `%LOCALAPPDATA%\FeatherMD-PartnerCenter`、仅本机 DevTools 端口、窗口在副屏。Edge 用 Windows 账户自动登录 Microsoft 帐户并开启同步，拉入了用户的扩展（自动打开扩展欢迎页）。没有读取或复制用户自己的 Edge 或其他应用的 Cookie / 密码，也没有在该配置里改扩展、收藏或设置（避免同步回其他设备）。用 Playwright 经 CDP 逐步操作，每步截图与无障碍树核对。

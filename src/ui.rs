@@ -11,11 +11,13 @@ mod smooth;
 mod snapshot;
 mod test_host;
 use crate::layout::{FontKey, Fonts, Layout, Picture, Row, Run, View};
+use feathermd::outline::OutlineKind;
 use feathermd::{
     distribution,
     document::{Document, Page, SearchResult, human_size},
     i18n::{self, Lang, tr, trf},
     key, markdown,
+    plain::{self, Format},
     scrollbar::ScrollTrack,
     settings::{Editor, Settings, Theme},
     text::{self, Caret},
@@ -607,6 +609,9 @@ struct App {
     outline_ticket: u64,
     outline_loading: bool,
     outline_error: Option<String>,
+    /// Bytes the running outline scan has read, and the percentage last painted.
+    outline_progress: Arc<std::sync::atomic::AtomicU64>,
+    outline_percent: Option<u8>,
     outline_top: usize,
     outline_selected: Option<(usize, usize)>,
     outline_pending: Option<usize>,
@@ -684,6 +689,8 @@ impl App {
             outline_ticket: 0,
             outline_loading: false,
             outline_error: None,
+            outline_progress: Arc::default(),
+            outline_percent: None,
             outline_top: 0,
             outline_selected: None,
             outline_pending: None,
@@ -832,12 +839,16 @@ impl App {
             self.outline_ticket = self.workers.cancel_outline();
             self.outline_loading = true;
             self.outline_error = None;
+            // A counter of this request only, so a cancelled scan cannot move it.
+            self.outline_progress = Arc::default();
+            self.outline_percent = None;
             let _ = self
                 .workers
                 .outline
                 .send(feathermd::worker::OutlineRequest {
                     document: document.clone(),
                     ticket: self.outline_ticket,
+                    progress: self.outline_progress.clone(),
                 });
         }
     }
@@ -902,6 +913,12 @@ impl App {
     unsafe fn invalidate(&self) {
         InvalidateRect(self.hwnd, null(), 0);
     }
+    /// How the open document is read: Markdown, plain text or a log.
+    fn format(&self) -> Format {
+        self.document
+            .as_ref()
+            .map_or(Format::Markdown, |d| d.format)
+    }
     unsafe fn open(&mut self, path: PathBuf) {
         self.reload_anchor = None;
         self.outline_ticket = self.workers.cancel_outline();
@@ -965,8 +982,9 @@ impl App {
     unsafe fn relayout(&mut self, anchor: u64) {
         self.outline_selected = None;
         self.pictures_changed = false;
+        let format = self.format();
         if let Some(page) = &self.page {
-            let blocks = markdown::blocks(&page.lines, self.settings.raw);
+            let blocks = plain::blocks(&page.lines, format, self.settings.raw);
             let dc = GetDC(self.hwnd);
             let width = self.body_width();
             // Queue this page's local images first, so layout sees every one.
@@ -1010,8 +1028,8 @@ impl App {
             };
             let layout = Layout::build(dc, &blocks, &view, &mut self.reading_fonts, width);
             ReleaseDC(self.hwnd, dc);
-            // Source mode shows every line as code; only the preview has boxes.
-            self.boxes = if self.settings.raw {
+            // Source mode shows every line as code; only a Markdown preview has boxes.
+            self.boxes = if self.settings.raw || format != Format::Markdown {
                 Vec::new()
             } else {
                 copy_boxes(&blocks, &layout.rows, page)
@@ -1565,7 +1583,7 @@ impl App {
         let mut file = vec![0u16; 32768];
         let mut ofn: OPENFILENAMEW = zeroed();
         let filter = w(tr(
-            "Markdown / Text\0*.md;*.markdown;*.mdown;*.mkd;*.txt\0所有文件\0*.*\0",
+            "Markdown / 文本 / 日志\0*.md;*.markdown;*.mdown;*.mkd;*.txt;*.text;*.log;*.out\0所有文件\0*.*\0",
         ));
         ofn.lStructSize = size_of::<OPENFILENAMEW>() as u32;
         ofn.hwndOwner = self.hwnd;
@@ -2008,7 +2026,7 @@ impl App {
         }
         match std::env::current_exe().and_then(|path| crate::association::register(&path)) {
             Ok(()) => {
-                self.status = tr("已加入 Markdown 文件的右键打开方式").into();
+                self.status = tr("已加入 Markdown、文本和日志文件的右键打开方式").into();
                 true
             }
             Err(error) => {
@@ -2826,6 +2844,38 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 }
                 None => -1,
             },
+            // How the document is read (0 Markdown, 1 text, 2 log; -1 without one), what
+            // its outline lists (0 headings, 1 chapters, 2 time index, 3 error lines),
+            // and its encoding (0 UTF-8, else the code page).
+            100 => app.document.as_ref().map_or(-1, |d| match d.format {
+                Format::Markdown => 0,
+                Format::Text => 1,
+                Format::Log => 2,
+            }),
+            101 => app.outline.as_ref().map_or(-1, |o| match o.kind {
+                OutlineKind::Headings => 0,
+                OutlineKind::Chapters => 1,
+                OutlineKind::Time => 2,
+                OutlineKind::Problems => 3,
+            }),
+            103 => app.document.as_ref().map_or(-1, |d| match d.encoding {
+                feathermd::encoding::Encoding::Utf8 => 0,
+                feathermd::encoding::Encoding::Legacy(codec) => codec.page as isize,
+            }),
+            // Test seam: the outline entries (level, errors, warnings, text; tab
+            // separated, one per line) in outline.txt beside the snapshot file.
+            102 => match (std::env::var_os("FEATHERMD_TEST_SNAPSHOT"), &app.outline) {
+                (Some(path), Some(outline)) => {
+                    let lines: Vec<String> = outline
+                        .headings
+                        .iter()
+                        .map(|h| format!("{}\t{}\t{}\t{}", h.level, h.errors, h.warnings, h.text))
+                        .collect();
+                    let path = PathBuf::from(path).with_file_name("outline.txt");
+                    std::fs::write(path, lines.join("\n")).map_or(-1, |_| lines.len() as isize)
+                }
+                _ => -1,
+            },
             // Tables: right edge of the widest table, the reading width, visual table
             // lines, distinct table rows and the first table's column count.
             54 => app.layout.as_ref().map_or(0, |l| l.table_width as isize),
@@ -3037,6 +3087,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_TIMER => {
             app.receive();
             app.drag_scroll();
+            // A long outline scan (a large log) reports its progress.
+            if app.outline_loading
+                && let Some(size) = app.page.as_ref().map(|p| p.size).filter(|&s| s > 0)
+            {
+                let read = app.outline_progress.load(Ordering::Relaxed).min(size);
+                let percent = (read * 100 / size) as u8;
+                if app.outline_percent != Some(percent) {
+                    app.outline_percent = Some(percent);
+                    app.invalidate();
+                }
+            }
             // The copy button's check mark returns to "Copy".
             if app.copied.is_some_and(|(_, at)| at.elapsed() >= COPIED_FOR) {
                 app.copied = None;
@@ -3597,7 +3658,11 @@ unsafe fn menus() -> (HMENU, HMENU) {
     AppendMenuW(settings, MF_SEPARATOR, 0, null());
     let associations = CreatePopupMenu();
     if !distribution::store() {
-        add(associations, REGISTER, tr("加入 Markdown 右键打开方式"));
+        add(
+            associations,
+            REGISTER,
+            tr("加入右键打开方式（Markdown / 文本 / 日志）"),
+        );
     }
     add(
         associations,

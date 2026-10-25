@@ -605,6 +605,96 @@ mod tests {
         }
     }
 
+    /// Plain text and logs laid out for real (memory DC, no window): indents stay,
+    /// chapter lines are headings, logs are monospace without the code inset, and
+    /// copying everything gives the lines back as shown.
+    #[test]
+    fn plain_text_and_log_pages_keep_their_lines_when_laid_out() {
+        use crate::layout::{Fonts, Layout, Picture, View};
+        use feathermd::{
+            document::SourceLine,
+            markdown::{self, Kind},
+            plain::{self, Format},
+            settings::Settings,
+        };
+        use windows_sys::Win32::Graphics::Gdi::{CreateCompatibleDC, DeleteDC};
+        let page = |text: &str| -> Vec<SourceLine> {
+            let mut start = 0;
+            text.split('\n')
+                .map(|line| {
+                    let out = SourceLine {
+                        start,
+                        end: start + line.len() as u64,
+                        text: line.to_owned(),
+                        continued: false,
+                    };
+                    start = out.end + 1;
+                    out
+                })
+                .collect()
+        };
+        let settings = Settings::default();
+        let pictures = |_: &markdown::Image| Picture::Off;
+        let view = View {
+            settings: &settings,
+            pictures: &pictures,
+            max_height: 600,
+        };
+        let novel = "第一章 少年\n　　他走了，再也没有回来。\n    四个空格\n\nend";
+        let log = "2026-10-24 08:15:30 ERROR failed\n\tat x";
+        unsafe {
+            let dc = CreateCompatibleDC(std::ptr::null_mut());
+            assert!(!dc.is_null());
+            let mut fonts = Fonts::with_family(96, "Microsoft YaHei UI");
+            let lines = page(novel);
+            let blocks = plain::blocks(&lines, Format::Text, false);
+            let text = Layout::build(dc, &blocks, &view, &mut fonts, 400);
+            assert_eq!(text.rows[0].kind, Kind::Heading(3));
+            let indented: Vec<&Row> = text
+                .rows
+                .iter()
+                .filter(|r| r.start == lines[2].start)
+                .collect();
+            assert_eq!(indented[0].runs[0].text[..4], [32; 4]);
+            let all = |rows: &[Row]| {
+                let last = rows.last().expect("rows");
+                super::text(
+                    rows,
+                    spot(rows[0].start, 0),
+                    spot(last.start, row_end(last).max(1)),
+                )
+            };
+            assert_eq!(all(&text.rows), novel.replace('\n', "\r\n"));
+            let blocks = plain::blocks(&page(log), Format::Log, false);
+            let logs = Layout::build(dc, &blocks, &view, &mut fonts, 400);
+            DeleteDC(dc);
+            assert!(
+                logs.rows
+                    .iter()
+                    .all(|r| r.kind == Kind::Log && r.indent == 0)
+            );
+            assert!(
+                logs.rows
+                    .iter()
+                    .flat_map(|r| &r.runs)
+                    .all(|run| run.font.mono)
+            );
+            let level = logs.rows[0]
+                .runs
+                .iter()
+                .find(|r| r.text == "ERROR".encode_utf16().collect::<Vec<_>>());
+            assert_eq!(
+                level.and_then(|r| r.token),
+                Some(feathermd::highlight::Token::Deleted)
+            );
+            // A tab shows as four spaces, and the preview copies what it shows.
+            assert_eq!(
+                all(&logs.rows),
+                "2026-10-24 08:15:30 ERROR failed\r\n    at x"
+            );
+        }
+    }
+
     #[test]
     fn double_click_in_a_table_stays_in_its_cell() {
         let rows = table();

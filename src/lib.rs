@@ -1,11 +1,13 @@
 pub mod distribution;
 pub mod document;
+pub mod encoding;
 pub mod highlight;
 pub mod html;
 pub mod i18n;
 pub mod image;
 pub mod markdown;
 pub mod outline;
+pub mod plain;
 pub mod scrollbar;
 pub mod settings;
 pub mod table;

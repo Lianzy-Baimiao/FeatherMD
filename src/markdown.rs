@@ -17,6 +17,10 @@ pub enum Kind {
     Fence,
     /// A line of only HTML tags, comments or hidden content: a thin gap.
     Spacer,
+    /// A line of plain text, as written (leading spaces kept).
+    Text,
+    /// A log line: monospace, leading spaces kept, timestamp and level coloured.
+    Log,
 }
 /// An image reference. FeatherMD shows local files only, and only when the
 /// reader enables images; otherwise the alternative text stands in.
@@ -455,7 +459,7 @@ fn code_spans(state: &mut Parse, text: &str) -> Vec<Span> {
         })
         .collect()
 }
-fn block(line: &SourceLine, kind: Kind, spans: Vec<Span>, indent: i32) -> Block {
+pub(crate) fn block(line: &SourceLine, kind: Kind, spans: Vec<Span>, indent: i32) -> Block {
     Block {
         start: line.start,
         end: line.end,

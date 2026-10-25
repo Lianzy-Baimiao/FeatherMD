@@ -48,6 +48,8 @@ jobs:
           ./scripts/table-smoke.ps1 -Theme dark -Output ./test-artifacts/table-dark
           ./scripts/image-smoke.ps1
           ./scripts/image-smoke.ps1 -Theme dark -Output ./test-artifacts/image-dark
+          ./scripts/formats-smoke.ps1
+          ./scripts/formats-smoke.ps1 -Theme dark -Output ./test-artifacts/formats-dark
           ./scripts/i18n-smoke.ps1
       # Keep the captures when a smoke fails; they show what went wrong.
       - uses: actions/upload-artifact@v4
@@ -75,6 +77,8 @@ jobs:
             test-artifacts/table*/table.json
             test-artifacts/image*/*.png
             test-artifacts/image*/image.json
+            test-artifacts/formats*/*.png
+            test-artifacts/formats*/formats.json
             test-artifacts/i18n/*.png
             test-artifacts/i18n/*.txt
             test-artifacts/i18n/i18n.json

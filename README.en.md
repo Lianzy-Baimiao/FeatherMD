@@ -5,7 +5,7 @@
 [![License MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 [![Support on Afdian](https://img.shields.io/badge/Support-Afdian-946ce6?style=flat-square)](https://ifdian.net/a/lianzy)
 
-**Lighter, so you read more.** A native Windows Markdown viewer written in Rust. The interface speaks Simplified Chinese, Traditional Chinese, English and Japanese.
+**Lighter, so you read more.** A native Windows Markdown viewer written in Rust, which reads plain text and big logs too. The interface speaks Simplified Chinese, Traditional Chinese, English and Japanese.
 
 [Download the single-file EXE](https://github.com/Lianzy-Baimiao/FeatherMD/releases/latest) · [Performance and validation](docs/PERFORMANCE.md) (Chinese) · [Architecture notes](docs/ARCHITECTURE.md)
 
@@ -42,14 +42,14 @@ The other screenshots in this README show the Simplified Chinese interface; ever
 
 Opening a Markdown file should not start a browser first.
 
-FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.12 Windows x64 EXE is about **1.07 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
+FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.13 Windows x64 EXE is about **1.11 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
 
 **Large files are not loaded whole before they show.** Only the nearby 128 KiB is read at a time; reading and searching run in the background and only visible lines are drawn. The file's total size does not decide how much memory the first page needs.
 
 ## Use
 
 1. Download **FeatherMD.exe** from Releases, put it in a folder you like and double-click it.
-2. Drop a Markdown file on the window, or press **Ctrl+O**.
+2. Drop a Markdown, text or log file on the window, or press **Ctrl+O**.
 3. Click a heading in the outline to jump to it. The button right of the "Outline" heading hides the outline and the one at the left edge of the text shows it again; **Ctrl+B** toggles it, and the choice is kept.
 4. The eye / code switch at the left of the status bar changes between preview and source (Ctrl+R); the appearance button picks a skin. The ellipsis "More → Settings…" (Ctrl+,) changes skins, opacity, the reading font and size, whether images are shown, the default editor and the interface language; word wrap and the reading width are in More too.
 5. **More → About FeatherMD** (F1) shows the version, shortcuts and reading notes, and links to the GitHub project page and to Afdian to support the author. External links ask first, then open in your default browser.
@@ -57,6 +57,20 @@ FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry
 7. **More → Language…** switches the interface language; it applies as soon as you save.
 
 Windows 10 (1607+) / Windows 11 **x64**. Tested on Windows 11 x64; other versions have not each been checked on real hardware. No installer and no administrator rights. The EXE is not code-signed yet, so Windows SmartScreen may warn about an unknown publisher; check the source and the SHA-256 instead of turning protection off.
+
+### Plain text and logs
+
+Besides Markdown, FeatherMD reads **.txt plain text** and **.log and other logs** directly, with an outline that depends on the format:
+
+| Format | Recognised by | Text | Outline |
+| --- | --- | --- | --- |
+| Markdown | .md / .markdown / .mdown / .mkd | Laid-out preview | `#` headings |
+| Plain text | .txt and other text files | Every line as written, leading indents and blank lines kept, wrapped | Chapters: `第三卷`, `第十二章`, `第3回`, `第2节`, `序章` / `番外`, `Chapter 12` / `Part One`, and underlined (`===` / `---`) titles; documents without chapters by `一、` / `（一）` numbering |
+| Log | .log, rotated `app.log.1`, .out; a .txt whose lines mostly start with timestamps is read as a log too | Monospace, timestamps muted, `ERROR` / `FATAL` red, `WARN` amber, ANSI colour codes hidden | **Time index**: days, then time ranges with their error and warning counts; ranges with errors are red, and a click goes to the range's first line. A log without timestamps (build output, say) lists its error lines |
+
+The range length follows the log's span (1 minute to 1 week), at most 240 ranges. ISO 8601, log4j / Spark, syslog, Android logcat, glog, Nginx / Apache access logs, and the time and `level=error` fields of logfmt / JSON are recognised. A log's outline scans the **whole file** in the background in 256 KiB chunks, shows its progress on large files and stops when you open another file or hide the outline; the text still reads only the nearby 128 KiB. Measured: a time index for a 1 GiB log of about 10.7 million lines in about 1.9 s, and the chapters of a 25 MB, 3000-chapter novel in about 22 ms (warm cache, see [PERFORMANCE.md](docs/PERFORMANCE.md)).
+
+**Files that are not UTF-8** (older GBK novels, for example) are read with Windows' legacy system code page: GB18030 (a superset of GBK) on Simplified Chinese systems, Big5 on Traditional Chinese, Shift-JIS on Japanese. The status bar names the encoding in use and search works in it; UTF-8 files are unaffected. Source view (Ctrl+R) shows the exact text, and copies keep tabs.
 
 ### Reading layout, code highlighting and HTML tags
 
@@ -213,11 +227,11 @@ The header and welcome icons are anti-aliased GDI+ vector curves with round caps
 ![File association settings](docs/file-associations-menu.png)
 
 - Put the EXE in a **fixed location** first.
-- **More → File associations → Add to Open with for Markdown** registers FeatherMD in the current user's Open with list, without a confirmation or Windows Settings.
+- **More → File associations → Add to Open with (Markdown, text, logs)** registers FeatherMD in the current user's Open with list, without a confirmation or Windows Settings.
 - To open .md files with FeatherMD on double-click, choose **More → File associations → Make default for .md (Windows asks)…**. It registers FeatherMD and opens Windows Default apps; pick **.md → FeatherMD** there. Older Windows versions may show the Default apps home page instead, where you search for .md.
 - If FeatherMD is not in the list, check that you are running the **new EXE in its fixed location**, repeat the step above, and close and reopen the Default apps page. Search for FeatherMD in the app list or for `.md` under file types; if it still does not appear, browse to the EXE under "Choose another app". Being in the list does not make it the default.
 - You can also right-click a .md file → Open with → Choose another app → FeatherMD → Always.
-- .md / .markdown / .mdown / .mkd are registered.
+- .md / .markdown / .mdown / .mkd / .txt / .text / .log are registered.
 - "Remove from Open with…" removes only FeatherMD's own entries.
 
 Windows 10/11 require the user to confirm default apps in Windows itself; ordinary desktop programs have no supported way to set them silently. So "Add to Open with" completes silently, while "Make default" still needs that confirmation. After moving the EXE, register it again; removing the registration does not choose another default viewer for you.
@@ -231,7 +245,7 @@ Details and Microsoft's documentation are in [File associations](docs/FILE_ASSOC
 - Custom vertical and horizontal scrollbars support dragging and paging on the track. After a quick drag far away and back, a stale page never pulls the reading position away. Short files hide the scrollbars they do not need.
 - End shows the whole last screen, even when the last paragraph is long and wrapped. PageUp / PageDown page by the real line heights and keep one overlapping line, so large headings never make you skip text. Paging back across cached pages keeps the wrap position of long paragraphs, and Copy without a selection takes the lines actually visible.
 
-The outline lists `#` to `######` headings and skips code fences. To keep large files responsive it scans at most the first **16 MiB** and shows up to **4096 headings**, with a note at the bottom when a limit is reached. Setext (underlined) headings are not listed; reading and full-text search are not limited to the outline's range. Reload (F5) rebuilds the outline.
+A Markdown outline lists `#` to `######` headings and skips code fences. To keep large files responsive it scans at most the first **16 MiB** (plain-text chapters the first 256 MiB; a log's time index the whole file, see "Plain text and logs") and shows up to **4096 headings**, with a note at the bottom when a limit is reached. Setext (underlined) headings are not listed; reading and full-text search are not limited to the outline's range. Reload (F5) rebuilds the outline.
 
 ### Shortcuts
 
@@ -271,7 +285,7 @@ For portable settings, create an empty **FeatherMD.ini** next to the EXE; settin
 
 ## What it reads, and its limits
 
-- Documents in UTF-8 / UTF-8 with BOM, in any Unicode the system fonts can show (any language). The interface is in Simplified Chinese, Traditional Chinese, English and Japanese.
+- Documents in UTF-8 / UTF-8 with BOM, and text that is not UTF-8 read with the system's legacy code page (GB18030 / Big5 / Shift-JIS and others), in any Unicode the system fonts can show (any language). The interface is in Simplified Chinese, Traditional Chinese, English and Japanese.
 - Headings, bold, italic, strikethrough, inline code, code fences (common languages highlighted), quotes, lists, task lists, rules, web links, GitHub-style tables (laid out to the window width) and common HTML tags.
 - Images show alt text by default. "Show images" controls automatic local images only; web images require a click and confirmation per URL (rules above).
 - HTML only shapes the text: no scripts run and nothing external loads automatically; unsupported tags and CSS are ignored. Only http/https links open, after a confirmation.
@@ -282,7 +296,9 @@ For portable settings, create an empty **FeatherMD.ini** next to the EXE; settin
 - Full-text search still reads the data in order, so its speed depends on the device; a search can be cancelled. Network drives, hard disks, file locks and system load affect it too.
 - The custom-drawn text does not yet expose full screen-reader semantics. HTML is handled line by line: one tag spread over several lines, table tags (`<table>` shows as lines of text separated by "·") and deeply nested markup may not look as they do in a browser; images inside table cells show their alt text.
 
-**There is no promise of "any size, rendered completely and instantly".** The goals are bounded reads, a fast first page and an interface that stays responsive.
+- Plain-text chapters and log times and levels are recognised by their common forms; this is not a complete log-format parser, and times it does not recognise stay out of the time index. In legacy-encoded text, a very long paragraph with no line break and no ASCII character may be one character off where a page starts inside it.
+
+**No promise of "instant full rendering at any size".** The goals are bounded reads, a fast first page and an interface that stays responsive.
 
 ## Measured
 

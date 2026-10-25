@@ -31,11 +31,14 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(app.get("Executable"), "FeatherMD.exe")
         self.assertEqual(app.get("{" + ns["uap10"] + "}TrustLevel"), "mediumIL")
         self.assertEqual([x.get("Name") for x in tree.find("f:Capabilities", ns)], ["runFullTrust"])
-        association = tree.find(".//uap3:FileTypeAssociation", ns)
-        self.assertEqual(association.get("Parameters"), '"%1"')
-        self.assertEqual(association.get("MultiSelectModel"), "Single")
-        self.assertEqual([x.text for x in association.findall("uap:SupportedFileTypes/uap:FileType", ns)],
-                         [".md", ".markdown", ".mdown", ".mkd"])
+        # Markdown, then plain text and logs: Open With entries, never a default.
+        associations = tree.findall(".//uap3:FileTypeAssociation", ns)
+        self.assertEqual([a.get("Name") for a in associations], ["feathermd.markdown", "feathermd.plaintext"])
+        for association in associations:
+            self.assertEqual(association.get("Parameters"), '"%1"')
+            self.assertEqual(association.get("MultiSelectModel"), "Single")
+        self.assertEqual([[x.text for x in a.findall("uap:SupportedFileTypes/uap:FileType", ns)] for a in associations],
+                         [[".md", ".markdown", ".mdown", ".mkd"], [".txt", ".text", ".log"]])
         self.assertEqual(len(tree.findall("f:Resources/f:Resource", ns)), 4)
 
     def test_archive_rejects_leaks_and_modified_files(self):

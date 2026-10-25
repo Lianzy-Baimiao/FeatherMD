@@ -8,7 +8,16 @@ const PROGID: &str = "FeatherMD.Document";
 const PROGID_PATH: &str = "Software\\Classes\\FeatherMD.Document";
 const CAPABILITIES: &str = "Software\\FeatherMD\\Capabilities";
 const REGISTERED_APPLICATIONS: &str = "Software\\RegisteredApplications";
-const EXTENSIONS: [&str; 4] = [".md", ".markdown", ".mdown", ".mkd"];
+/// Markdown, plain text and logs: offered in Open With, never made the default.
+const EXTENSIONS: [&str; 7] = [
+    ".md",
+    ".markdown",
+    ".mdown",
+    ".mkd",
+    ".txt",
+    ".text",
+    ".log",
+];
 const DESCRIPTION: &str = feathermd::key!("轻量原生 Markdown 查看器");
 
 fn wide(s: &str) -> Vec<u16> {
@@ -143,7 +152,7 @@ impl Registry {
             ));
         }
         let icon = format!("\"{exe}\",0");
-        self.text(PROGID_PATH, "", tr("Markdown 文档 (FeatherMD)"))?;
+        self.text(PROGID_PATH, "", tr("FeatherMD 文档"))?;
         self.text(&format!("{PROGID_PATH}\\DefaultIcon"), "", &icon)?;
         self.text(
             &format!("{PROGID_PATH}\\shell\\open\\command"),
@@ -354,7 +363,7 @@ mod tests {
         let exe = r"C:\用户 程序\Feather MD\FeatherMD.exe";
         registry.register(Path::new(exe)).unwrap();
         registry.register(Path::new(exe)).unwrap();
-        assert_text(&registry, PROGID_PATH, "", "Markdown 文档 (FeatherMD)");
+        assert_text(&registry, PROGID_PATH, "", "FeatherMD 文档");
         assert_text(
             &registry,
             &format!("{PROGID_PATH}\\shell\\open\\command"),

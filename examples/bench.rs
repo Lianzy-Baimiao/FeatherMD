@@ -1,6 +1,7 @@
-//! Reproducible warm-cache, local-file read + Markdown parse benchmark. Not first-paint timing.
-use feathermd::{document::Document, markdown};
-use std::{path::PathBuf, time::Instant};
+//! Reproducible warm-cache, local-file read + parse benchmark in the file's own
+//! format (Markdown, plain text or log), plus one outline scan. Not first-paint timing.
+use feathermd::{document::Document, outline, plain};
+use std::{path::PathBuf, sync::atomic::AtomicU64, time::Instant};
 fn percentile(samples: &mut [f64], p: f64) -> f64 {
     samples.sort_by(f64::total_cmp);
     samples[((samples.len() - 1) as f64 * p).round() as usize]
@@ -21,9 +22,12 @@ fn main() {
     let mut middle = vec![];
     let mut end = vec![];
     let size = Document::open(&path).unwrap().size;
+    let mut format = plain::Format::Markdown;
     for _ in 0..count {
         let start = Instant::now();
-        let d = Document::open(&path).unwrap();
+        let mut d = Document::open(&path).unwrap();
+        d.format = plain::sniff(d.format, &d.page(0).unwrap().lines);
+        format = d.format;
         open.push(start.elapsed().as_secs_f64() * 1000.0);
         for (anchor, out) in [
             (0, &mut first),
@@ -32,16 +36,29 @@ fn main() {
         ] {
             let start = Instant::now();
             let page = d.page(anchor).unwrap();
-            std::hint::black_box(markdown::blocks(&page.lines, false));
+            std::hint::black_box(plain::blocks(&page.lines, d.format, false));
             out.push(start.elapsed().as_secs_f64() * 1000.0);
         }
     }
+    let mut d = Document::open(&path).unwrap();
+    d.format = format;
+    let start = Instant::now();
+    let scan = outline::scan(&d, &AtomicU64::new(0), 0, &AtomicU64::new(0))
+        .unwrap()
+        .unwrap();
+    let outline_ms = start.elapsed().as_secs_f64() * 1000.0;
     println!(
-        "{{\"bytes\":{size},\"iterations\":{count},\"open_p50_ms\":{:.3},\"first_p50_ms\":{:.3},\"first_p95_ms\":{:.3},\"middle_p50_ms\":{:.3},\"end_p50_ms\":{:.3}}}",
+        "{{\"bytes\":{size},\"format\":\"{format:?}\",\"encoding\":\"{}\",\"iterations\":{count},\"open_p50_ms\":{:.3},\"first_p50_ms\":{:.3},\"first_p95_ms\":{:.3},\"middle_p50_ms\":{:.3},\"end_p50_ms\":{:.3},\"outline_ms\":{outline_ms:.1},\"outline_scanned\":{},\"outline_kind\":\"{:?}\",\"outline_entries\":{},\"errors\":{},\"warnings\":{}}}",
+        d.encoding.name(),
         percentile(&mut open, 0.5),
         percentile(&mut first, 0.5),
         percentile(&mut first, 0.95),
         percentile(&mut middle, 0.5),
-        percentile(&mut end, 0.5)
+        percentile(&mut end, 0.5),
+        scan.scanned,
+        scan.kind,
+        scan.headings.len(),
+        scan.errors,
+        scan.warnings
     );
 }
