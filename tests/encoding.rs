@@ -141,6 +141,37 @@ mod windows {
         );
     }
 
+    /// The result does not depend on this computer's code page: each case names one.
+    #[test]
+    fn detection_with_western_and_chinese_system_pages() {
+        let western = encoding::page_codec(1252).expect("cp1252");
+        let chinese = encoding::page_codec(936).expect("cp936");
+        assert_eq!(chinese, Codec::gb18030());
+        // ANSI text with an accent is Windows-1252 on a Western system.
+        let latin = b"caf\xe9 au lait\r\nna\xefve\r\n";
+        assert_eq!(
+            encoding::detect(latin, Some(western)),
+            Encoding::Legacy(western)
+        );
+        assert_eq!(western.decode(latin).0, "café au lait\r\nnaïve\r\n");
+        // UTF-8 with one stray byte stays UTF-8 on both.
+        let mut stray = "中文 café".as_bytes().to_vec();
+        stray.push(0xff);
+        for page in [western, chinese] {
+            assert_eq!(encoding::detect(&stray, Some(page)), Encoding::Utf8);
+        }
+        // GBK text is GB18030 on a Chinese system.
+        let gbk = Codec::gb18030()
+            .encode(&"他走出了家门，天还没有亮。".repeat(20))
+            .unwrap();
+        assert_eq!(
+            encoding::detect(&gbk, Some(chinese)),
+            Encoding::Legacy(chinese)
+        );
+        // UTF-8 systems have no legacy page.
+        assert!(encoding::page_codec(65001).is_none());
+    }
+
     #[test]
     fn an_ascii_query_never_matches_the_trail_byte_of_a_character() {
         // 0x81 0x40 is one character whose trail byte is '@'; then a real '@'.

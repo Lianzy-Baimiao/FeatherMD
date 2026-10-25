@@ -121,8 +121,8 @@ impl Codec {
 }
 
 /// The encoding of a file from its first bytes: UTF-8 unless they are clearly not
-/// (invalid sequences are common, not one stray byte; no NUL) and `legacy` reads
-/// them without error.
+/// (more invalid bytes than valid multi-byte characters; no NUL) and `legacy` reads
+/// them without error, as Notepad falls back to the ANSI page.
 pub fn detect(sample: &[u8], legacy: Option<Codec>) -> Encoding {
     if sample.starts_with(b"\xef\xbb\xbf") || sample.contains(&0) || mostly_utf8(sample) {
         return Encoding::Utf8;
@@ -139,7 +139,9 @@ pub fn detect(sample: &[u8], legacy: Option<Codec>) -> Encoding {
         None => Encoding::Utf8,
     }
 }
-/// No invalid UTF-8, or far more valid multi-byte characters than invalid bytes.
+/// No invalid UTF-8, or at least as many valid multi-byte characters as invalid
+/// bytes (UTF-8 text with stray bytes). Legacy CJK text reads as about one valid
+/// UTF-8 character per ten invalid bytes, Western ANSI text as none.
 fn mostly_utf8(sample: &[u8]) -> bool {
     let multibyte = |text: &str| text.chars().filter(|c| !c.is_ascii()).count();
     let (mut good, mut bad) = (0, 0);
@@ -164,7 +166,7 @@ fn mostly_utf8(sample: &[u8]) -> bool {
             }
         }
     }
-    bad == 0 || good >= 8 * bad
+    bad == 0 || good >= bad
 }
 
 pub use system::{codec as system_codec, page_codec};

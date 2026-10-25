@@ -221,7 +221,18 @@ fn multibyte_boundaries_never_corrupt_valid_utf8() {
 }
 #[test]
 fn invalid_bytes_are_flagged() {
-    let f = Fixture::new(b"abc\xff\n");
+    // UTF-8 text with one stray byte stays UTF-8 on every system code page, so the
+    // byte is replaced and flagged. (Text with no UTF-8 at all may be read as the
+    // system's ANSI page instead: see tests/encoding.rs.)
+    let f = Fixture::new(
+        "中文 abc\u{e9}\n"
+            .as_bytes()
+            .iter()
+            .copied()
+            .chain(*b"\xff\n")
+            .collect::<Vec<_>>()
+            .as_slice(),
+    );
     assert!(f.doc().page(0).unwrap().invalid_utf8);
 }
 #[test]
