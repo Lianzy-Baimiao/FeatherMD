@@ -1,0 +1,12 @@
+2026-10-24 23:58:10,120 [main] INFO  com.example.Api - service started
+2026-10-24 23:59:58,101 [main] WARN  com.example.Disk - disk 91% full
+2026-10-25 08:00:01,002 [main] INFO  com.example.Api - accepting requests
+2026-10-25 08:00:30,513 [worker-1] ERROR com.example.Job - job 42 failed
+java.lang.IllegalStateException: connection reset
+	at com.example.Job.run(Job.java:42)
+	at java.lang.Thread.run(Thread.java:833)
+2026-10-25 08:00:40,001 [worker-3] INFO  com.example.Api - request 1 done
+2026-10-25 08:00:40,002 [worker-3] INFO  com.example.Api - request 2 done
+2026-10-25 08:10:00,000 [worker-2] ERROR com.example.Job - job 43 failed again
+2026-10-25 08:11:00,001 [worker-2] WARN  com.example.Job - retrying job 43
+2026-10-25 08:11:05,300 [worker-2] INFO  com.example.Job - job 43 done
