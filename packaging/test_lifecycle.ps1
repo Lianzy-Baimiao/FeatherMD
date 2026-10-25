@@ -64,6 +64,13 @@ public static class PackageActivation {
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowTextW(IntPtr hwnd, StringBuilder s, int count);
  [DllImport("user32.dll")] static extern IntPtr SendMessageTimeoutW(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp, uint flags, uint timeout, out IntPtr result);
  [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
+ [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+ [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+ // Visible top-level windows (pid | class | title), as evidence when an activation fails.
+ public static string[] Windows(){var found=new List<string>();
+  EnumWindows((h,d)=>{if(IsWindowVisible(h)){uint p;GetWindowThreadProcessId(h,out p);var c=new StringBuilder(256);GetClassNameW(h,c,c.Capacity);
+   found.Add(p+" | "+c+" | "+Title(h));}return true;},IntPtr.Zero);return found.ToArray();
+ }
  public static long Query(IntPtr hwnd, int query) {
   IntPtr result;
   if(SendMessageTimeoutW(hwnd,0x802a,(IntPtr)query,IntPtr.Zero,2,5000,out result)==IntPtr.Zero) throw new Exception("Packaged reader did not respond");
@@ -126,6 +133,70 @@ function Sign([string]$inputFile,[string]$name) {
     if($LASTEXITCODE){throw 'Test signing failed'}
     return $copy
 }
+# What followed an activation that did not open the reader: new processes (also
+# late ones), visible windows, AppModel and application events, the extension's
+# registration, a desktop capture, and a direct launch of the same file as a
+# control (a process-start check, not an association test).
+function Evidence([string]$file,[string]$message,[int[]]$before,[datetime]$since) {
+    Start-Sleep -Seconds 3
+    $ext=[IO.Path]::GetExtension($file)
+    $evidence=[ordered]@{error=$message}
+    $evidence.processes=@(Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+        $start=$null; $path=$null
+        try{$start=$_.StartTime}catch{}
+        try{$path=$_.Path}catch{}
+        if($start -and $start -ge $since){"$($_.Id) | $($_.ProcessName) | $path | $($start.ToString('HH:mm:ss.fff'))"}
+    })
+    $evidence.windows=@([PackageActivation]::Windows())
+    $logs=@(@('Application','Microsoft-Windows-AppModel-Runtime/Admin','Microsoft-Windows-TWinUI/Operational','Microsoft-Windows-Shell-Core/Operational','Microsoft-Windows-AppXDeploymentServer/Operational','Microsoft-Windows-AppReadiness/Admin') |
+        Where-Object { Get-WinEvent -ListLog $_ -ErrorAction SilentlyContinue })
+    $evidence.events=@(try {
+        Get-WinEvent -FilterHashtable @{LogName=[string[]]$logs;StartTime=$since} -MaxEvents 80 -ErrorAction Stop | ForEach-Object {
+            $text=([string]$_.Message) -replace '\s+',' '
+            if($text.Length -gt 400){$text=$text.Substring(0,400)}
+            "$($_.TimeCreated.ToString('HH:mm:ss.fff')) | $($_.LogName) | $($_.ProviderName) | $($_.Id) | $text"
+        }
+    } catch {"events: $($_.Exception.Message)"})
+    $evidence.registration=@(foreach($key in @("Registry::HKEY_CURRENT_USER\Software\Classes\$ext\OpenWithProgids","Registry::HKEY_CLASSES_ROOT\$ext\OpenWithProgids","Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext\UserChoice")) {
+        if(Test-Path -LiteralPath $key){
+            $item=Get-Item -LiteralPath $key
+            "$key = "+(@($item.GetValueNames() | ForEach-Object { $value=$item.GetValue($_); if($value){"$_=$value"}else{$_} }) -join ', ')
+        } else {"$key absent"}
+    })
+    foreach($progid in @(Get-Item -LiteralPath "Registry::HKEY_CLASSES_ROOT\$ext\OpenWithProgids" -ErrorAction SilentlyContinue | ForEach-Object { $_.GetValueNames() } | Where-Object { $_ -like 'AppX*' })) {
+        $id=try{(Get-ItemProperty -LiteralPath "Registry::HKEY_CLASSES_ROOT\$progid\Application" -ErrorAction Stop).AppUserModelID}catch{"no Application key ($($_.Exception.Message))"}
+        $evidence.registration+="$progid -> $id"
+    }
+    try {
+        Add-Type -AssemblyName System.Drawing
+        $bitmap=[Drawing.Bitmap]::new([PackageActivation]::GetSystemMetrics(78),[PackageActivation]::GetSystemMetrics(79))
+        $graphics=[Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen([PackageActivation]::GetSystemMetrics(76),[PackageActivation]::GetSystemMetrics(77),0,0,$bitmap.Size)
+            $bitmap.Save((Join-Path $Output "activation$ext.png"),[Drawing.Imaging.ImageFormat]::Png)
+        } finally {$graphics.Dispose();$bitmap.Dispose()}
+        $evidence.capture="activation$ext.png"
+    } catch {$evidence.capture="capture failed: $($_.Exception.Message)"}
+    $readers=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $before })
+    $evidence.new_readers=$readers.Count
+    $readers | Stop-Process -Force -ErrorAction SilentlyContinue
+    $control=$null
+    try {
+        $control=Start-Process -FilePath $exe -ArgumentList ('"'+$file+'"') -PassThru
+        $controlWindow=[IntPtr]::Zero; $length=(Get-Item -LiteralPath $file).Length
+        for($i=0;$i -lt 400 -and -not $control.HasExited;$i++) {
+            $controlWindow=[PackageActivation]::Find($control.Id)
+            if($controlWindow -ne [IntPtr]::Zero -and [PackageActivation]::Query($controlWindow,10) -eq $length){break}
+            Start-Sleep -Milliseconds 25
+        }
+        $evidence.direct_launch=if($control.HasExited){"exited $($control.ExitCode)"}elseif($controlWindow -eq [IntPtr]::Zero){'no window'}else{
+            "loaded=$([PackageActivation]::Query($controlWindow,10) -eq $length) store=$([PackageActivation]::Query($controlWindow,97)) packaged=$([PackageActivation]::Query($controlWindow,98)) format=$([PackageActivation]::Query($controlWindow,100))"}
+        if($controlWindow -ne [IntPtr]::Zero){[void][PackageActivation]::PostMessageW($controlWindow,0x10,[IntPtr]::Zero,[IntPtr]::Zero)}
+        if(-not $control.HasExited){[void]$control.WaitForExit(5000)}
+    } catch {$evidence.direct_launch="failed: $($_.Exception.Message)"}
+    finally {if($control){try{if(-not $control.HasExited){$control.Kill()}}catch{};$control.Dispose()}}
+    return $evidence
+}
 try {
     $cert=New-SelfSignedCertificate -Type Custom -Subject 'CN=FeatherMD Store Test' -KeyUsage DigitalSignature -KeyExportPolicy NonExportable -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(2) -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3')
     $cer=Join-Path $private 'test.cer'
@@ -142,26 +213,28 @@ try {
     $result.family=$family
     $exe=Join-Path $app.InstallLocation 'FeatherMD.exe'
     $result.stage='shell-file-activation'
-    $activated=@()
+    $activated=@(); $failures=[ordered]@{}
     # Both declared groups, and the format each opens as (0 Markdown, 1 text, 2 log).
-    $formats=[ordered]@{'.md'=0;'.markdown'=0;'.mdown'=0;'.mkd'=0;'.txt'=1;'.text'=1;'.log'=2}
+    # Interleaved, and every extension is tried, so a failure shows whether it
+    # follows the extension, its group or the number of activations.
+    $formats=[ordered]@{'.md'=0;'.txt'=1;'.markdown'=0;'.log'=2;'.mdown'=0;'.text'=1;'.mkd'=0}
     foreach($ext in $formats.Keys) {
         $file=Join-Path $Output (([string][char]0x9605)+([string][char]0x8bfb)+' spaced file'+$ext)
         [IO.File]::WriteAllText($file,"# Shell activation`n`nUnicode and spaces.`n",[Text.UTF8Encoding]::new($false))
         $before=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
-        # Desktop FTAs receive command-line parameters, not a UWP Windows.File event.
-        $result.shell_handlers += [PackageActivation]::Open("$family!FeatherMD",$exe,$file)
-        $process=$null
-        for($i=0;$i -lt 400;$i++) {
-            $created=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $before -and $_.Path -eq $exe })
-            if($created.Count -gt 1){throw 'Shell created more than one matching reader'}
-            if($created.Count -eq 1){$process=$created[0];break}
-            Start-Sleep -Milliseconds 25
-        }
-        if(-not $process){throw 'Shell did not create the exact installed reader process'}
-        $processId=$process.Id
-        $window=[IntPtr]::Zero
+        $since=(Get-Date).AddSeconds(-1)
+        $process=$null; $window=[IntPtr]::Zero
         try {
+            # Desktop FTAs receive command-line parameters, not a UWP Windows.File event.
+            $result.shell_handlers += [PackageActivation]::Open("$family!FeatherMD",$exe,$file)
+            for($i=0;$i -lt 400;$i++) {
+                $created=@(Get-Process -Name FeatherMD -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $before -and $_.Path -eq $exe })
+                if($created.Count -gt 1){throw 'Shell created more than one matching reader'}
+                if($created.Count -eq 1){$process=$created[0];break}
+                Start-Sleep -Milliseconds 25
+            }
+            if(-not $process){throw 'Shell did not create the exact installed reader process'}
+            $processId=$process.Id
             for($i=0;$i -lt 400;$i++) {
                 if($process.HasExited){throw 'Shell-activated reader exited early'}
                 $window=[PackageActivation]::Find($processId)
@@ -173,14 +246,22 @@ try {
             if([PackageActivation]::Query($window,100) -ne $formats[$ext]){throw "Shell-activated $ext opened as format $([PackageActivation]::Query($window,100))"}
             if(-not [PackageActivation]::Title($window).StartsWith([IO.Path]::GetFileName($file))){throw 'Shell activation lost the Unicode file name'}
             $activated+=$ext
+        } catch {
+            $failures[$ext]=Evidence $file $_.Exception.Message $before $since
         } finally {
-            if($window -ne [IntPtr]::Zero){[void][PackageActivation]::PostMessageW($window,0x10,[IntPtr]::Zero,[IntPtr]::Zero)}
-            if(-not $process.WaitForExit(5000)){$process.Kill();throw 'Shell-activated process failed to close'}
-            $process.Dispose()
+            if($process){
+                if($window -ne [IntPtr]::Zero){[void][PackageActivation]::PostMessageW($window,0x10,[IntPtr]::Zero,[IntPtr]::Zero)}
+                if(-not $process.WaitForExit(5000)){$process.Kill();$failures["$ext close"]='Shell-activated process failed to close'}
+                $process.Dispose()
+            }
         }
     }
-    $result.shell_activation_tested=$true
     $result.activated_extensions=$activated
+    if($failures.Count){
+        $result.shell_failures=$failures
+        throw "Shell activation failed for $(@($failures.Keys) -join ', '); opened $($activated -join ', ')"
+    }
+    $result.shell_activation_tested=$true
     $result.stage='gui'
     & pwsh -NoProfile -File "$PSScriptRoot/../scripts/store-smoke.ps1" -Exe $exe -PackageFamily $family -Output (Join-Path $Output 'gui')
     if($LASTEXITCODE){throw 'Installed GUI test failed'}
@@ -211,6 +292,6 @@ try {
     }
     $result.cleanup_errors=$cleanupErrors
     if($cleanupErrors.Count){$result.result='FAIL'}
-    $result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Output 'lifecycle.json') -Encoding utf8
+    $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Output 'lifecycle.json') -Encoding utf8
 }
 if($cleanupErrors.Count){throw 'Cleanup did not finish'}
