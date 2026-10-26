@@ -11,7 +11,10 @@
 - [x] 非 UTF-8 文件按系统旧代码页读取（GB18030 / Big5 / Shift-JIS），搜索与目录同编码；UTF-8 路径不变。
 - [x] 打开方式与商店包加入 .txt / .text / .log（不设默认）；四语 README、CHANGELOG、ARCHITECTURE、PERFORMANCE、FILE_ASSOCIATIONS、AGENTS。
 - [x] fmt、Clippy、128 / 130 项测试、基准；新增 formats-smoke 加入 CI。
-- [ ] CI（含 formats-smoke 与全部原生回归）通过后打标签发布 v0.1.13；商店 1.0.13.0 WACK / 生命周期 / Partner Center 更新。
+- [x] CI 修正（cp1252 runner 上的 UTF-8 判定、GBK 截图等目录完成）后 main / tag CI（40240155669 / 40240696533）通过，发布 [v0.1.13](https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.13)；附件重新下载后哈希一致。
+- [x] 商店：WACK 40240292473（总体 PASS）冻结 1.0.13.0；生命周期测试扩到七个扩展名，查明 .txt / .text 由 Windows 选择框接管（记录而不点击），运行 40244480948 通过。
+- [x] 商店：Submission 2（1.0.12.0）已上架；Submission 3 上传 1.0.13.0、四语“此版本的新增功能”、认证说明与审核样例，通过认证后自动发布，已提交认证。
+- [ ] 商店：查看 Submission 3 的实际认证结果；被拒时先读报告。商店说明与截图仍只讲 Markdown，可另行更新。
 
 ## v0.1.12：隐私按钮间距与商店更新（2026-10-24）
 
@@ -20,7 +23,7 @@
 - [x] 提交 6fe4f38、推送，main / tag CI（40048137266 / 40048749172）通过后发布 [v0.1.12](https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.12)；附件重新下载后哈希一致。
 - [x] 商店：WACK（40048542912，总体 PASS）与生命周期（40048545728）验证 1.0.12.0，冻结 dist/store-1.0.12.0-candidate。
 - [x] 商店：Partner Center Submission 2 上传 1.0.12.0、四语“此版本的新增功能”、认证通过后自动发布，已提交认证（用户授权全权操作）。
-- [ ] 商店：查看 Submission 2 的实际认证结果；被拒时先读报告。
+- [x] 商店：Submission 2 已通过认证并上架（2026-10-26 在 Partner Center 概述确认）。
 
 ## v0.1.11：表格单元格按字符选择（2026-10-24）
 

@@ -1,20 +1,16 @@
 # Microsoft Store build and submission
 
-Status (2026-10-24): Submission 1 (`1152921505702158375`, the frozen 1.0.10.0
-MSIX) passed certification and is published. The public display catalog lists
-`ice.FeatherMD_1.0.10.0_x64__rz8m2sa64m4em`, free, publisher 白描ice, released
-2026-10-20 02:58 UTC; the Store page answers HTTP 200. The publication step itself
-was not recorded by this tooling; the catalog is the evidence. **Submission 2**
-(`1152921505702218732`) with the frozen 1.0.12.0 MSIX was submitted for
-certification on 2026-10-24 and publishes automatically when it passes (the owner
-gave full authority for this update); it was accepted, not yet certified. The package is
-**1.0.12.0** (Cargo 0.1.12: table cells select by character from 0.1.11, and the
-Updates-page privacy button no longer touching the card and footer rule), built and
-validated by the disposable workflows below and uploaded as a new submission. A
-1.0.11.0 candidate passed WACK (run 40044912773) and lifecycle (run 40044915701) but
-was never uploaded, because the button layout defect was found first. Never reuse an
-uploaded version. Do not reuse LiteView's identity or ratings. See PROGRESS.md for
-exact evidence and limitations.
+Status (2026-10-26): Submission 1 (`1152921505702158375`, 1.0.10.0) was published
+2026-10-20. **Submission 2** (`1152921505702218732`, 1.0.12.0) passed
+certification and is the version in the Store. **Submission 3**
+(`1152921505702229604`) with the frozen **1.0.13.0** MSIX (Cargo 0.1.13: plain text,
+logs and legacy encodings; `.txt` / `.text` / `.log` added to Open With) was
+submitted for certification on 2026-10-26 and publishes automatically when it passes
+(the owner asked for an unattended release including the Store); it was accepted,
+not yet certified. A 1.0.11.0 candidate passed WACK (run 40044912773) and lifecycle
+(run 40044915701) but was never uploaded. Never reuse an uploaded version. Do not
+reuse LiteView's identity or ratings. See PROGRESS.md for exact evidence and
+limitations.
 
 ## Build
 
@@ -114,7 +110,10 @@ answers or screenshots. Complete the questionnaire for FeatherMD's actual behavi
 - Uploaded `dist/store-1.0.10.0-candidate/FeatherMD-1.0.10.0-x64.msix`, 551,084
   bytes, SHA-256 `ba17aec5ba13880c794e767640104f8ae41771da0a60b751f9f013c7538cb80f`.
   Desktop only; future device-family expansion is disabled. Do not replace these
-  verified bytes casually.
+  verified bytes casually. Later uploads: 1.0.12.0 (Submission 2, SHA-256
+  `9c4eb44c…`) and `dist/store-1.0.13.0-candidate/FeatherMD-1.0.13.0-x64.msix`
+  (Submission 3), 574,736 bytes, SHA-256
+  `34a7d6332b64cdee2ac89db1abecc7a9bf724e1dbd30c93e605b5c5e57a348e2`.
 - Four localized listings (zh-CN, zh-TW, en-US, ja-JP) each have four desktop
   screenshots and five feature bullets. Capture output is
   `test-artifacts/store-listing-39047863992/`: light, dark, source and tables for
@@ -132,8 +131,8 @@ answers or screenshots. Complete the questionnaire for FeatherMD's actual behavi
   saved. Submission was subsequently accepted; the missing text did not block
   submission. Do not invent a Chinese ISBN or other approval
   from the market selector's generic label.
-- Release hold is manual and was confirmed again by the submitted status page:
-  certification must not automatically publish this submission. The
+- Submission 1's release hold was manual and was confirmed again by its submitted
+  status page: certification did not automatically publish it. The
   500-character restricted-capability field contains a saved
   454-character explanation. Full testing notes are saved separately and were
   verified after a page reload.
@@ -160,24 +159,35 @@ administrator elevation. No login or payment is required. Optional support links
 lead to third-party payments and do not unlock features.
 
 Test: launch from Start; open a local Markdown file containing Unicode/spaces in
-its path; navigate/search; switch language/theme; use the Windows Open With picker
-for each declared extension; save settings; restart; update/uninstall the package.
-Remote images require clicking and confirming a URL; F5 revokes that consent.
-Open Settings > Updates to find the Store update entry and offline privacy notice.
+its path; navigate/search; switch language/theme; open the `.txt` novel and `.log`
+in `docs/store-samples` (chapters; time index with error/warning counts); use the
+Windows Open With picker for each of the seven declared extensions; save settings;
+restart; update/uninstall the package. Remote images require clicking and
+confirming a URL; F5 revokes that consent. Open Settings > Updates to find the
+Store update entry and offline privacy notice.
+
+Where another app is already the default (Notepad for `.txt`), Windows may answer
+Open With → FeatherMD with its own "Select an app" dialog listing FeatherMD; the
+notes tell reviewers to choose FeatherMD and "Just once". This was observed for
+`.txt` and `.text` on the Windows Server 2025 runner (run 40242268129 captures);
+`.log` and the Markdown types opened FeatherMD directly.
 
 The saved notes also preserve the production WACK overall PASS with one optional
 Blocked executables FAIL, the ShellExecuteW/ExW and REG explanation, and links to
-runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
-10 validation, full accessibility or prior Microsoft certification.
+the current WACK and lifecycle runs (40240292473 and 40244480948 for 1.0.13.0).
+They explicitly do not claim completed Windows 10 validation, full accessibility or
+prior Microsoft certification.
 
 ## Remaining release gates
 
-- 1.0.10.0 passed certification and is live. 1.0.12.0 is in certification as
-  Submission 2 with "What's new" in all four listings and automatic publication;
-  listing, pricing, markets and age rating are unchanged. Check the actual result.
-  If certification rejects it, read the actual report before changing the frozen
+- 1.0.12.0 passed certification and is live. 1.0.13.0 is in certification as
+  Submission 3 with "What's new" in all four listings and automatic publication;
+  pricing, markets and age rating are unchanged. Check the actual result. If
+  certification rejects it, read the actual report before changing the frozen
   candidate; a fix needs a new version number. Do not repeat completed
   IARC/age/data-sharing consent.
+- The listing description, feature bullets and screenshots still describe a
+  Markdown reader only; updating them for text and logs is a separate change.
 - Partner Center from this machine: headless browsers get Akamai "Access Denied".
   A separate Edge instance with its own user-data folder signs in through the
   Windows account; drive it over a local DevTools port. Its sync pulls the owner's
@@ -194,7 +204,10 @@ runs 39045802702 and 39045655691. They explicitly do not claim completed Windows
   2026-09-15, in effect from 2026-10-22) changes XBOX branding and game rules,
   age-rating accuracy (11.11) and game-mod UGC moderation (11.12). Nothing new
   applies to this update, and the content behind the age rating is unchanged.
-- No automatic publication or new monitoring task was configured.
+  They were not rechecked for 1.0.13.0 (the policy pages could not be fetched from
+  that session); 1.0.13.0 only adds reading local text and log files.
+- Submissions 2 and 3 publish automatically after certification, as the owner
+  asked; no monitoring task was configured.
 
 ## Testing without interrupting the desktop
 
@@ -214,11 +227,17 @@ restriction and requires separate user permission; never use it just to make a
 test pass.
 
 The manually dispatched `Store candidate validation` workflow prepares two test
-versions and runs GUI, Shell activation of all four extensions, installation,
+versions and runs GUI, Shell activation of all seven extensions, installation,
 settings-preserving upgrade and uninstall on a disposable Windows 2025 runner.
 Its short-lived signing certificate/private key and signed packages are not
 uploaded. It is not WACK and not Store certification. Run 39045655691 passed,
 including exact-AUMID Shell Open With activation rather than a UWP file contract.
+When Windows answers an activation with its "Select an app" dialog (OpenWith.exe),
+the dialog is not reachable by UI Automation on the runner, so the test records a
+capture and opens the same file directly instead of clicking; it still requires
+each declared group to start the reader through the Shell at least once and every
+UserChoice default to stay unchanged. Run 40244480948 passed this way (`.txt` and
+`.text` showed the dialog).
 
 The separate manual `Supplemental Store WACK` workflow builds the same Store
 channel on a fresh Windows 2025 runner. Its default is a test identity. After

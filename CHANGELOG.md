@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.13 — 2026-10-24
+## 0.1.13 — 2026-10-26
 
 ### Added
 - Plain text and logs. A file is read as Markdown, plain text or a log from its name (`.log`, rotated `app.log.1`, `.out` are logs); a `.txt` whose lines mostly start with timestamps or level words is read as a log. Plain text keeps every line as written, leading and full-width indents included; logs are monospace with timestamps muted, errors red and warnings amber, without ANSI escapes.
