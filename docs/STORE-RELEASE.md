@@ -70,7 +70,13 @@ unsigned unless separately signed with a trusted code-signing service/certificat
 
 MSIX versions: 1.0.10.0 was the first upload (Cargo 0.1.10); 1.0.12.0 carries
 Cargo 0.1.12 (1.0.11.0 was built but never uploaded); 1.0.13.0 carries Cargo 0.1.13
-(plain text and logs). Increment the third component for each new candidate/upload,
+(plain text and logs). 1.0.14.0 (Cargo 0.1.14, WACK run 41219784164) was uploaded to
+the Submission 4 draft and failed package acceptance: its PublisherDisplayName read
+`鐧芥弿ice`, because the identity JSON passed to the workflow had been read without
+an explicit encoding on a cp936 system. It was deleted from the draft unsaved and is
+never reused; 1.0.15.0 carries Cargo 0.1.14. Read `store-identity.local.json` as
+UTF-8 (`open(..., encoding="utf-8")`, `json.dumps` keeps non-ASCII as `\u` escapes)
+and check the manifest's PublisherDisplayName before uploading. Increment the third component for each new candidate/upload,
 independent of Cargo's version: a replacement candidate for the same Cargo version
 still takes the next number. Components are <=65535, the first is nonzero and the
 fourth stays 0. Never overwrite/reuse an uploaded version.

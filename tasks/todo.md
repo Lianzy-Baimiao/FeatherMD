@@ -12,7 +12,9 @@
 - [x] 大文件快速拖动滚动条不再卡顿（只排版附近的块、每次移动都重绘）；拖到底不再停在 97.7%。
 - [x] 查找默认不区分 ASCII 字母大小写，Aa / Alt+C 切换；正文标题按编号深度定字号；空表头行让位给第一行。
 - [x] fmt、两种配置 strict Clippy、146 / 148 项测试、17 项 Python 测试；副屏 22 项原生回归 PASS；README 截图按新构建重截，新增 docs/outline-find.png。
-- [ ] 提交推送、main / tag CI、GitHub Release；商店 WACK、生命周期与 Submission 4（1.0.14.0）。
+- [x] 提交 4f6f527 推送，main / tag CI（41212514896 / 41215688476）通过后发布 [v0.1.14](https://github.com/Lianzy-Baimiao/FeatherMD/releases/tag/v0.1.14)；附件重新下载后哈希一致。
+- [x] 商店：Submission 3（1.0.13.0）已通过认证并上架（2026-10-31 在概述确认）。
+- [ ] 商店：1.0.14.0 上传时发布者显示名称被读错编码而不被接受，已从草稿删除；改用 1.0.15.0 重新 WACK 后上传 Submission 4。
 
 ## v0.1.13：纯文本、日志与旧编码（2026-10-24）
 
