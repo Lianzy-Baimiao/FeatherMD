@@ -1,13 +1,14 @@
 # Microsoft Store build and submission
 
-Status (2026-10-26): Submission 1 (`1152921505702158375`, 1.0.10.0) was published
-2026-10-20. **Submission 2** (`1152921505702218732`, 1.0.12.0) passed
-certification and is the version in the Store. **Submission 3**
-(`1152921505702229604`) with the frozen **1.0.13.0** MSIX (Cargo 0.1.13: plain text,
-logs and legacy encodings; `.txt` / `.text` / `.log` added to Open With) was
-submitted for certification on 2026-10-26 and publishes automatically when it passes
-(the owner asked for an unattended release including the Store); it was accepted,
-not yet certified. A 1.0.11.0 candidate passed WACK (run 40044912773) and lifecycle
+Status (2026-11-01): Submission 1 (`1152921505702158375`, 1.0.10.0) was published
+2026-10-20; Submission 2 (`1152921505702218732`, 1.0.12.0) followed. **Submission 3**
+(`1152921505702229604`, 1.0.13.0: plain text, logs and legacy encodings; `.txt` /
+`.text` / `.log` in Open With) passed certification and is the version in the Store
+(checked 2026-10-31). **Submission 4** (`1152921505702286065`) with the frozen
+**1.0.15.0** MSIX (Cargo 0.1.14: outline tree and filter, Find's list of matches,
+links inside documents, smooth scrollbar drags) was submitted for certification on
+2026-11-01 and publishes automatically when it passes (the owner asked for an
+unattended release including the Store); it was accepted, not yet certified. A 1.0.11.0 candidate passed WACK (run 40044912773) and lifecycle
 (run 40044915701) but was never uploaded. Never reuse an uploaded version. Do not
 reuse LiteView's identity or ratings. See PROGRESS.md for exact evidence and
 limitations.
@@ -119,7 +120,10 @@ answers or screenshots. Complete the questionnaire for FeatherMD's actual behavi
   verified bytes casually. Later uploads: 1.0.12.0 (Submission 2, SHA-256
   `9c4eb44c…`) and `dist/store-1.0.13.0-candidate/FeatherMD-1.0.13.0-x64.msix`
   (Submission 3), 574,736 bytes, SHA-256
-  `34a7d6332b64cdee2ac89db1abecc7a9bf724e1dbd30c93e605b5c5e57a348e2`.
+  `34a7d6332b64cdee2ac89db1abecc7a9bf724e1dbd30c93e605b5c5e57a348e2`;
+  `dist/store-1.0.15.0-candidate/FeatherMD-1.0.15.0-x64.msix` (Submission 4),
+  621,258 bytes, SHA-256
+  `f9a59b9340d77b6385f0dd0588e46d0822be8a8afcc8512a75e5e11529d106ad`.
 - Four localized listings (zh-CN, zh-TW, en-US, ja-JP) each have four desktop
   screenshots and five feature bullets. Capture output is
   `test-artifacts/store-listing-39047863992/`: light, dark, source and tables for
@@ -180,20 +184,23 @@ notes tell reviewers to choose FeatherMD and "Just once". This was observed for
 
 The saved notes also preserve the production WACK overall PASS with one optional
 Blocked executables FAIL, the ShellExecuteW/ExW and REG explanation, and links to
-the current WACK and lifecycle runs (40240292473 and 40244480948 for 1.0.13.0).
+the current WACK and lifecycle runs (41230598022 and 41219786958 for 1.0.15.0;
+40240292473 and 40244480948 were 1.0.13.0's). Step 3 now asks reviewers to try the
+outline filter, Find's list of matches (Aa / Alt+C) and a scrollbar drag.
 They explicitly do not claim completed Windows 10 validation, full accessibility or
 prior Microsoft certification.
 
 ## Remaining release gates
 
-- 1.0.12.0 passed certification and is live. 1.0.13.0 is in certification as
-  Submission 3 with "What's new" in all four listings and automatic publication;
+- 1.0.13.0 passed certification and is live. 1.0.15.0 is in certification as
+  Submission 4 with "What's new" in all four listings and automatic publication;
   pricing, markets and age rating are unchanged. Check the actual result. If
   certification rejects it, read the actual report before changing the frozen
-  candidate; a fix needs a new version number. Do not repeat completed
+  candidate; a fix needs a new version number (1.0.16.0). Do not repeat completed
   IARC/age/data-sharing consent.
 - The listing description, feature bullets and screenshots still describe a
-  Markdown reader only; updating them for text and logs is a separate change.
+  Markdown reader only (no text/logs, outline filter or Find list); updating them is
+  a separate change.
 - Partner Center from this machine: headless browsers get Akamai "Access Denied".
   A separate Edge instance with its own user-data folder signs in through the
   Windows account; drive it over a local DevTools port. Its sync pulls the owner's
@@ -212,8 +219,10 @@ prior Microsoft certification.
   applies to this update, and the content behind the age rating is unchanged.
   They were not rechecked for 1.0.13.0 (the policy pages could not be fetched from
   that session); 1.0.13.0 only adds reading local text and log files.
-- Submissions 2 and 3 publish automatically after certification, as the owner
-  asked; no monitoring task was configured.
+- Submissions 2, 3 and 4 publish automatically after certification, as the owner
+  asked; no monitoring task was configured. Policies were not rechecked for
+  1.0.15.0 either (learn.microsoft.com was unreachable from that session); it only
+  changes the reading interface, with no new capability or content.
 
 ## Testing without interrupting the desktop
 
