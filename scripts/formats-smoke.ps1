@@ -154,7 +154,8 @@ function Copied {
 function ClickEntry([int]$index) {
  $offset = Query 37 $index
  Capture
- $x = Scale 40; $y = Scale (90 + 30 * $index + 15)
+ if ((Query 113 $index) -ne $index) { throw "Outline row $index lists entry $(Query 113 $index)" }
+ $x = Scale 40; $y = [int]((Query 110) + $index * (Query 111) + [Math]::Floor((Query 111) / 2))
  Send 0x201 1 ([FormatsSmoke]::Point($x, $y)); Send 0x202 0 ([FormatsSmoke]::Point($x, $y))
  Idle
  if ((Query 9) -ne $offset) { throw "Outline entry $index did not seek to byte $offset; reading at $(Query 9)" }

@@ -1,4 +1,4 @@
-param([string]$Version = "0.1.13", [string]$Output = "")
+param([string]$Version = "0.1.14", [string]$Output = "")
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot
 $dist=if($Output){[IO.Path]::GetFullPath($Output)}else{Join-Path $root 'dist'}
@@ -21,7 +21,7 @@ if((Test-Path -LiteralPath $docs) -and ((Get-Item -LiteralPath $docs).Attributes
 if(Test-Path -LiteralPath $docs){Remove-Item -LiteralPath $docs -Recurse -Force}
 New-Item -ItemType Directory -Path $docs -Force | Out-Null
 $shots=@('reading-light.png','reading-dark.png','reading-outline-hidden.png','welcome-light.png','welcome-dark.png','about-light.png','about-dark.png','typography-light.png','typography-dark.png','settings-skins-light.png','settings-skins-dark.png','settings-editor.png','settings-update.png','settings-language.png','settings-reading.png','copy-button.png','reading-table.png','reading-typography.png','reading-skins.png','reading-images.png','preview-selection.png','table-selection.png','source-selection.png','reading-book.png','reading-ancient.png','file-associations-menu.png')
-$shots+=@('reading-web-images.png','reading-web-images-loaded.png')
+$shots+=@('reading-web-images.png','reading-web-images-loaded.png','outline-find.png')
 # Each translated README shows its own reading view, About window and language page.
 foreach($code in @('zh-TW','en','ja')){$shots+=@("reading-light.$code.png","about-light.$code.png","settings-language.$code.png")}
 foreach($name in $shots+@('PERFORMANCE.md','ARCHITECTURE.md','FILE_ASSOCIATIONS.md','PRIVACY.md','sample.md')){Copy-Item -LiteralPath (Join-Path $root "docs\$name") -Destination (Join-Path $docs $name)}

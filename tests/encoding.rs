@@ -50,7 +50,7 @@ fn files_are_utf8_unless_clearly_not() {
 #[cfg(windows)]
 mod windows {
     use feathermd::{
-        document::{Document, SearchResult},
+        document::{Document, Query, SearchResult},
         encoding::{self, Codec, Encoding},
     };
     use std::sync::atomic::AtomicU64;
@@ -170,6 +170,67 @@ mod windows {
         );
         // UTF-8 systems have no legacy page.
         assert!(encoding::page_codec(65001).is_none());
+    }
+
+    #[test]
+    fn gbk_matches_are_listed_with_their_lines_as_text() {
+        let gb = Codec::gb18030();
+        let bytes = gb
+            .encode("第一章 少年\r\n　　他走了。他走了\r\nend")
+            .unwrap();
+        let (_temp, document) = file(&bytes);
+        let (epoch, progress) = (AtomicU64::new(0), AtomicU64::new(0));
+        let found = document
+            .find_all("他走了", &epoch, 0, &progress)
+            .unwrap()
+            .unwrap();
+        let shape: Vec<(u64, &str, &str)> = found
+            .items
+            .iter()
+            .map(|m| (m.line, m.before.as_str(), m.after.as_str()))
+            .collect();
+        assert_eq!(shape, [(2, "", "。他走了"), (2, "他走了。", "")]);
+        // Only whole characters match: '@' inside 0x81 0x40 is not one.
+        let (_temp, document) = file(&[0x81, 0x40, b'@']);
+        let found = document
+            .find_all("@", &epoch, 0, &progress)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            found.items.iter().map(|m| m.offset).collect::<Vec<_>>(),
+            [2]
+        );
+    }
+
+    #[test]
+    fn folding_letters_never_joins_two_characters_by_their_trail_bytes() {
+        // 0x81 0x41 and 0x81 0x61 are two characters; folding the trail byte 'A' to
+        // 'a' must not make one match the other, and each still finds itself.
+        let gb = Codec::gb18030();
+        let (upper, lower) = (gb.decode(&[0x81, 0x41]).0, gb.decode(&[0x81, 0x61]).0);
+        assert_ne!(upper, lower);
+        let (_temp, document) = file(&[0x81, 0x41, b'x', b' ', 0x81, 0x61, b'X']);
+        let (epoch, progress) = (AtomicU64::new(0), AtomicU64::new(0));
+        let find = |text: &str| {
+            document
+                .find_all(
+                    Query {
+                        text,
+                        match_case: false,
+                    },
+                    &epoch,
+                    0,
+                    &progress,
+                )
+                .unwrap()
+                .unwrap()
+                .items
+                .iter()
+                .map(|m| m.offset)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(find(&format!("{upper}X")), [0]);
+        assert_eq!(find(&format!("{lower}x")), [4]);
     }
 
     #[test]

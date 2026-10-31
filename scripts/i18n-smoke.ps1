@@ -227,6 +227,15 @@ function Views([int]$index) {
  Send $window 0x2a3 0 ([IntPtr]::Zero)
  Send $window 0x111 102 ([IntPtr]::Zero)
  Check $window "$code-find"
+ # The match-case toggle's tooltip, below the find strip.
+ $aa = Query 143
+ if ($aa -lt 0) { Problem "$code Find has no match-case toggle" } else {
+  Send $window 0x200 0 ([IntPtr]$aa)
+  Start-Sleep -Milliseconds 600
+  if ((Query 43) -ne 1) { Problem "$code match-case tooltip did not appear (hover $(Query 44))" }
+  Check $window "$code-find-tip"
+  Send $window 0x2a3 0 ([IntPtr]::Zero)
+ }
  Send $window 0x100 0x1b ([IntPtr]::Zero)
  Send $window 0x111 103 ([IntPtr]::Zero)
  Check $window "$code-goto"

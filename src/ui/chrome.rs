@@ -249,7 +249,9 @@ impl App {
 
     /// Tooltip of the title-bar or footer control under the pointer.
     pub(super) fn header_tip(&self) -> Option<String> {
-        let bars = |y: i32| y < self.s(HEADER_HEIGHT) || y >= self.height - self.s(30);
+        // The title bar, the footer and, while it is open, the find strip.
+        let strip = |y: i32| self.edit_mode.is_some() && y < self.s(HEADER_HEIGHT + 53);
+        let bars = |y: i32| y < self.s(HEADER_HEIGHT) || y >= self.height - self.s(30) || strip(y);
         if self.theme_menu.is_some() || self.mouse.is_none_or(|(_, y)| !bars(y)) {
             return None;
         }
@@ -268,6 +270,7 @@ impl App {
                 THEME_PICKER => {
                     return Some(trf("外观：{} · Ctrl+T", &[&skin_name(self.settings.theme)]));
                 }
+                MATCH_CASE => tr("区分大小写 · Alt+C"),
                 MINIMIZE => tr("最小化"),
                 MAXIMIZE => tr("最大化 / 还原"),
                 EXIT => tr("关闭"),
@@ -434,6 +437,9 @@ impl App {
             // Below the title bar, or above the footer for its controls.
             let top = if hit.rect.top >= self.height - self.s(30) {
                 self.height - self.s(30 + 41)
+            } else if hit.rect.top >= self.s(HEADER_HEIGHT) {
+                // Find's controls: below their strip, clear of the native box.
+                self.s(HEADER_HEIGHT + 56)
             } else {
                 self.s(HEADER_HEIGHT + 7)
             };
@@ -550,6 +556,19 @@ impl App {
                 ChromeTone::Quiet,
                 p,
             );
+            if self.edit_mode == Some(FIND) {
+                // Match case: a toggle, filled while it is on.
+                let toggle = chrome_rect(
+                    self.width - self.s(196),
+                    self.s(HEADER_HEIGHT + 12),
+                    self.width - self.s(158),
+                    self.s(HEADER_HEIGHT + 44),
+                );
+                if self.match_case {
+                    chrome_round(dc, toggle, p.selection, self.s(6));
+                }
+                self.chrome_button(dc, "Aa", toggle, MATCH_CASE, ChromeTone::Quiet, p);
+            }
             let close = chrome_rect(
                 self.width - self.s(56),
                 self.s(HEADER_HEIGHT + 12),
@@ -601,9 +620,9 @@ impl App {
             tr("目录"),
             chrome_rect(
                 self.s(18),
-                self.s(HEADER_HEIGHT + 14),
+                self.s(HEADER_HEIGHT + 8),
                 width - self.s(52),
-                self.s(HEADER_HEIGHT + 42),
+                self.s(HEADER_HEIGHT + 38),
             ),
             12,
             true,
@@ -612,24 +631,83 @@ impl App {
         );
         let collapse = chrome_rect(
             width - self.s(42),
-            self.s(HEADER_HEIGHT + 14),
+            self.s(HEADER_HEIGHT + 9),
             width - self.s(14),
-            self.s(HEADER_HEIGHT + 42),
+            self.s(HEADER_HEIGHT + 37),
         );
         self.chrome_button(dc, "", collapse, OUTLINE, ChromeTone::Quiet, p);
         self.chrome_window_icon(dc, collapse, OUTLINE, p.muted);
+        // The filter box: the edit control sits inside, after the search glyph.
+        let field = self.filter_rect();
+        let focused = !self.filter.is_null() && GetFocus() == self.filter;
+        chrome_round(
+            dc,
+            field,
+            if focused { p.accent } else { p.edge },
+            self.s(6),
+        );
+        chrome_round(
+            dc,
+            chrome_rect(
+                field.left + 1,
+                field.top + 1,
+                field.right - 1,
+                field.bottom - 1,
+            ),
+            p.bg,
+            self.s(6) - 1,
+        );
+        self.hits.push(HitBox {
+            rect: field,
+            action: Hit::Command(FILTER_BOX),
+        });
+        self.header_glyph(
+            dc,
+            chrome_rect(
+                field.left + self.s(6),
+                field.top,
+                field.left + self.s(24),
+                field.bottom,
+            ),
+            FIND,
+            p.muted,
+            0.62,
+        );
+        if !self.outline_filter.is_empty() {
+            let clear = chrome_rect(
+                field.right - self.s(25),
+                field.top + self.s(3),
+                field.right - self.s(3),
+                field.bottom - self.s(3),
+            );
+            if self.hover == Some(CLEAR_FILTER) {
+                chrome_round(dc, clear, mix(p.bg, p.fg, 8), self.s(4));
+            }
+            smooth::icon(dc, clear, EXIT, p.muted, self.fonts.dpi as f32 / 96.0 * 0.8);
+            self.hits.push(HitBox {
+                rect: clear,
+                action: Hit::Command(CLEAR_FILTER),
+            });
+        }
         let visible = self.outline_visible_rows();
         let first = self.outline_top;
-        let active = self.outline_active();
+        let row_height = self.s(OUTLINE_ROW);
+        let filtering = !self.outline_filter.trim().is_empty();
         // Copy only visible labels so GDI font lookup can borrow App mutably.
-        let (entries, total, limited) = if let Some(outline) = &self.outline {
-            let entries: Vec<_> = outline
-                .headings
+        let (entries, total, limited, nested, active) = if let Some(outline) = &self.outline {
+            let headings = &outline.headings;
+            let active = self
+                .outline_active()
+                .and_then(|a| feathermd::toc::active_row(headings, &self.outline_rows, a));
+            let entries: Vec<_> = self
+                .outline_rows
                 .iter()
                 .enumerate()
                 .skip(first)
                 .take(visible)
-                .map(|(index, heading)| {
+                .map(|(row, line)| {
+                    let index = line.entry;
+                    let heading = &headings[index];
                     // A log time entry says how many error and warning lines it holds.
                     let mut text = heading.text.clone();
                     if heading.errors > 0 && outline.kind == OutlineKind::Time {
@@ -640,73 +718,115 @@ impl App {
                         text.push_str(" · ");
                         text.push_str(&trf("{} 警告", &[&heading.warnings]));
                     }
-                    (index, heading.level, text, heading.errors > 0)
+                    let fold = (!filtering && feathermd::toc::has_children(headings, index))
+                        .then(|| self.outline_folded.get(index).copied().unwrap_or(false));
+                    (
+                        row,
+                        index,
+                        heading.depth,
+                        text,
+                        heading.errors > 0,
+                        fold,
+                        line.context,
+                    )
                 })
                 .collect();
-            (entries, outline.headings.len(), outline.limited)
+            let nested = headings.iter().any(|h| h.depth > 1);
+            (entries, headings.len(), outline.limited, nested, active)
         } else {
-            (Vec::new(), 0, false)
+            (Vec::new(), 0, false, false, None)
         };
         let bottom = self.height - self.s(62);
         let saved = SaveDC(dc);
         IntersectClipRect(dc, 1, self.s(OUTLINE_ROWS_TOP), width - 1, bottom);
         let error_tone = p.token(feathermd::highlight::Token::Deleted);
-        for (row, (index, level, text, errors)) in entries.into_iter().enumerate() {
-            let top = self.s(OUTLINE_ROWS_TOP + row as i32 * 30);
+        // Fold marks take a column only in an outline that has nesting.
+        let mark = if nested { self.s(16) } else { 0 };
+        for (slot, (row, index, depth, text, errors, fold, context)) in
+            entries.into_iter().enumerate()
+        {
+            let top = self.s(OUTLINE_ROWS_TOP) + slot as i32 * row_height;
             if top >= bottom {
                 break;
             }
-            let rect = chrome_rect(
-                self.s(6),
-                top,
-                width - self.s(10),
-                (top + self.s(30)).min(bottom),
-            );
-            let selected = active == Some(index);
+            let rect = chrome_rect(self.s(6), top, width - self.s(10), top + row_height);
+            let selected = active == Some(row);
             if selected || self.pressed == Some(Hit::Heading(index)) {
-                chrome_round(dc, rect, p.selection, self.s(4));
+                chrome_round(
+                    dc,
+                    chrome_rect(rect.left, rect.top, rect.right, rect.bottom - 1),
+                    p.selection,
+                    self.s(4),
+                );
             }
             if selected {
                 chrome_round(
                     dc,
-                    chrome_rect(self.s(7), top + self.s(8), self.s(9), top + self.s(22)),
+                    chrome_rect(
+                        self.s(7),
+                        top + self.s(5),
+                        self.s(9),
+                        top + row_height - self.s(6),
+                    ),
                     p.accent,
                     self.s(1),
                 );
             }
-            self.label(
-                dc,
-                &text,
-                chrome_rect(
-                    self.s(12 + i32::from(level.saturating_sub(1).min(5)) * 12),
-                    top,
-                    width - self.s(16),
-                    top + self.s(30),
-                ),
-                12,
-                selected || level == 1,
-                if selected {
-                    p.accent
-                } else if errors {
-                    error_tone
-                } else if level <= 2 {
-                    p.fg
-                } else {
-                    p.muted
-                },
-                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
-            );
+            let indent = self.s(12) + self.s(14) * i32::from(depth.saturating_sub(1).min(6));
             self.hits.push(HitBox {
                 rect,
                 action: Hit::Heading(index),
             });
+            if let Some(folded) = fold {
+                let r = chrome_rect(indent - self.s(2), top, indent + mark, top + row_height);
+                smooth::icon(
+                    dc,
+                    r,
+                    if folded {
+                        smooth::FOLDED
+                    } else {
+                        smooth::UNFOLDED
+                    },
+                    p.muted,
+                    self.fonts.dpi as f32 / 96.0,
+                );
+                self.hits.push(HitBox {
+                    rect: r,
+                    action: Hit::Fold(index),
+                });
+            }
+            self.label(
+                dc,
+                &text,
+                chrome_rect(indent + mark, top, width - self.s(16), top + row_height),
+                12,
+                selected || (nested && depth == 1),
+                if selected {
+                    p.accent
+                } else if errors {
+                    error_tone
+                } else if context || (!filtering && depth > 3) {
+                    p.muted
+                } else {
+                    p.fg
+                },
+                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
+            );
         }
         RestoreDC(dc, saved);
 
         let format = self.format();
         let kind = self.outline.as_ref().map(|o| o.kind);
+        let listed = self.outline_rows.len();
+        let matched = self.outline_rows.iter().filter(|r| !r.context).count();
         let status = if let Some(error) = &self.outline_error {
             trf("目录读取失败：{}", &[error])
+        } else if filtering && total > 0 {
+            match matched {
+                0 => tr("没有匹配的条目").to_string(),
+                1 => tr("1 个匹配").to_string(),
+                n => trf("{} 个匹配", &[&n]),
+            }
         } else if limited {
             tr("目录已达显示上限").to_string()
         } else if self.outline_loading {
@@ -728,7 +848,7 @@ impl App {
         } else {
             outline_count(kind.unwrap_or_default(), total)
         };
-        let status_top = if total == 0 {
+        let status_top = if listed == 0 {
             self.s(OUTLINE_ROWS_TOP + 8)
         } else {
             footer - self.s(27)
@@ -747,13 +867,13 @@ impl App {
             p.muted,
             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
         );
-        if total > visible && visible > 0 {
+        if listed > visible && visible > 0 {
             let track_height = (bottom - self.s(OUTLINE_ROWS_TOP)).max(1);
-            let thumb_height = ((track_height as i64 * visible as i64 / total as i64) as i32)
+            let thumb_height = ((track_height as i64 * visible as i64 / listed as i64) as i32)
                 .max(self.s(18))
                 .min(track_height);
-            let offset = ((track_height - thumb_height) as i64 * first.min(total - visible) as i64
-                / (total - visible) as i64) as i32;
+            let offset = ((track_height - thumb_height) as i64 * first.min(listed - visible) as i64
+                / (listed - visible) as i64) as i32;
             chrome_round(
                 dc,
                 chrome_rect(
@@ -764,6 +884,322 @@ impl App {
                 ),
                 p.edge,
                 self.s(1),
+            );
+        }
+    }
+
+    /// Find's results at the right of the reading column: the count, then one row
+    /// per match with its line number and the text around it, the match marked.
+    pub(super) unsafe fn paint_results(&mut self, dc: HDC, p: Palette) {
+        if self.results_width() == 0 {
+            return;
+        }
+        let panel = self.results_rect();
+        Self::fill(dc, &panel, p.panel);
+        Self::fill(
+            dc,
+            &chrome_rect(panel.left, panel.top, panel.left + 1, panel.bottom),
+            p.edge,
+        );
+        let (left, right) = (panel.left + self.s(16), panel.right - self.s(12));
+        let header = chrome_rect(left, panel.top, right, panel.top + self.s(RESULTS_HEADER));
+        let middle = left + (right - left) * 2 / 5;
+        self.label(
+            dc,
+            tr("搜索结果"),
+            chrome_rect(header.left, header.top, middle, header.bottom),
+            12,
+            true,
+            p.fg,
+            DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+        );
+        let listed = !self.matches_loading && !self.matches_query.is_empty();
+        let count = self.matches.items.len();
+        let total = if self.matches.more {
+            format!("{}+", feathermd::document::MAX_MATCHES)
+        } else {
+            count.to_string()
+        };
+        let summary = if self.matches_loading {
+            match self.find_percent {
+                Some(percent) => trf("正在搜索… {}%", &[&percent]),
+                None => tr("正在搜索…").to_string(),
+            }
+        } else if !listed || count == 0 {
+            String::new()
+        } else if let Some(current) = self.match_current {
+            format!("{} / {total}", current + 1)
+        } else if count == 1 && !self.matches.more {
+            tr("1 处匹配").to_string()
+        } else {
+            trf("{} 处匹配", &[&total])
+        };
+        self.label(
+            dc,
+            &summary,
+            chrome_rect(middle, header.top, right, header.bottom),
+            11,
+            false,
+            p.muted,
+            DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS | DT_NOPREFIX,
+        );
+        let rows_top = header.bottom;
+        let note = (count > 0 && self.matches.more).then(|| tr("仅列出前 1000 处匹配"));
+        let rows_bottom = panel.bottom - self.s(28);
+        if count == 0 {
+            let text = if listed {
+                self.not_found_status()
+            } else if self.matches_loading {
+                ""
+            } else {
+                tr(
+                    "输入文字即列出全文匹配；回车跳到下一处，Shift+回车上一处。Aa 或 Alt+C 区分大小写。",
+                )
+            };
+            self.label(
+                dc,
+                text,
+                chrome_rect(left, rows_top, right, rows_top + self.s(110)),
+                11,
+                false,
+                p.muted,
+                DT_WORDBREAK | DT_NOPREFIX,
+            );
+            return;
+        }
+        let visible = self.result_rows();
+        let first = self.match_top.min(count.saturating_sub(1));
+        let row_height = self.s(RESULTS_ROW);
+        // Line numbers in a column as wide as the largest on screen.
+        let widest = self.matches.items[first..(first + visible).min(count)]
+            .iter()
+            .map(|m| m.line)
+            .max()
+            .unwrap_or(1);
+        let number_width = self.text_width(dc, &widest.to_string(), 11, false) + self.s(14);
+        let saved = SaveDC(dc);
+        IntersectClipRect(dc, panel.left + 1, rows_top, panel.right, rows_bottom);
+        for slot in 0..visible {
+            let index = first + slot;
+            let Some(m) = self.matches.items.get(index) else {
+                break;
+            };
+            let (line, text, before, after) =
+                (m.line, m.text.clone(), m.before.clone(), m.after.clone());
+            let top = rows_top + slot as i32 * row_height;
+            let rect = chrome_rect(
+                panel.left + self.s(6),
+                top,
+                panel.right - self.s(8),
+                top + row_height,
+            );
+            let current = self.match_current == Some(index);
+            if current || self.pressed == Some(Hit::Match(index)) {
+                chrome_round(
+                    dc,
+                    chrome_rect(rect.left, rect.top, rect.right, rect.bottom - 1),
+                    p.selection,
+                    self.s(4),
+                );
+            }
+            if current {
+                chrome_round(
+                    dc,
+                    chrome_rect(
+                        rect.left + 1,
+                        top + self.s(6),
+                        rect.left + self.s(3),
+                        top + row_height - self.s(7),
+                    ),
+                    p.accent,
+                    self.s(1),
+                );
+            }
+            self.label(
+                dc,
+                &line.to_string(),
+                chrome_rect(
+                    left - self.s(4),
+                    top,
+                    left - self.s(4) + number_width - self.s(8),
+                    top + row_height,
+                ),
+                11,
+                false,
+                p.muted,
+                DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX,
+            );
+            self.paint_snippet(
+                dc,
+                chrome_rect(
+                    left - self.s(4) + number_width,
+                    top,
+                    right,
+                    top + row_height,
+                ),
+                (&before, &text, &after),
+                p,
+            );
+            self.hits.push(HitBox {
+                rect,
+                action: Hit::Match(index),
+            });
+        }
+        RestoreDC(dc, saved);
+        if let Some(note) = note {
+            self.label(
+                dc,
+                note,
+                chrome_rect(left, rows_bottom, right, panel.bottom),
+                11,
+                false,
+                p.muted,
+                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+            );
+        }
+        if count > visible {
+            let track = (rows_bottom - rows_top).max(1);
+            let thumb = ((track as i64 * visible as i64 / count as i64) as i32)
+                .max(self.s(18))
+                .min(track);
+            let offset = ((track - thumb) as i64 * first.min(count - visible) as i64
+                / (count - visible) as i64) as i32;
+            chrome_round(
+                dc,
+                chrome_rect(
+                    panel.right - self.s(5),
+                    rows_top + offset,
+                    panel.right - self.s(3),
+                    rows_top + offset + thumb,
+                ),
+                p.edge,
+                self.s(1),
+            );
+        }
+    }
+
+    /// Pen positions after each UTF-16 unit of `text` in the interface font.
+    unsafe fn pen_positions(&mut self, dc: HDC, text: &[u16], size: i32, bold: bool) -> Vec<i32> {
+        if text.is_empty() {
+            return Vec::new();
+        }
+        let old = SelectObject(
+            dc,
+            self.fonts.get(FontKey {
+                size,
+                bold,
+                ..FontKey::default()
+            }),
+        );
+        let mut pens = vec![0i32; text.len()];
+        let mut fit = 0;
+        let mut extent = SIZE::default();
+        GetTextExtentExPointW(
+            dc,
+            text.as_ptr(),
+            text.len() as i32,
+            i32::MAX,
+            &mut fit,
+            pens.as_mut_ptr(),
+            &mut extent,
+        );
+        SelectObject(dc, old);
+        pens
+    }
+
+    /// One result: the text before the match (cut from the left with `…`), the
+    /// match on a wash, then the text after it (cut at the right).
+    unsafe fn paint_snippet(
+        &mut self,
+        dc: HDC,
+        rect: RECT,
+        (before, query, after): (&str, &str, &str),
+        p: Palette,
+    ) {
+        let room = rect.right - rect.left;
+        if room <= 0 {
+            return;
+        }
+        let flags = DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS;
+        let match_width = self.text_width(dc, query, 11, true);
+        let after_width = self.text_width(dc, after, 11, false);
+        // The match stays in view; the text after it keeps a little room.
+        let keep = after_width.min(self.s(48));
+        let units: Vec<u16> = before.encode_utf16().collect();
+        let pens = self.pen_positions(dc, &units, 11, false);
+        let full = pens.last().copied().unwrap_or(0);
+        let mut shown = before.to_owned();
+        let mut before_width = full;
+        if full + match_width + keep > room && !units.is_empty() {
+            let ellipsis = self.text_width(dc, "…", 11, false);
+            let budget = (room - match_width - keep - ellipsis).max(0);
+            // The longest tail of `before` that fits the budget, at a whole character:
+            // it starts after the first unit whose pen leaves at most `budget`.
+            let mut start = pens.partition_point(|&x| full - x > budget) + 1;
+            while start < units.len() && (0xdc00..0xe000).contains(&units[start]) {
+                start += 1;
+            }
+            let start = start.min(units.len());
+            let tail = String::from_utf16_lossy(&units[start..]);
+            before_width = ellipsis + full - pens[start - 1];
+            shown = format!("…{tail}");
+        }
+        let mut x = rect.left;
+        if !shown.is_empty() {
+            self.label(
+                dc,
+                &shown,
+                chrome_rect(
+                    x,
+                    rect.top,
+                    (x + before_width + self.s(2)).min(rect.right),
+                    rect.bottom,
+                ),
+                11,
+                false,
+                p.fg,
+                flags,
+            );
+            x += before_width;
+        }
+        let end = (x + match_width).min(rect.right);
+        if end > x {
+            let wash = if p.is_dark() {
+                mix(p.panel, p.accent, 35)
+            } else {
+                mix(p.panel, p.accent, 22)
+            };
+            chrome_round(
+                dc,
+                chrome_rect(
+                    x - self.s(1),
+                    rect.top + self.s(4),
+                    end + self.s(1),
+                    rect.bottom - self.s(4),
+                ),
+                wash,
+                self.s(3),
+            );
+            self.label(
+                dc,
+                query,
+                chrome_rect(x, rect.top, end, rect.bottom),
+                11,
+                true,
+                p.fg,
+                flags,
+            );
+        }
+        x = end;
+        if x < rect.right && !after.is_empty() {
+            self.label(
+                dc,
+                after,
+                chrome_rect(x, rect.top, rect.right, rect.bottom),
+                11,
+                false,
+                p.fg,
+                flags,
             );
         }
     }
@@ -1122,7 +1558,7 @@ impl App {
         let pad = self
             .s(24)
             .min(left - self.sidebar_width() - self.s(4))
-            .min(self.width - self.s(22) - right)
+            .min(self.reading_right() - self.s(22) - right)
             .max(0);
         let sheet = chrome_rect(
             left - pad,

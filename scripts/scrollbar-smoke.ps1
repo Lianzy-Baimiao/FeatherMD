@@ -51,7 +51,7 @@ $process = $null
 $window = [IntPtr]::Zero
 $createdIni = $false
 $oldDpiContext = [IntPtr]::Zero
-function Query([int]$id) { [ScrollbarSmoke]::SendMessageW($window, 0x802a, [IntPtr]$id, [IntPtr]::Zero).ToInt64() }
+function Query([int]$id, [int]$index = 0) { [ScrollbarSmoke]::SendMessageW($window, 0x802a, [IntPtr]$id, [IntPtr]$index).ToInt64() }
 function Cursor { ((Query 9) * 1MB) + (Query 14) }
 function Idle {
  for ($i = 0; $i -lt 500; $i++) {
@@ -261,6 +261,39 @@ try {
  $paragraphTopByte = Drag 0.0
  if ($paragraphTopByte -ne 0 -or (Cursor) -ne 0) { throw 'Cached paragraph thumb did not return to its first wrapped row' }
 
+ # A fast drag through pages of table rows lays out only the rows around the thumb
+ # and paints each move itself: a stream of moves keeps WM_PAINT and the timer waiting.
+ StopReader
+ $tableDocument = Join-Path $Output 'table-pages.md'
+ $table = @('| Name | Title | Type | Length | Precision | Scale | Null | Default |', '| --- | --- | --- | --- | --- | --- | --- | --- |')
+ $table += 0..17999 | ForEach-Object { '| F{0:D5} | lianzy field {0} | nvarchar | 160 | 80 | 0 | yes | default |' -f $_ }
+ [IO.File]::WriteAllLines($tableDocument, [string[]]$table, [Text.UTF8Encoding]::new($false))
+ StartReader $tableDocument
+ $tableSize = Query 10
+ $fullLayout = Query 132
+ $g = Geometry
+ $x = [int][Math]::Floor(($g.Left + $g.Right) / 2)
+ $grab = [int][Math]::Floor(($g.ThumbEnd - $g.ThumbStart) / 2)
+ $span = ($g.Bottom - $g.Top) - ($g.ThumbEnd - $g.ThumbStart)
+ $paintsBefore = Query 142
+ [void](Query 133 1)
+ Mouse 0x201 $x ($g.ThumbStart + $grab) 1
+ $glimpsed = $false
+ for ($k = 1; $k -le 40; $k++) {
+  Mouse 0x200 $x ($g.Top + $grab + [int][Math]::Floor($span * $k / 40)) 1
+  if ((Query 141) -eq 1) { $glimpsed = $true }
+  Start-Sleep -Milliseconds 10
+ }
+ $tablePaints = (Query 142) - $paintsBefore
+ $tableDragLayout = Query 133
+ Mouse 0x202 $x ($g.Top + $grab + $span)
+ Settle
+ $tableEnd = Query 9
+ if (-not $glimpsed -or (Query 141) -ne 0) { throw 'The table drag did not lay out a window of rows, or kept it after release' }
+ if ($tablePaints -lt 20) { throw "The table drag painted only $tablePaints of 40 moves itself" }
+ if ($tableEnd / $tableSize -lt 0.95) { throw "The table drag ended at $tableEnd of $tableSize bytes" }
+ Capture 'table-drag-end'
+
  $metrics = [ordered]@{
   result = 'PASS'; author = 'lianzy'; company = 'lianzy'; last_modified_by = 'lianzy'
   input = 'native window messages; hidden process; no desktop input injection'
@@ -271,6 +304,7 @@ try {
   capture_cancel_axes = 2; rapid_drag_round_trips = $roundTrip; short_document_scrollbars_hidden = $true
   theme_and_selected_mode_preserve_wrapped_row = $true
   cached_paragraph_bytes = $paragraphSize; cached_paragraph_middle_row = $paragraphMiddleRow; cached_paragraph_end_row = $paragraphEndRow
+  table_bytes = $tableSize; table_drag_paints = $tablePaints; table_drag_layout_max_us = $tableDragLayout; table_full_layout_us = $fullLayout; table_drag_end = $tableEnd
   exe_bytes = (Get-Item -LiteralPath $Exe).Length
  }
  $metrics | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Output 'scrollbar.json') -Encoding utf8

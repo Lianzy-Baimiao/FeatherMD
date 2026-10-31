@@ -257,17 +257,26 @@ pub(super) fn word(rows: &[Row], block: u64, unit: usize) -> (Spot, Spot) {
         let (a, b) = word_in(&line.text[from..to], unit.clamp(from, to) - from);
         return (spot(from + a), spot(from + b));
     }
-    // The block's displayed units; spaces removed at line breaks come back.
+    let (a, b) = word_in(&units(rows, block), unit);
+    (spot(a), spot(b))
+}
+
+/// The displayed units of `block` on `rows`: a table row's cells joined by tabs, a
+/// text block's runs with the spaces removed at its line breaks put back.
+pub(super) fn units(rows: &[Row], block: u64) -> Vec<u16> {
+    let mut rows = rows.iter().filter(|r| r.start == block).peekable();
+    if let Some(line) = rows.peek().and_then(|r| r.table.as_ref()) {
+        return line.text.to_vec();
+    }
     let mut units: Vec<u16> = Vec::new();
-    for row in rows.iter().filter(|r| r.start == block) {
+    for row in rows {
         units.resize(units.len().max(row.unit), 32);
         units.truncate(row.unit);
         for run in &row.runs {
             units.extend_from_slice(&run.text);
         }
     }
-    let (a, b) = word_in(&units, unit);
-    (spot(a), spot(b))
+    units
 }
 
 /// Units `[a, b)` of the word, space run or symbol run of `units` around `unit`. The

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.14 — 2026-10-31
+
+### Added
+- A filter box above the outline: typing lists the entries whose titles hold every word (case does not matter), each with the parents it needs; Enter goes to the first match, Esc clears it.
+- The outline is a tree. Entries indent by depth and fold with a triangle; an outline of more than 500 entries opens with its deeper levels folded. Documents converted from Word that put every heading at one level (all `####`) and keep the hierarchy in their numbers (`1`, `1.1`, `1.1.1`) nest by those numbers, with unnumbered headings under the numbered one before them. A heading that only names the contents (`目录`, `Contents`) no longer holds the whole document.
+- Find lists every match at the right of the text as you type: line number and the text around each match, the match highlighted, the first 1000 listed. Click a result or press Enter / F3 for the next match, Shift+Enter / Shift+F3 for the previous one; the status bar says which match and line. Matches are marked in the text, the current one stronger, and a wide table scrolls to the match's column. In a narrow window the panel stays hidden and Find works as before.
+- Find in Markdown also matches punctuation the way converters escape it: `T_BD_CONTACT` finds `T\_BD\_CONTACT`, and results show it without the backslashes.
+- Links inside a document: `[text](#heading)` goes to that heading (GitHub anchors or the heading's own text), also with the outline hidden. Contents lists of plain items that name headings, as converters write them, become links and indent by level.
+- Match case in Find: the **Aa** button at the right of the Find box or Alt+C (the tooltip says so); the status line says when a search matched case.
+
+### Changed
+- Find matches ASCII letters of either case by default (it matched case before). A query without letters, such as Chinese text, costs the same either way.
+- In a document whose headings nest by their numbers, the headings in the text are drawn at their depth (`1`, `1.1`, `1.1.1` in falling sizes) instead of all at their one Markdown level.
+- A table whose header row is empty (`|  |  |`, as converters write it above the real one) shows a thin gap and its first row as the header.
+- Outline rows are denser (22 instead of 30 logical pixels), so more entries fit; the outline lists up to 16384 entries instead of 4096.
+- Find's search in the background reads the whole file once to list its matches; the old single search still continues past the 1000th.
+
+### Fixed
+- Dragging the scrollbar fast through a large file stuttered: every move laid out the whole page (tens of milliseconds for a page of table rows) and Windows put mouse moves ahead of repaints, so about half the moves drew nothing. A drag now lays out only the blocks near the thumb, keeps one page read in flight and repaints after each move; the whole page follows on release. On a 4.9 MiB converted document the longest layout fell from 47.6 to 8.9 ms and every move is drawn.
+- A drag to the bottom could stop short of the end when a horizontal scrollbar appeared during it; the track is fixed for the drag.
+- After a link that worked, the status bar no longer keeps the note about an earlier link that found no heading.
+- The Find box could repaint with Windows' default white background while the reader was busy updating (every skin's test captures showed it white); it now keeps the skin's colours.
+
+### Tests
+- Unit tests for escaped-punctuation search in Markdown (and only literal matches in plain text), section numbers, contents titles, depths of converted, titled, plain and numbered outlines, folds, filter rows, the active row, GitHub anchors and fragment resolution, contents lists linked and indented (and lists left alone), find-all lines, context, overlaps, read boundaries, the cap, cancellation and GB18030, and find-mark readability in all 20 skins. New outline-smoke (light / dark) checks depths, folds, the filter, written and contents links, a link to no heading, Find's list, Enter, result clicks, the status line, marks and that jumps keep folds; window-smoke and formats-smoke read the outline row geometry from new queries.
+- Unit tests for letters of either case (Find's list and search, Markdown escapes, GB18030 trail bytes never joined by folding, queries without letters unchanged), the empty header row and heading levels from outline depths. outline-smoke now types the filter and Find text as input-method characters (WM_IME_CHAR), toggles Aa and checks heading sizes and the promoted table header; scrollbar-smoke drags through an 18000-row table in 40 moves and checks that the reader paints during the drag (at least 20 moves; all 40 locally), the layout is partial during the drag and whole after it, and the drag ends within the last 5% of the file; i18n-smoke checks the Aa tooltip in all four languages. `examples/bench` also times Find with letters of either case.
+
 ## 0.1.13 — 2026-10-26
 
 ### Added

@@ -192,6 +192,8 @@ function CheckHitTests {
  Hit 'bottom right' ($width - 2) ($height - 2) 17
 }
 function HeaderLeft { return ((Query 0) - (Scale 132) - (Scale 148) - 1) }
+# Middle of outline row $row (on screen from the sidebar's first listed row).
+function OutlineRowY([int]$row) { return [int]((Query 110) + ($row - (Query 36)) * (Query 111) + [Math]::Floor((Query 111) / 2)) }
 # Footer preview/source switch: segment centres 26 and 54 px from the left edge.
 function FooterY { return ((Query 1) - (Scale 15)) }
 function ThemePicker {
@@ -294,7 +296,7 @@ try {
  $headingIndex = 5
  $headingOffset = Query 37 $headingIndex
  if ($headingOffset -le $headingIndex * 1KB) { throw 'Outline fixture headings are not spaced far enough apart' }
- Click (Scale 40) (Scale (90 + 30 * $headingIndex + 15))
+ Click (Scale 40) (OutlineRowY $headingIndex)
  if ((Query 9) -ne $headingOffset) { throw "Outline click did not seek to heading $headingIndex at byte $headingOffset; got $(Query 9)" }
  Capture 'outline-click'
  $bodyBeforeWheel = Query 9; $wrappedBeforeWheel = Query 14; $outlineBeforeWheel = Query 36
@@ -383,7 +385,7 @@ try {
  if ((Query 34) -ne $shortCount) { throw 'Short-section outline did not load' }
  if ((Query 46) -ne 0) { throw "Short-section outline did not start on the first heading: $(Query 46)" }
  foreach ($shortIndex in @(3, 6, 1)) {
-  Click (Scale 40) (Scale (90 + 30 * $shortIndex + 15))
+  Click (Scale 40) (OutlineRowY $shortIndex)
   if ((Query 46) -ne $shortIndex) { throw "Outline highlight stayed on $(Query 46) after clicking short heading $shortIndex" }
  }
  Capture 'outline-short-click'

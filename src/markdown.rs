@@ -226,6 +226,8 @@ pub fn blocks(lines: &[SourceLine], raw: bool) -> Vec<Block> {
     let mut out = Vec::with_capacity(lines.len());
     // Columns and group of the table being continued.
     let mut table: Option<(Vec<Align>, u64)> = None;
+    // The table's header row was empty: its first body row heads it instead.
+    let mut promote = false;
     let mut i = 0;
     // A page that starts inside a table (its header is above the window) keeps the
     // rows starting with `|` as one table without a header row.
@@ -283,14 +285,29 @@ pub fn blocks(lines: &[SourceLine], raw: bool) -> Vec<Block> {
             if let Some((align, group)) = &table
                 && continues_table(line)
             {
-                out.push(table_row(line, line.end, *group, false, align));
+                out.push(table_row(line, line.end, *group, promote, align));
+                promote = false;
                 i += 1;
                 continue;
             }
             table = None;
+            promote = false;
             if let Some(align) = table_start(lines, i) {
-                // The delimiter row is part of the header row's range.
-                out.push(table_row(line, lines[i + 1].end, line.start, true, &align));
+                // The delimiter row is part of the header row's range. Converters
+                // often write an empty header row above the real one (`| | |`):
+                // it is a thin gap, and the first body row becomes the header.
+                let empty = table::split_row(&line.text)
+                    .iter()
+                    .all(|cell| cell.trim().is_empty());
+                if empty && lines.get(i + 2).is_some_and(continues_table) {
+                    out.push(block(line, Kind::Spacer, Vec::new(), 0));
+                    if let Some(last) = out.last_mut() {
+                        last.end = lines[i + 1].end;
+                    }
+                    promote = true;
+                } else {
+                    out.push(table_row(line, lines[i + 1].end, line.start, true, &align));
+                }
                 table = Some((align, line.start));
                 i += 2;
                 continue;
@@ -826,6 +843,24 @@ pub fn inline(text: &str) -> Vec<Span> {
     // unless it was only hidden HTML.
     if out.is_empty() && !text.is_empty() && !markup {
         return plain(text);
+    }
+    out
+}
+/// `text` without the backslashes of escaped ASCII punctuation (`T\_NAME` is
+/// `T_NAME`), as a Markdown preview shows it.
+pub fn unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\'
+            && let Some(&next) = chars.peek()
+            && next.is_ascii_punctuation()
+        {
+            out.push(next);
+            chars.next();
+            continue;
+        }
+        out.push(c);
     }
     out
 }

@@ -50,8 +50,10 @@ try {
   if([NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]4,[IntPtr]::Zero) -ne [IntPtr]1){throw 'Internal GDI capture failed'}
   $bmp=[Drawing.Bitmap]::new($env:FEATHERMD_TEST_SNAPSHOT)
   $bmp.Save((Join-Path $Output ($name+'.png')),[Drawing.Imaging.ImageFormat]::Png)
-  # The left edge is now the outline panel; sample the reader's right gutter.
-  $a=$bmp.GetPixel(5,5).ToArgb();$b=$bmp.GetPixel($bmp.Width-30,[Math]::Min(150,$bmp.Height-1)).ToArgb();$bmp.Dispose()
+  # The outline is at the left and Find's results at the right: sample the gutter
+  # just left of the reading column.
+  $gutter=[Math]::Max(0,[NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]80,[IntPtr]::Zero).ToInt64()-[Math]::Floor(6*[NativeSmoke]::SendMessageW($window,0x802a,[IntPtr]3,[IntPtr]::Zero).ToInt64()/96))
+  $a=$bmp.GetPixel(5,5).ToArgb();$b=$bmp.GetPixel([int]$gutter,[Math]::Min(150,$bmp.Height-1)).ToArgb();$bmp.Dispose()
   if($a -eq $b){throw 'Header and document background did not render'}
  }
  Capture 'reading-light'

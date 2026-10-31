@@ -94,8 +94,36 @@ const PREFERENCES: usize = 415;
 const EDITOR_SETTINGS: usize = 416;
 const CHECK_UPDATES: usize = 417;
 const LANGUAGE: usize = 418;
+/// The outline filter box's clear mark, and the rest of the box (focuses it).
+const CLEAR_FILTER: usize = 419;
+const FILTER_BOX: usize = 420;
+/// Find's match-case toggle (Aa, Alt+C).
+const MATCH_CASE: usize = 421;
 const HEADER_HEIGHT: i32 = 34;
-const OUTLINE_ROWS_TOP: i32 = HEADER_HEIGHT + 56;
+/// Outline sidebar, in logical pixels: the title row, the filter box below it, then
+/// the entry rows.
+const OUTLINE_FILTER_TOP: i32 = HEADER_HEIGHT + 44;
+const OUTLINE_FILTER_HEIGHT: i32 = 28;
+const OUTLINE_ROWS_TOP: i32 = OUTLINE_FILTER_TOP + OUTLINE_FILTER_HEIGHT + 6;
+const OUTLINE_ROW: i32 = 22;
+/// Entries an outline opens with, at most; deeper ones start folded.
+const OUTLINE_UNFOLDED: usize = 500;
+/// Find results panel at the right, in logical pixels: its widths and the reading
+/// column it leaves at least.
+const RESULTS_WIDTH: i32 = 300;
+const RESULTS_MIN_WIDTH: i32 = 220;
+const RESULTS_MIN_READING: i32 = 420;
+const RESULTS_HEADER: i32 = 40;
+const RESULTS_ROW: i32 = 24;
+/// Blocks laid out above the reader while the thumb is dragged; below it as many
+/// as one and a half screens of the shortest rows, within these bounds.
+const GLIMPSE_BEFORE: usize = 24;
+const GLIMPSE_AFTER: (usize, usize) = (64, 176);
+/// Typing in Find lists the matches after this pause.
+const FIND_DELAY: Duration = Duration::from_millis(300);
+/// Control ids of the Find box and the outline filter box.
+const FIND_ID: usize = 501;
+const FILTER_ID: usize = 502;
 /// Default and minimum window sizes in logical (96 DPI) pixels.
 const DEFAULT_SIZE: (i32, i32) = (1080, 820);
 const MIN_SIZE: (i32, i32) = (640, 480);
@@ -108,6 +136,9 @@ const PREVIEW_APPEARANCE: u32 = WM_APP + 45;
 const UPDATE_RESULT: u32 = WM_APP + 46;
 /// One-shot timer for the optional startup update check.
 const UPDATE_TIMER: usize = 2;
+/// Text and background of the Find and filter boxes as `fg << 32 | bg`, for a box
+/// that repaints while the App is borrowed (moved or printed by an App method).
+static EDIT_COLORS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0xff_ffff);
 /// Shift held during a mouse message (WPARAM flag).
 const MK_SHIFT: usize = 0x0004;
 const UPDATE_DELAY_MS: u32 = 3000;
@@ -529,6 +560,10 @@ enum Hit {
     LoadImage(String),
     Row(usize),
     Heading(usize),
+    /// The fold mark of an outline entry.
+    Fold(usize),
+    /// A row of the Find results, by its index in the list.
+    Match(usize),
     /// Copy button of the box with this index in `App::boxes`.
     CopyBlock(usize),
 }
@@ -556,6 +591,10 @@ enum Axis {
 struct ScrollDrag {
     axis: Axis,
     grab: i32,
+    /// The track as the drag began: the pointer maps through it until release, so
+    /// a page that adds or drops the horizontal bar cannot move the thumb's target.
+    scale: ScrollTrack,
+    pixels: bool,
 }
 struct Bar {
     track: RECT,
@@ -566,9 +605,16 @@ struct Bar {
 fn contains(rect: RECT, x: i32, y: i32) -> bool {
     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
 }
+/// Diagnostics: the centre of `rect` as `y << 16 | x`.
+fn centre(rect: RECT) -> isize {
+    let (x, y) = ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+    ((y as isize) << 16) | x as isize
+}
 struct App {
     hwnd: HWND,
     edit: HWND,
+    /// The outline's filter box.
+    filter: HWND,
     menu: HMENU,
     settings_menu: HMENU,
     fonts: Fonts,
@@ -612,15 +658,61 @@ struct App {
     /// Bytes the running outline scan has read, and the percentage last painted.
     outline_progress: Arc<std::sync::atomic::AtomicU64>,
     outline_percent: Option<u8>,
+    /// First listed row on screen (an index into `outline_rows`).
     outline_top: usize,
     outline_selected: Option<(usize, usize)>,
     outline_pending: Option<usize>,
+    /// The sidebar's rows (folds and filter applied), its folded entries, the
+    /// entries' labels in lower case and the filter text.
+    outline_rows: Vec<feathermd::toc::Line>,
+    outline_folded: Vec<bool>,
+    outline_lower: Vec<String>,
+    outline_filter: String,
+    /// A `#fragment` link clicked before the outline that resolves it was ready.
+    pending_anchor: Option<String>,
+    /// The outline arrived after the page was laid out: link its contents list.
+    contents_changed: bool,
     horizontal: i32,
     status: String,
     edit_mode: Option<usize>,
     query: String,
     found: Option<u64>,
     search_ticket: u64,
+    /// Find's list of matches, the query it lists and whether it is still being
+    /// read (with the bytes read and the percentage last painted).
+    matches: feathermd::document::Matches,
+    matches_query: String,
+    matches_loading: bool,
+    find_ticket: u64,
+    find_progress: Arc<std::sync::atomic::AtomicU64>,
+    find_percent: Option<u8>,
+    /// The listed match the reader is at, the first row on screen, a step that
+    /// waits for the list (true forward), and when typing runs the next find.
+    match_current: Option<usize>,
+    match_top: usize,
+    match_step: Option<bool>,
+    find_due: Option<Instant>,
+    /// Status to show once the page a jump waits for arrives.
+    pending_status: Option<String>,
+    /// Find matches letter case (Aa), and whether the listed matches did.
+    match_case: bool,
+    matches_case: bool,
+    /// The last paint marked the current match in the text (diagnostics).
+    find_placed: bool,
+    /// A jump to a match waits to scroll a wide table to the match's column.
+    reveal_found: bool,
+    /// Layout and paint costs in microseconds: last, longest, and how many
+    /// layouts ran (diagnostics).
+    layout_us: (u64, u64, u64),
+    paint_us: (u64, u64),
+    /// Dragging the vertical thumb through a document larger than one page: the
+    /// byte it points at while a page read is in flight, whether the layout holds
+    /// only a window of blocks around the reader, and when the last drag paint ran.
+    drag_target: Option<u64>,
+    glimpse: bool,
+    drag_paint: Option<Instant>,
+    /// Paints a drag drew itself (diagnostics).
+    drag_paints: u64,
     /// Unsaved skin/opacity draft from the open Settings dialog.
     preview: Option<(Theme, u8)>,
     /// F5 restores this source byte and wrapped row once the reopened document is ready.
@@ -652,6 +744,7 @@ impl App {
         Self {
             hwnd: null_mut(),
             edit: null_mut(),
+            filter: null_mut(),
             menu: null_mut(),
             settings_menu: null_mut(),
             fonts: Fonts::new(96),
@@ -694,12 +787,39 @@ impl App {
             outline_top: 0,
             outline_selected: None,
             outline_pending: None,
+            outline_rows: Vec::new(),
+            outline_folded: Vec::new(),
+            outline_lower: Vec::new(),
+            outline_filter: String::new(),
+            pending_anchor: None,
+            contents_changed: false,
             horizontal: 0,
             status: tr("只读 · 离线阅读").into(),
             edit_mode: None,
             query: String::new(),
             found: None,
             search_ticket: 0,
+            matches: Default::default(),
+            matches_query: String::new(),
+            matches_loading: false,
+            find_ticket: 0,
+            find_progress: Arc::default(),
+            find_percent: None,
+            match_current: None,
+            match_top: 0,
+            match_step: None,
+            find_due: None,
+            pending_status: None,
+            match_case: false,
+            matches_case: false,
+            find_placed: false,
+            reveal_found: false,
+            layout_us: (0, 0, 0),
+            paint_us: (0, 0),
+            drag_target: None,
+            glimpse: false,
+            drag_paint: None,
+            drag_paints: 0,
             preview: None,
             reload_anchor: None,
             update_check: None,
@@ -786,7 +906,7 @@ impl App {
     fn reading_area(&self, x: i32, y: i32) -> bool {
         self.document.is_some()
             && x >= self.sidebar_width()
-            && x < self.width - self.s(22)
+            && x < self.reading_right() - self.s(22)
             && y >= self.content_top()
             && y < self.content_bottom()
     }
@@ -798,7 +918,7 @@ impl App {
         self.height - self.s(if self.horizontal_max() > 0 { 50 } else { 34 })
     }
     fn body_width(&self) -> i32 {
-        let usable = (self.width - self.sidebar_width() - self.s(80)).max(self.s(80));
+        let usable = (self.reading_right() - self.sidebar_width() - self.s(80)).max(self.s(80));
         if self.settings.wide {
             usable
         } else {
@@ -807,7 +927,8 @@ impl App {
     }
     fn left(&self) -> i32 {
         self.sidebar_width()
-            + ((self.width - self.sidebar_width() - self.body_width()) / 2).max(self.s(20))
+            + ((self.reading_right() - self.sidebar_width() - self.body_width()) / 2)
+                .max(self.s(20))
     }
     fn sidebar_width(&self) -> i32 {
         if self.settings.outline && self.document.is_some() {
@@ -816,8 +937,26 @@ impl App {
             0
         }
     }
+    /// The Find results panel at the right: as wide as leaves the reading column
+    /// room, or hidden in a narrow window (Find still steps through matches).
+    fn results_width(&self) -> i32 {
+        if self.edit_mode != Some(FIND) || self.document.is_none() {
+            return 0;
+        }
+        let room = self.width - self.sidebar_width() - self.s(RESULTS_MIN_READING);
+        if room < self.s(RESULTS_MIN_WIDTH) {
+            0
+        } else {
+            room.min(self.s(RESULTS_WIDTH))
+        }
+    }
+    /// Right edge of the reading area: the window's, or the results panel's left.
+    fn reading_right(&self) -> i32 {
+        self.width - self.results_width()
+    }
     fn outline_visible_rows(&self) -> usize {
-        ((self.height - self.s(62) - self.s(OUTLINE_ROWS_TOP)) / self.s(30).max(1)).max(1) as usize
+        ((self.height - self.s(62) - self.s(OUTLINE_ROWS_TOP)) / self.s(OUTLINE_ROW).max(1)).max(1)
+            as usize
     }
     fn reading_percent(&self) -> f64 {
         let Some(page) = &self.page else {
@@ -831,8 +970,16 @@ impl App {
         }
         self.current() as f64 * 100.0 / page.size as f64
     }
+    /// Starts the outline when the sidebar shows it.
     unsafe fn start_outline(&mut self) {
-        if !self.settings.outline || self.outline.is_some() || self.outline_loading {
+        if self.settings.outline {
+            self.scan_outline();
+        }
+    }
+    /// Reads the outline in the background unless it is read or being read; a
+    /// `#fragment` link needs it even while the sidebar is hidden.
+    unsafe fn scan_outline(&mut self) {
+        if self.outline.is_some() || self.outline_loading {
             return;
         }
         if let Some(document) = &self.document {
@@ -857,6 +1004,7 @@ impl App {
         if !self.settings.outline {
             self.outline_ticket = self.workers.cancel_outline();
             self.outline_loading = false;
+            self.pending_anchor = None;
         }
         self.persist();
         self.start_outline();
@@ -865,7 +1013,7 @@ impl App {
         }
     }
     unsafe fn scroll_outline(&mut self, delta: i32) {
-        let count = self.outline.as_ref().map_or(0, |o| o.headings.len());
+        let count = self.outline_rows.len();
         self.outline_top = (self.outline_top as i64 + i64::from(delta))
             .clamp(0, count.saturating_sub(self.outline_visible_rows()) as i64)
             as usize;
@@ -910,8 +1058,245 @@ impl App {
             self.outline_selected = Some((index, self.top));
         }
     }
+    /// Lists the sidebar's rows again after the outline, a fold or the filter changed.
+    fn outline_layout(&mut self) {
+        let words: Vec<String> = self
+            .outline_filter
+            .to_lowercase()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect();
+        let rows = self.outline.as_ref().map_or_else(Vec::new, |o| {
+            feathermd::toc::rows(
+                &o.headings,
+                &self.outline_folded,
+                &self.outline_lower,
+                &words,
+            )
+        });
+        self.outline_rows = rows;
+        self.outline_top = self.outline_top.min(
+            self.outline_rows
+                .len()
+                .saturating_sub(self.outline_visible_rows()),
+        );
+    }
+    /// A finished outline: folded to a short list, filtered as the box says, and
+    /// any link that waited for it followed.
+    unsafe fn set_outline(&mut self, outline: feathermd::outline::Outline) {
+        self.outline_lower = outline
+            .headings
+            .iter()
+            .map(|h| h.text.to_lowercase())
+            .collect();
+        self.outline_folded = feathermd::toc::initial_folds(&outline.headings, OUTLINE_UNFOLDED);
+        self.outline = Some(outline);
+        self.outline_top = 0;
+        self.outline_layout();
+        // Contents lists on the page link to the headings now.
+        self.contents_changed = self.contents_ready() && self.page_links_contents();
+        if let Some(fragment) = self.pending_anchor.take() {
+            self.follow_anchor(&fragment);
+        }
+    }
+    /// The outline changes the page (contents links, heading sizes): worth laying
+    /// out again.
+    fn page_links_contents(&self) -> bool {
+        let (Some(page), Some(outline)) = (&self.page, &self.outline) else {
+            return false;
+        };
+        let mut blocks = plain::blocks(&page.lines, self.format(), self.settings.raw);
+        let shape = |blocks: &[markdown::Block]| {
+            let links = blocks
+                .iter()
+                .flat_map(|b| &b.spans)
+                .filter(|s| s.link.as_deref().is_some_and(|l| l.starts_with('#')))
+                .count();
+            let levels: Vec<u8> = blocks
+                .iter()
+                .filter_map(|b| match b.kind {
+                    markdown::Kind::Heading(level) => Some(level),
+                    _ => None,
+                })
+                .collect();
+            (links, levels)
+        };
+        let before = shape(&blocks);
+        feathermd::toc::link(&mut blocks, &outline.headings, &outline.contents);
+        if outline.numbered {
+            feathermd::toc::levels(&mut blocks, &outline.headings);
+        }
+        shape(&blocks) != before
+    }
+    /// Markdown preview with an outline that links can resolve against.
+    fn contents_ready(&self) -> bool {
+        self.format() == Format::Markdown
+            && !self.settings.raw
+            && self
+                .outline
+                .as_ref()
+                .is_some_and(|o| !o.contents.is_empty())
+    }
+    /// Scrolls the sidebar to entry `index`: unfolding its parents when `unfold`,
+    /// otherwise to the folded parent that shows it.
+    fn reveal_entry(&mut self, index: usize, unfold: bool) {
+        let Some(outline) = &self.outline else {
+            return;
+        };
+        let Some(depth) = outline.headings.get(index).map(|h| h.depth) else {
+            return;
+        };
+        if unfold && self.outline_filter.trim().is_empty() {
+            let mut need = depth;
+            let mut unfolded = false;
+            for i in (0..index).rev() {
+                let d = outline.headings[i].depth;
+                if d < need {
+                    if self.outline_folded.get(i).copied().unwrap_or(false) {
+                        self.outline_folded[i] = false;
+                        unfolded = true;
+                    }
+                    need = d;
+                    if need <= 1 {
+                        break;
+                    }
+                }
+            }
+            if unfolded {
+                self.outline_layout();
+            }
+        }
+        let row = self
+            .outline
+            .as_ref()
+            .and_then(|o| feathermd::toc::active_row(&o.headings, &self.outline_rows, index));
+        if let Some(row) = row {
+            let visible = self.outline_visible_rows();
+            if row < self.outline_top {
+                self.outline_top = row;
+            } else if row >= self.outline_top + visible {
+                self.outline_top = row + 1 - visible;
+            }
+        }
+    }
+    unsafe fn toggle_fold(&mut self, index: usize) {
+        if let Some(folded) = self.outline_folded.get_mut(index) {
+            *folded = !*folded;
+            self.outline_layout();
+            self.invalidate();
+        }
+    }
+    /// Text of the Find or filter box.
+    unsafe fn edit_text(hwnd: HWND) -> String {
+        let len = GetWindowTextLengthW(hwnd).clamp(0, 16384) as usize;
+        let mut buf = vec![0u16; len + 1];
+        let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
+        String::from_utf16_lossy(&buf[..n.min(len)])
+    }
+    /// The filter box changed: list the entries it matches.
+    unsafe fn filter_changed(&mut self) {
+        let text = Self::edit_text(self.filter);
+        if text == self.outline_filter {
+            return;
+        }
+        let was = !self.outline_filter.trim().is_empty();
+        self.outline_filter = text;
+        self.outline_top = 0;
+        self.outline_layout();
+        // Back to the whole outline: show where the reader is.
+        if was
+            && self.outline_filter.trim().is_empty()
+            && let Some(active) = self.outline_active()
+        {
+            self.reveal_entry(active, false);
+        }
+        self.invalidate();
+    }
+    /// Enter in the filter box: go to the first match.
+    unsafe fn filter_enter(&mut self) {
+        if let Some(row) = self.outline_rows.iter().find(|r| !r.context) {
+            let entry = row.entry;
+            self.select_heading(entry);
+        }
+    }
+    /// Esc or the clear mark: empty the filter, or leave the box when it is empty.
+    unsafe fn clear_filter(&mut self) {
+        if self.outline_filter.is_empty() && Self::edit_text(self.filter).is_empty() {
+            SetFocus(self.hwnd);
+            return;
+        }
+        // The box's change notice cannot reach the App while it is borrowed here.
+        SetWindowTextW(self.filter, w("").as_ptr());
+        self.filter_changed();
+    }
+    /// The filter box in the sidebar.
+    fn filter_rect(&self) -> RECT {
+        RECT {
+            left: self.s(12),
+            top: self.s(OUTLINE_FILTER_TOP),
+            right: self.sidebar_width() - self.s(12),
+            bottom: self.s(OUTLINE_FILTER_TOP + OUTLINE_FILTER_HEIGHT),
+        }
+    }
+    /// The filter box's hint, shown while it is empty (focused too).
+    unsafe fn filter_cue(&self) {
+        // EM_SETCUEBANNER
+        SendMessageW(self.filter, 0x1501, 1, w(tr("筛选目录")).as_ptr() as isize);
+    }
+    unsafe fn filter_font(&mut self) -> HFONT {
+        self.fonts.get(FontKey {
+            size: 12,
+            ..FontKey::default()
+        })
+    }
+    /// Places the filter box's edit control in the sidebar, or hides it with the
+    /// sidebar.
+    unsafe fn sync_filter(&mut self) {
+        if self.filter.is_null() {
+            return;
+        }
+        if self.sidebar_width() == 0 {
+            if GetFocus() == self.filter {
+                SetFocus(self.hwnd);
+            }
+            ShowWindow(self.filter, SW_HIDE);
+            return;
+        }
+        let r = self.filter_rect();
+        let key = FontKey {
+            size: 12,
+            ..FontKey::default()
+        };
+        let dc = GetDC(self.hwnd);
+        let (ascent, descent) = self.fonts.metrics(dc, key);
+        ReleaseDC(self.hwnd, dc);
+        let height = ascent + descent + 2;
+        let left = r.left + self.s(28);
+        MoveWindow(
+            self.filter,
+            left,
+            (r.top + r.bottom - height) / 2,
+            (r.right - self.s(26) - left).max(self.s(20)),
+            height,
+            1,
+        );
+        ShowWindow(self.filter, SW_SHOWNA);
+    }
     unsafe fn invalidate(&self) {
         InvalidateRect(self.hwnd, null(), 0);
+    }
+    /// The Find and filter boxes repaint in the skin on screen (also remembered for
+    /// repaints while the App is borrowed).
+    unsafe fn invalidate_boxes(&self) {
+        self.edit_colors();
+        InvalidateRect(self.edit, null(), 1);
+        InvalidateRect(self.filter, null(), 1);
+    }
+    fn edit_colors(&self) -> u64 {
+        let p = self.palette();
+        let colors = (u64::from(p.fg) << 32) | u64::from(p.bg);
+        EDIT_COLORS.store(colors, Ordering::Relaxed);
+        colors
     }
     /// How the open document is read: Markdown, plain text or a log.
     fn format(&self) -> Format {
@@ -928,6 +1313,25 @@ impl App {
         self.outline_top = 0;
         self.outline_selected = None;
         self.outline_pending = None;
+        self.outline_rows.clear();
+        self.outline_folded.clear();
+        self.outline_lower.clear();
+        self.pending_anchor = None;
+        self.contents_changed = false;
+        if !self.outline_filter.is_empty() {
+            // The box's change notice cannot reach the App while it is borrowed.
+            self.outline_filter.clear();
+            SetWindowTextW(self.filter, w("").as_ptr());
+        }
+        self.find_ticket = self.workers.cancel_find();
+        self.matches = Default::default();
+        self.matches_query.clear();
+        self.matches_loading = false;
+        self.match_current = None;
+        self.match_top = 0;
+        self.match_step = None;
+        self.find_due = None;
+        self.pending_status = None;
         self.pending_scroll = None;
         self.workers.cancel_search();
         self.io_ticket += 1;
@@ -962,11 +1366,13 @@ impl App {
             .as_ptr(),
         );
         let _ = self.workers.io.send(Request::Open(path, self.io_ticket));
+        self.sync_filter();
         self.invalidate();
     }
     unsafe fn request_page(&mut self, anchor: u64) {
         self.pending_scroll = None;
         self.outline_pending = None;
+        self.pending_status = None;
         if let Some(doc) = &self.document {
             self.io_ticket += 1;
             self.loading = true;
@@ -980,11 +1386,47 @@ impl App {
         }
     }
     unsafe fn relayout(&mut self, anchor: u64) {
+        let start = Instant::now();
+        self.lay_out(anchor);
+        let us = start.elapsed().as_micros() as u64;
+        self.layout_us = (us, self.layout_us.1.max(us), self.layout_us.2 + 1);
+    }
+    unsafe fn lay_out(&mut self, anchor: u64) {
         self.outline_selected = None;
         self.pictures_changed = false;
+        self.contents_changed = false;
         let format = self.format();
+        let thumb = self.thumb_dragged();
+        self.glimpse = false;
         if let Some(page) = &self.page {
-            let blocks = plain::blocks(&page.lines, format, self.settings.raw);
+            let mut blocks = plain::blocks(&page.lines, format, self.settings.raw);
+            // Contents lists link to the headings they name.
+            if self.contents_ready()
+                && let Some(outline) = &self.outline
+            {
+                feathermd::toc::link(&mut blocks, &outline.headings, &outline.contents);
+                // Numbered headings at one level read in sizes by their depth.
+                if outline.numbered {
+                    feathermd::toc::levels(&mut blocks, &outline.headings);
+                }
+            }
+            // While the thumb is dragged only the blocks around the reader are laid
+            // out (a page of table rows takes tens of milliseconds); the whole page
+            // follows on release. Near the end the window runs to it, so the last
+            // screen is still full.
+            let (from, to) = if thumb {
+                let at = blocks.partition_point(|b| b.end <= anchor);
+                let from = at.saturating_sub(GLIMPSE_BEFORE);
+                let after = self.glimpse_after();
+                let mut to = (at + after).min(blocks.len());
+                if blocks.len() - to < after {
+                    to = blocks.len();
+                }
+                (from, to)
+            } else {
+                (0, blocks.len())
+            };
+            let glimpse = from > 0 || to < blocks.len();
             let dc = GetDC(self.hwnd);
             let width = self.body_width();
             // Queue this page's local images first, so layout sees every one.
@@ -1026,14 +1468,17 @@ impl App {
                 max_height: (self.content_bottom() - self.content_top() - self.s(36))
                     .max(self.s(48)),
             };
-            let layout = Layout::build(dc, &blocks, &view, &mut self.reading_fonts, width);
+            let layout =
+                Layout::build(dc, &blocks[from..to], &view, &mut self.reading_fonts, width);
             ReleaseDC(self.hwnd, dc);
-            // Source mode shows every line as code; only a Markdown preview has boxes.
-            self.boxes = if self.settings.raw || format != Format::Markdown {
+            // Source mode shows every line as code; only a Markdown preview has boxes
+            // (none while dragging: copy buttons are hidden then).
+            self.boxes = if self.settings.raw || format != Format::Markdown || glimpse {
                 Vec::new()
             } else {
                 copy_boxes(&blocks, &layout.rows, page)
             };
+            self.glimpse = glimpse;
             let mut layout = layout;
             for b in &self.boxes {
                 if matches!(
@@ -1049,6 +1494,7 @@ impl App {
             self.position(anchor, 0);
             self.scrollbar();
         }
+        self.sync_filter();
         self.invalidate();
     }
     unsafe fn receive(&mut self) {
@@ -1059,7 +1505,11 @@ impl App {
         // Decoded images of this page: lay it out again around the same top row,
         // but not under a drag, which would lose its selection.
         self.pictures_changed |= self.pictures.receive();
-        if self.pictures_changed && !self.selecting && self.drag.is_none() && !self.loading {
+        if (self.pictures_changed || self.contents_changed)
+            && !self.selecting
+            && self.drag.is_none()
+            && !self.loading
+        {
             let anchor = self.current();
             let wrapped = self.wrapped_row(self.top);
             self.relayout(anchor);
@@ -1078,6 +1528,10 @@ impl App {
                             self.status = tr("就绪").into();
                             self.relayout(0);
                             self.start_outline();
+                            // F5 with Find open lists the matches of the new file.
+                            if self.edit_mode == Some(FIND) {
+                                self.start_find();
+                            }
                             // F5 after an external edit keeps the reader near the same place.
                             if let Some((anchor, wrapped_row)) = self.reload_anchor.take()
                                 && (anchor > 0 || wrapped_row > 0)
@@ -1103,11 +1557,28 @@ impl App {
                     self.loading = false;
                     let pending = self.pending_scroll.take();
                     let heading = self.outline_pending.take();
+                    // A dragged thumb may have moved on since the read began.
+                    let target = self.drag_target.take();
                     match result {
                         Ok(page) => {
+                            let next = target.filter(|&t| t < page.start || t >= page.end);
+                            let anchor = target.filter(|_| next.is_none()).unwrap_or(anchor);
                             self.page = Some(page);
-                            self.status = tr("就绪").into();
+                            self.status = self
+                                .pending_status
+                                .take()
+                                .unwrap_or_else(|| tr("就绪").into());
                             self.relayout(anchor);
+                            if let Some(next) = next {
+                                // One read at a time: the next follows the thumb.
+                                self.request_page(next);
+                                self.drag_target = Some(next);
+                                continue;
+                            }
+                            if target.is_some() {
+                                self.invalidate();
+                                continue;
+                            }
                             if let Some((wrapped_row, delta)) = pending {
                                 self.position(anchor, wrapped_row);
                                 self.scroll(delta);
@@ -1117,6 +1588,7 @@ impl App {
                             }
                         }
                         Err(e) => {
+                            self.pending_status = None;
                             self.status = trf("读取失败：{}", &[&e]);
                         }
                     }
@@ -1128,11 +1600,25 @@ impl App {
                     match result {
                         Ok(SearchResult::Found(offset)) => {
                             self.found = Some(offset);
-                            self.status = trf("找到匹配 · 字节位置 {}", &[&offset]);
+                            self.match_current = if self.listed() {
+                                self.matches
+                                    .items
+                                    .binary_search_by_key(&offset, |m| m.offset)
+                                    .ok()
+                            } else {
+                                None
+                            };
+                            let status = trf("找到匹配 · 字节位置 {}", &[&offset]);
+                            self.reveal_found = true;
                             self.jump(offset);
+                            if self.loading {
+                                self.pending_status = Some(status);
+                            } else {
+                                self.status = status;
+                            }
                         }
                         Ok(SearchResult::NotFound) => {
-                            self.status = tr("未找到匹配（区分大小写）").into();
+                            self.status = self.not_found_status().into();
                         }
                         Ok(SearchResult::Cancelled) => {}
                         Err(e) => self.status = trf("搜索失败：{}", &[&e]),
@@ -1141,10 +1627,36 @@ impl App {
                 Reply::Outline(id, result) if id == self.outline_ticket => {
                     self.outline_loading = false;
                     match result {
-                        Ok(outline) => self.outline = Some(outline),
-                        Err(error) => self.outline_error = Some(error),
+                        Ok(outline) => self.set_outline(outline),
+                        Err(error) => {
+                            self.outline_error = Some(error);
+                            self.pending_anchor = None;
+                            self.outline_top = 0;
+                        }
                     }
-                    self.outline_top = 0;
+                }
+                Reply::Found(id, result) if id == self.find_ticket => {
+                    self.matches_loading = false;
+                    self.find_percent = None;
+                    match result {
+                        Ok(matches) => {
+                            self.matches = matches;
+                            self.match_current = self.found.and_then(|f| {
+                                self.matches
+                                    .items
+                                    .binary_search_by_key(&f, |m| m.offset)
+                                    .ok()
+                            });
+                            if let Some(forward) = self.match_step.take() {
+                                self.find_next(forward);
+                            }
+                        }
+                        Err(e) => {
+                            self.matches = Default::default();
+                            self.match_step = None;
+                            self.status = trf("搜索失败：{}", &[&e]);
+                        }
+                    }
                 }
                 _ => continue,
             }
@@ -1339,9 +1851,9 @@ impl App {
             ),
             Axis::Vertical => {
                 let track = RECT {
-                    left: self.width - self.s(20),
+                    left: self.reading_right() - self.s(20),
                     top: self.content_top() + self.s(12),
-                    right: self.width - self.s(5),
+                    right: self.reading_right() - self.s(5),
                     bottom: self.content_bottom(),
                 };
                 let viewport = self.viewport();
@@ -1363,7 +1875,10 @@ impl App {
                 } else {
                     let maximum = page.size.saturating_sub(1);
                     let at_end = page.end >= page.size && self.top >= viewport.bottom_top();
-                    let position = if at_end {
+                    let position = if let Some(target) = self.drag_target {
+                        // The thumb stays with the pointer while its page is read.
+                        target.min(maximum)
+                    } else if at_end {
                         maximum
                     } else {
                         layout.rows.get(self.top).map_or(self.current(), |row| {
@@ -1419,14 +1934,21 @@ impl App {
         let Some(drag) = self.drag else {
             return;
         };
-        let Some(bar) = self.scroll_bar(drag.axis) else {
-            return;
+        // A whole-document (pixel) track follows the layout; a byte track keeps the
+        // geometry it had when the drag began.
+        let scale = if drag.pixels {
+            match self.scroll_bar(drag.axis) {
+                Some(bar) => bar.scale,
+                None => return,
+            }
+        } else {
+            drag.scale
         };
         let pointer = if drag.axis == Axis::Vertical { y } else { x };
-        let value = bar.scale.value_at(pointer, drag.grab);
+        let value = scale.value_at(pointer, drag.grab);
         if drag.axis == Axis::Horizontal {
             self.horizontal = value as i32;
-        } else if bar.pixels {
+        } else if drag.pixels {
             if let Some(layout) = &self.layout {
                 let mut used = 0;
                 self.top = 0;
@@ -1441,10 +1963,95 @@ impl App {
                 self.anchor = self.current();
             }
         } else {
-            self.jump(value);
+            self.drag_to_byte(value);
         }
         self.scrollbar();
         self.invalidate();
+    }
+    /// The vertical thumb is dragged through a document larger than one page.
+    fn thumb_dragged(&self) -> bool {
+        self.drag.is_some_and(|d| d.axis == Axis::Vertical)
+            && self
+                .page
+                .as_ref()
+                .is_some_and(|p| p.start > 3 || p.end < p.size)
+    }
+    /// The dragged thumb points at byte `at`: lay out the cached page around it, or
+    /// read the page that holds it, one read at a time.
+    unsafe fn drag_to_byte(&mut self, at: u64) {
+        self.outline_selected = None;
+        self.pending_scroll = None;
+        let cached = self
+            .page
+            .as_ref()
+            .is_some_and(|p| at >= p.start && at < p.end);
+        if self.loading {
+            // A read is in flight: its reply follows the thumb from there.
+            self.drag_target = Some(at);
+            return;
+        }
+        if cached {
+            self.anchor = at;
+            let shown = self.layout.as_ref().is_some_and(|l| {
+                l.rows.first().is_some_and(|r| r.start <= at)
+                    && l.rows.last().is_some_and(|r| r.end > at)
+            });
+            // Inside the laid-out window only the top row moves.
+            if shown && !self.glimpse_edge(at) {
+                self.position(at, 0);
+            } else {
+                self.relayout(at);
+            }
+            return;
+        }
+        self.request_page(at);
+        self.drag_target = Some(at);
+    }
+    /// `at` is near the start or end of a windowed layout, so the screen below or
+    /// above it would run out of rows.
+    fn glimpse_edge(&self, at: u64) -> bool {
+        let (Some(layout), Some(page)) =
+            (self.layout.as_ref().filter(|_| self.glimpse), &self.page)
+        else {
+            return false;
+        };
+        let index = layout.rows.partition_point(|r| r.end <= at);
+        let after = self.glimpse_after();
+        // An edge of the window that is the page's own edge needs nothing more.
+        let starts = layout.rows.first().is_some_and(|r| r.start <= page.start);
+        let ends = layout.rows.last().is_some_and(|r| r.end >= page.end);
+        (!starts && index < GLIMPSE_BEFORE / 2) || (!ends && layout.rows.len() - index < after / 2)
+    }
+    /// Blocks below the reader in a dragged layout: a blank line, the shortest
+    /// row, is about 12 logical pixels high.
+    fn glimpse_after(&self) -> usize {
+        let rows = (self.content_bottom() - self.content_top()).max(0) / self.s(12).max(1);
+        (rows as usize * 3 / 2).clamp(GLIMPSE_AFTER.0, GLIMPSE_AFTER.1)
+    }
+    /// The thumb was let go: the page it points at, laid out whole.
+    unsafe fn end_thumb_drag(&mut self) {
+        let target = self.drag_target.take();
+        if self.loading {
+            if let Some(at) = target {
+                self.request_page(at);
+            }
+        } else if self.glimpse {
+            let anchor = self.current();
+            let wrapped = self.wrapped_row(self.top);
+            self.relayout(anchor);
+            self.position(anchor, wrapped);
+        }
+        self.drag_paint = None;
+    }
+    /// Paints right away instead of waiting for WM_PAINT, which a fast drag's
+    /// stream of mouse messages keeps waiting.
+    unsafe fn paint_now(&mut self) {
+        let dc = GetDC(self.hwnd);
+        self.paint(Some(dc));
+        ReleaseDC(self.hwnd, dc);
+        ValidateRect(self.hwnd, null());
+        self.drag_paint = Some(Instant::now());
+        self.drag_paints += 1;
     }
     unsafe fn begin_scrollbar(&mut self, x: i32, y: i32) -> bool {
         for axis in [Axis::Vertical, Axis::Horizontal] {
@@ -1460,7 +2067,12 @@ impl App {
                 } else {
                     x - bar.thumb.left
                 };
-                self.drag = Some(ScrollDrag { axis, grab });
+                self.drag = Some(ScrollDrag {
+                    axis,
+                    grab,
+                    scale: bar.scale,
+                    pixels: bar.pixels,
+                });
                 SetCapture(self.hwnd);
             } else if axis == Axis::Vertical {
                 self.page_scroll(y >= bar.thumb.bottom);
@@ -1492,7 +2104,7 @@ impl App {
         // Colors do not change layout. Keep wrapped-row, selection and horizontal position.
         self.save_preferences();
         self.invalidate();
-        InvalidateRect(self.edit, null(), 1);
+        self.invalidate_boxes();
     }
     /// Apply a saved Settings draft. Only fields owned by the dialog are copied,
     /// so commands handled while it was open are not overwritten.
@@ -1532,7 +2144,7 @@ impl App {
             self.save_preferences();
             self.invalidate();
         }
-        InvalidateRect(self.edit, null(), 1);
+        self.invalidate_boxes();
     }
     /// Switch interface strings, the UI font and the menus to the saved language.
     unsafe fn apply_language(&mut self) {
@@ -1549,6 +2161,9 @@ impl App {
             underline: false,
         });
         SendMessageW(self.edit, WM_SETFONT, font as usize, 1);
+        let small = self.filter_font();
+        SendMessageW(self.filter, WM_SETFONT, small as usize, 1);
+        self.filter_cue();
         drop(old);
         DestroyMenu(self.menu);
         (self.menu, self.settings_menu) = menus();
@@ -1625,44 +2240,285 @@ impl App {
             }
         }
     }
-    unsafe fn position_edit(&self, _mode: usize) {
+    unsafe fn position_edit(&self, mode: usize) {
         let left = (self.sidebar_width() + self.s(24)).max(self.s(48));
+        // Find keeps room for its match-case toggle.
+        let right = if mode == FIND { 204 } else { 164 };
         MoveWindow(
             self.edit,
             left,
             self.s(HEADER_HEIGHT + 12),
-            (self.width - left - self.s(164)).max(self.s(80)),
+            (self.width - left - self.s(right)).max(self.s(80)),
             self.s(32),
             1,
         );
     }
     unsafe fn show_edit(&mut self, mode: usize) {
+        let width = self.body_width();
         self.edit_mode = Some(mode);
         self.position_edit(mode);
         ShowWindow(self.edit, SW_SHOW);
+        // Its change notice cannot reach the App while it is borrowed here.
         SetWindowTextW(
             self.edit,
             w(if mode == GOTO { "50" } else { &self.query }).as_ptr(),
         );
         SetFocus(self.edit);
         SendMessageW(self.edit, 0x00B1, 0, -1);
+        self.find_due = None;
+        // Find lists the matches of the last query again unless it still has them.
+        if mode == FIND
+            && !self.query.is_empty()
+            && (self.matches_query != self.query || self.matches_case != self.match_case)
+        {
+            self.start_find();
+        }
+        self.reflow(width);
         self.clamp_top();
         self.invalidate();
     }
     unsafe fn hide_edit(&mut self) {
+        let width = self.body_width();
         self.workers.cancel_search();
+        if self.edit_mode == Some(FIND) {
+            let text = Self::edit_text(self.edit);
+            if text != self.query {
+                self.query = text;
+                self.found = None;
+            }
+        }
+        if self.matches_loading {
+            // An unfinished list is no list: Find reads it again next time.
+            self.find_ticket = self.workers.cancel_find();
+            self.matches_loading = false;
+            self.matches_query.clear();
+            self.match_step = None;
+        }
+        self.find_due = None;
         self.edit_mode = None;
         ShowWindow(self.edit, SW_HIDE);
         SetFocus(self.hwnd);
         self.status = tr("就绪").into();
+        self.reflow(width);
         self.clamp_top();
         self.invalidate();
     }
-    unsafe fn submit(&mut self) {
-        let len = GetWindowTextLengthW(self.edit).clamp(0, 16384) as usize;
-        let mut buf = vec![0u16; len + 1];
-        GetWindowTextW(self.edit, buf.as_mut_ptr(), buf.len() as i32);
-        let text = String::from_utf16_lossy(&buf[..len]);
+    /// The reading column changed width (the results panel opened or closed): lay
+    /// the page out again at the same place.
+    unsafe fn reflow(&mut self, before: i32) {
+        if self.body_width() != before && self.layout.is_some() && !self.loading {
+            let anchor = self.current();
+            let wrapped = self.wrapped_row(self.top);
+            self.relayout(anchor);
+            self.position(anchor, wrapped);
+        }
+    }
+    /// The Find box changed: list its matches after a short pause.
+    unsafe fn find_changed(&mut self) {
+        if self.edit_mode == Some(FIND) {
+            self.find_due = Some(Instant::now() + FIND_DELAY);
+        }
+    }
+    /// The matches listed belong to the query.
+    fn listed(&self) -> bool {
+        !self.matches_loading
+            && self.matches_query == self.query
+            && self.matches_case == self.match_case
+    }
+    /// Status lines of a search; they say when letter case counts.
+    fn searching_status(&self) -> &'static str {
+        if self.match_case {
+            tr("正在后台搜索…（Esc 取消，区分大小写）")
+        } else {
+            tr("正在后台搜索…（Esc 取消）")
+        }
+    }
+    fn not_found_status(&self) -> &'static str {
+        if self.match_case {
+            tr("未找到匹配（区分大小写）")
+        } else {
+            tr("未找到匹配")
+        }
+    }
+    /// Lists every match of the Find box's text in the background.
+    unsafe fn start_find(&mut self) {
+        self.find_due = None;
+        let text = Self::edit_text(self.edit);
+        if text != self.query {
+            self.found = None;
+            self.query = text.clone();
+        }
+        self.find_ticket = self.workers.cancel_find();
+        self.match_current = None;
+        self.match_top = 0;
+        self.find_percent = None;
+        self.matches_query = text.clone();
+        self.matches_case = self.match_case;
+        let document = self.document.clone().filter(|_| !text.is_empty());
+        let Some(document) = document else {
+            self.matches = Default::default();
+            self.matches_loading = false;
+            self.match_step = None;
+            self.invalidate();
+            return;
+        };
+        self.matches_loading = true;
+        self.find_progress = Arc::default();
+        let _ = self.workers.find.send(feathermd::worker::FindRequest {
+            document,
+            query: text,
+            match_case: self.match_case,
+            ticket: self.find_ticket,
+            progress: self.find_progress.clone(),
+        });
+        self.invalidate();
+    }
+    /// Enter / F3 (Shift: back): the next match from the reader's position, from
+    /// the list when it has one; past the listed ones a search goes on from there.
+    unsafe fn find_next(&mut self, forward: bool) {
+        if self.edit_mode == Some(FIND)
+            && (self.find_due.is_some()
+                || Self::edit_text(self.edit) != self.matches_query
+                || self.matches_case != self.match_case)
+        {
+            self.start_find();
+        }
+        if self.query.is_empty() {
+            return;
+        }
+        if self.matches_loading {
+            self.match_step = Some(forward);
+            self.status = self.searching_status().into();
+            self.invalidate();
+            return;
+        }
+        if !self.listed() {
+            self.search();
+            return;
+        }
+        let items = &self.matches.items;
+        let len = items.len();
+        if len == 0 {
+            self.status = self.not_found_status().into();
+            self.invalidate();
+            return;
+        }
+        let at = self.found.unwrap_or_else(|| self.current());
+        let index = match (self.match_current, forward) {
+            (Some(i), true) => i + 1,
+            (Some(i), false) => i.wrapping_sub(1),
+            // After a match found by a search, or from the reader's position.
+            (None, true) if self.found.is_some() => items.partition_point(|m| m.offset <= at),
+            (None, true) => items.partition_point(|m| m.offset < at),
+            (None, false) => items.partition_point(|m| m.offset < at).wrapping_sub(1),
+        };
+        let index = if index < len {
+            index
+        } else if forward && self.matches.more {
+            if self.match_current == Some(len - 1) {
+                self.found = Some(items[len - 1].offset);
+            }
+            self.match_current = None;
+            self.search();
+            return;
+        } else if forward {
+            0
+        } else {
+            len - 1
+        };
+        self.go_to_match(index);
+    }
+    /// Goes to listed match `index`, shows it in the list and in the outline.
+    unsafe fn go_to_match(&mut self, index: usize) {
+        let Some(m) = self.matches.items.get(index) else {
+            return;
+        };
+        let (offset, line) = (m.offset, m.line);
+        let total = if self.matches.more {
+            format!("{}+", feathermd::document::MAX_MATCHES)
+        } else {
+            self.matches.items.len().to_string()
+        };
+        let status = trf("第 {} / {} 处 · 第 {} 行", &[&(index + 1), &total, &line]);
+        self.match_current = Some(index);
+        self.found = Some(offset);
+        self.reveal_found = true;
+        self.reveal_match(index);
+        self.jump(offset);
+        if self.loading {
+            self.pending_status = Some(status);
+        } else {
+            self.status = status;
+        }
+        let entry = self.outline.as_ref().and_then(|o| {
+            o.headings
+                .partition_point(|h| h.offset <= offset)
+                .checked_sub(1)
+        });
+        if let Some(entry) = entry {
+            self.reveal_entry(entry, false);
+        }
+        self.invalidate();
+    }
+    /// The results panel, and the top of its rows.
+    fn results_rect(&self) -> RECT {
+        RECT {
+            left: self.reading_right(),
+            top: self.s(HEADER_HEIGHT + 53) + 1,
+            right: self.width - 1,
+            bottom: self.height - self.s(30),
+        }
+    }
+    fn result_rows(&self) -> usize {
+        let r = self.results_rect();
+        ((r.bottom - self.s(28) - r.top - self.s(RESULTS_HEADER)) / self.s(RESULTS_ROW).max(1))
+            .max(1) as usize
+    }
+    fn reveal_match(&mut self, index: usize) {
+        let visible = self.result_rows();
+        if index < self.match_top {
+            self.match_top = index;
+        } else if index >= self.match_top + visible {
+            self.match_top = index + 1 - visible;
+        }
+    }
+    unsafe fn scroll_results(&mut self, delta: i32) {
+        let count = self.matches.items.len();
+        self.match_top = (self.match_top as i64 + i64::from(delta))
+            .clamp(0, count.saturating_sub(self.result_rows()) as i64)
+            as usize;
+        self.invalidate();
+    }
+    /// Follows a `#fragment` link to the heading it names, reading the outline
+    /// first when it is not there yet.
+    unsafe fn follow_anchor(&mut self, fragment: &str) {
+        let resolved = match &self.outline {
+            Some(outline) => outline.contents.resolve(fragment),
+            None => {
+                self.pending_anchor = Some(fragment.to_owned());
+                self.scan_outline();
+                if !self.outline_loading {
+                    self.pending_anchor = None;
+                }
+                return;
+            }
+        };
+        match resolved {
+            Some(index) => {
+                // A link that worked replaces a note about one that did not.
+                self.status = tr("就绪").into();
+                self.reveal_entry(index, true);
+                self.select_heading(index);
+            }
+            None => {
+                self.status = trf("文档中没有与此链接对应的标题：{}", &[&fragment]);
+                self.invalidate();
+            }
+        }
+    }
+    /// Enter in the Find or Go to box (`forward` false: Shift+Enter).
+    unsafe fn submit(&mut self, forward: bool) {
+        let text = Self::edit_text(self.edit);
         if self.edit_mode == Some(GOTO) {
             match text.trim().trim_end_matches('%').parse::<f64>() {
                 Ok(value) if value.is_finite() && (0.0..=100.0).contains(&value) => {
@@ -1676,11 +2532,7 @@ impl App {
                 }
             }
         } else {
-            if text != self.query {
-                self.found = None;
-            }
-            self.query = text;
-            self.search();
+            self.find_next(forward);
         }
     }
     unsafe fn search(&mut self) {
@@ -1693,10 +2545,11 @@ impl App {
             let _ = self.workers.search.send(SearchRequest {
                 document: doc.clone(),
                 query: self.query.clone(),
+                match_case: self.match_case,
                 from,
                 ticket: self.search_ticket,
             });
-            self.status = tr("正在后台搜索…（Esc 取消，区分大小写）").into();
+            self.status = self.searching_status().into();
             self.invalidate();
         }
     }
@@ -2299,7 +3152,22 @@ impl App {
             LICENSES => self.export_licenses(),
             OPEN => self.dialog(),
             FIND | GOTO => self.show_edit(id),
-            NEXT => self.search(),
+            NEXT => self.find_next(!test_host::key_pressed(VK_SHIFT as i32)),
+            MATCH_CASE => {
+                self.match_case = !self.match_case;
+                if self.edit_mode == Some(FIND) {
+                    self.found = None;
+                    self.start_find();
+                    SetFocus(self.edit);
+                }
+            }
+            CLEAR_FILTER => {
+                self.clear_filter();
+                SetFocus(self.filter);
+            }
+            FILTER_BOX => {
+                SetFocus(self.filter);
+            }
             COPY => self.copy(),
             EXIT => {
                 DestroyWindow(self.hwnd);
@@ -2556,12 +3424,19 @@ impl App {
         SelectObject(dc, old);
     }
     unsafe fn paint(&mut self, supplied: Option<HDC>) {
+        let start = Instant::now();
+        self.paint_frame(supplied);
+        let us = start.elapsed().as_micros() as u64;
+        self.paint_us = (us, self.paint_us.1.max(us));
+    }
+    unsafe fn paint_frame(&mut self, supplied: Option<HDC>) {
         let mut ps: PAINTSTRUCT = zeroed();
         let target = supplied.unwrap_or_else(|| BeginPaint(self.hwnd, &mut ps));
         let dc = CreateCompatibleDC(target);
         let bitmap = CreateCompatibleBitmap(target, self.width.max(1), self.height.max(1));
         let old_bitmap = SelectObject(dc, bitmap);
         let p = self.palette();
+        self.edit_colors();
         let all = RECT {
             left: 0,
             top: 0,
@@ -2603,6 +3478,7 @@ impl App {
             RestoreDC(dc, saved);
             self.paint_copy_button(dc, p);
         }
+        self.paint_results(dc, p);
         self.paint_footer(dc, p);
         self.paint_scrollbars(dc, p);
         self.paint_header_overlay(dc, p);
@@ -2617,9 +3493,14 @@ impl App {
     unsafe fn test_snapshot(&mut self) -> bool {
         snapshot::capture(self.hwnd, |dc| {
             self.paint(Some(dc));
-            if self.edit_mode.is_some() {
+            // Child edits paint themselves: print the visible ones into the capture.
+            for child in [self.edit, self.filter] {
+                if child.is_null() || (GetWindowLongPtrW(child, GWL_STYLE) as u32 & WS_VISIBLE) == 0
+                {
+                    continue;
+                }
                 let mut rect = RECT::default();
-                GetWindowRect(self.edit, &mut rect);
+                GetWindowRect(child, &mut rect);
                 let mut origin = POINT {
                     x: rect.left,
                     y: rect.top,
@@ -2628,7 +3509,7 @@ impl App {
                 let saved = SaveDC(dc);
                 SetViewportOrgEx(dc, origin.x, origin.y, null_mut());
                 SendMessageW(
-                    self.edit,
+                    child,
                     WM_PRINT,
                     dc as usize,
                     (PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND) as isize,
@@ -2680,7 +3561,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             app.preview = None;
                             app.apply_opacity();
                             app.invalidate();
-                            InvalidateRect(app.edit, null(), 1);
+                            app.invalidate_boxes();
                         }
                     }
                 }
@@ -2703,7 +3584,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 .map(|theme| (*theme, Settings::clamp_opacity(lp as i64)));
             app.apply_opacity();
             app.invalidate();
-            InvalidateRect(app.edit, null(), 1);
+            app.invalidate_boxes();
         }
         return 0;
     }
@@ -2745,6 +3626,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
         }
         return 0;
+    }
+    if msg == WM_CTLCOLOREDIT {
+        // A box may repaint inside an App method; then the last colours painted hold.
+        let colors = match (*ptr).try_borrow() {
+            Ok(app) => app.edit_colors(),
+            Err(_) => EDIT_COLORS.load(Ordering::Relaxed),
+        };
+        let (fg, bg) = ((colors >> 32) as u32, colors as u32);
+        SetTextColor(wp as HDC, fg);
+        SetBkColor(wp as HDC, bg);
+        SetDCBrushColor(wp as HDC, bg);
+        return GetStockObject(DC_BRUSH) as isize;
     }
     // Modal Win32 calls may re-enter this procedure. Never alias a mutable App reference.
     let Ok(mut app) = (*ptr).try_borrow_mut() else {
@@ -3057,6 +3950,165 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 .iter()
                 .filter(|h| matches!(h.action, Hit::Row(_)))
                 .count() as isize,
+            // Outline sidebar: top and height of its rows, the rows listed, and per
+            // row LPARAM its entry, depth and whether it is folded (-1 past the end).
+            110 => app.s(OUTLINE_ROWS_TOP) as isize,
+            111 => app.s(OUTLINE_ROW) as isize,
+            112 => app.outline_rows.len() as isize,
+            113..=115 => match (app.outline_rows.get(lp as usize), &app.outline) {
+                (Some(row), Some(outline)) => match wp {
+                    113 => row.entry as isize,
+                    114 => outline
+                        .headings
+                        .get(row.entry)
+                        .map_or(-1, |h| h.depth as isize),
+                    _ => app.outline_folded.get(row.entry).copied().unwrap_or(false) as isize,
+                },
+                _ => -1,
+            },
+            // The filter box, and the entries it matches (context rows left out).
+            116 => app.filter as isize,
+            117 => app.outline_rows.iter().filter(|r| !r.context).count() as isize,
+            // Find's list: its matches (-1 while reading), more than listed, the
+            // current one, and per match LPARAM its offset and line.
+            118 => {
+                if app.matches_loading {
+                    -1
+                } else {
+                    app.matches.items.len() as isize
+                }
+            }
+            119 => app.matches.more as isize,
+            120 => app.match_current.map_or(-1, |i| i as isize),
+            121 => app
+                .matches
+                .items
+                .get(lp as usize)
+                .map_or(-1, |m| m.offset as isize),
+            122 => app
+                .matches
+                .items
+                .get(lp as usize)
+                .map_or(-1, |m| m.line as isize),
+            // The results panel's width, its first row on screen and the centre of
+            // result LPARAM as y << 16 | x (-1 when not painted).
+            123 => app.results_width() as isize,
+            124 => app.match_top as isize,
+            125 => app
+                .hits
+                .iter()
+                .find(|h| h.action == Hit::Match(lp as usize))
+                .map_or(-1, |h| centre(h.rect)),
+            // Links inside the document (`#…`) the last paint drew, and the centre
+            // of link LPARAM; the centre of the fold mark of outline row LPARAM.
+            126 => app
+                .hits
+                .iter()
+                .filter(|h| matches!(&h.action, Hit::Link(u) if u.starts_with('#')))
+                .count() as isize,
+            127 => app
+                .hits
+                .iter()
+                .filter(|h| matches!(&h.action, Hit::Link(u) if u.starts_with('#')))
+                .nth(lp as usize)
+                .map_or(-1, |h| centre(h.rect)),
+            128 => app
+                .outline_rows
+                .get(lp as usize)
+                .and_then(|row| app.hits.iter().find(|h| h.action == Hit::Fold(row.entry)))
+                .map_or(-1, |h| centre(h.rect)),
+            // The last paint marked the current match in the text itself.
+            129 => app.find_placed as isize,
+            // Find's match-case toggle: whether it is on, and the centre of its button.
+            143 => app
+                .hits
+                .iter()
+                .find(|h| h.action == Hit::Command(MATCH_CASE))
+                .map_or(-1, |h| centre(h.rect)),
+            144 => app.match_case as isize,
+            // Layout row LPARAM in a table: 1 for a header row, 0 for a body row, -1
+            // otherwise; its copy text goes to row.txt beside the snapshot.
+            146 => match app.layout.as_ref().and_then(|l| l.rows.get(lp as usize)) {
+                Some(row) => match &row.table {
+                    Some(table) => {
+                        if let Some(path) = std::env::var_os("FEATHERMD_TEST_SNAPSHOT") {
+                            let _ = std::fs::write(
+                                PathBuf::from(path).with_file_name("row.txt"),
+                                table.copy.as_bytes(),
+                            );
+                        }
+                        table.header as isize
+                    }
+                    None => -1,
+                },
+                None => -1,
+            },
+            // The heading level layout row LPARAM is drawn at (0 for other rows).
+            145 => app
+                .layout
+                .as_ref()
+                .and_then(|l| l.rows.get(lp as usize))
+                .map_or(-1, |r| match r.kind {
+                    markdown::Kind::Heading(level) => level as isize,
+                    _ => 0,
+                }),
+            // The loaded page's first and end byte, and a pending thumb target.
+            138 => app.page.as_ref().map_or(-1, |p| p.start as isize),
+            139 => app.page.as_ref().map_or(-1, |p| p.end as isize),
+            140 => app.drag_target.map_or(-1, |t| t as isize),
+            141 => app.glimpse as isize,
+            142 => app.drag_paints as isize,
+            // A paint into a memory bitmap, as WM_PAINT would draw: its time in
+            // microseconds.
+            137 => {
+                let screen = GetDC(hwnd);
+                let dc = CreateCompatibleDC(screen);
+                let bitmap = CreateCompatibleBitmap(screen, app.width.max(1), app.height.max(1));
+                let old = SelectObject(dc, bitmap);
+                let start = Instant::now();
+                app.paint(Some(dc));
+                let us = start.elapsed().as_micros() as isize;
+                SelectObject(dc, old);
+                DeleteObject(bitmap);
+                DeleteDC(dc);
+                ReleaseDC(hwnd, screen);
+                us
+            }
+            // Layout: last and longest time in microseconds, layouts run; paint:
+            // last and longest. LPARAM 1 resets the longest times.
+            132..=136 => {
+                let value = match wp {
+                    132 => app.layout_us.0,
+                    133 => app.layout_us.1,
+                    134 => app.layout_us.2,
+                    135 => app.paint_us.0,
+                    _ => app.paint_us.1,
+                } as isize;
+                if lp == 1 {
+                    app.layout_us.1 = 0;
+                    app.paint_us.1 = 0;
+                }
+                value
+            }
+            // Test seam: the status line in status.txt beside the snapshot, and the
+            // URL of the link at client point LPARAM in link.txt (their UTF-8 lengths).
+            130 | 131 => match std::env::var_os("FEATHERMD_TEST_SNAPSHOT") {
+                Some(path) => {
+                    let (name, text) = if wp == 130 {
+                        ("status.txt", app.status.clone())
+                    } else {
+                        let (x, y) = (lp as u16 as i16 as i32, (lp >> 16) as u16 as i16 as i32);
+                        let url = match app.hit(x, y) {
+                            Some(Hit::Link(url)) => url,
+                            _ => String::new(),
+                        };
+                        ("link.txt", url)
+                    };
+                    let path = PathBuf::from(path).with_file_name(name);
+                    std::fs::write(path, text.as_bytes()).map_or(-1, |_| text.len() as isize)
+                }
+                None => -1,
+            },
             _ => 0,
         },
         WM_KILLFOCUS | WM_NCLBUTTONDOWN | WM_ENTERSIZEMOVE => {
@@ -3087,6 +4139,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_TIMER => {
             app.receive();
             app.drag_scroll();
+            if app.find_due.is_some_and(|due| Instant::now() >= due) {
+                app.start_find();
+            }
+            // Find in a large file says how far it has read.
+            if app.matches_loading
+                && let Some(size) = app
+                    .page
+                    .as_ref()
+                    .map(|p| p.size)
+                    .filter(|&s| s > 4 * 1024 * 1024)
+            {
+                let read = app.find_progress.load(Ordering::Relaxed).min(size);
+                let percent = (read * 100 / size) as u8;
+                if app.find_percent != Some(percent) {
+                    app.find_percent = Some(percent);
+                    app.invalidate();
+                }
+            }
             // A long outline scan (a large log) reports its progress.
             if app.outline_loading
                 && let Some(size) = app.page.as_ref().map(|p| p.size).filter(|&s| s > 0)
@@ -3117,7 +4187,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_SETTINGCHANGE | WM_THEMECHANGED => {
             app.system_dark = system_uses_dark_theme();
             app.invalidate();
-            InvalidateRect(app.edit, null(), 1);
+            app.invalidate_boxes();
             0
         }
         WM_SIZE => {
@@ -3225,6 +4295,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 underline: false,
             });
             SendMessageW(app.edit, WM_SETFONT, font as usize, 1);
+            let small = app.filter_font();
+            SendMessageW(app.filter, WM_SETFONT, small as usize, 1);
             app.relayout(anchor);
             if let Some(mode) = app.edit_mode {
                 app.position_edit(mode);
@@ -3232,7 +4304,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_COMMAND => {
-            app.command(wp & 0xffff);
+            // Notices from the Find and filter boxes carry their window; commands do not.
+            if lp != 0 {
+                match (wp & 0xffff, (wp >> 16) & 0xffff) {
+                    // EN_CHANGE
+                    (FILTER_ID, 0x0300) => app.filter_changed(),
+                    (FIND_ID, 0x0300) => app.find_changed(),
+                    // EN_SETFOCUS / EN_KILLFOCUS: the filter box's focus ring.
+                    (FILTER_ID, 0x0100 | 0x0200) => app.invalidate(),
+                    _ => {}
+                }
+            } else {
+                app.command(wp & 0xffff);
+            }
             0
         }
         WM_KEYDOWN => {
@@ -3259,6 +4343,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             ScreenToClient(hwnd, &mut point);
             if point.x >= 0 && point.x < app.sidebar_width() && point.y >= app.s(HEADER_HEIGHT) {
                 app.scroll_outline(-steps * 3);
+                return 0;
+            }
+            if app.results_width() > 0 && contains(app.results_rect(), point.x, point.y) {
+                app.scroll_results(-steps * 3);
                 return 0;
             }
             if test_host::key_pressed(VK_CONTROL as i32) {
@@ -3311,6 +4399,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+            // The filter box's focus ring goes with its focus (its notice cannot
+            // reach the App while it is borrowed here).
+            if GetFocus() == app.filter {
+                app.invalidate();
+            }
             SetFocus(hwnd);
             let x = lp as u16 as i16 as i32;
             let y = (lp >> 16) as u16 as i16 as i32;
@@ -3344,6 +4437,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         | Hit::Link(_)
                         | Hit::LoadImage(_)
                         | Hit::Heading(_)
+                        | Hit::Fold(_)
+                        | Hit::Match(_)
                         | Hit::CopyBlock(_)
                 )
             ) {
@@ -3438,7 +4533,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 TrackMouseEvent(&mut tracking);
             }
             if app.drag.is_some() {
+                // Pages read meanwhile, then the thumb's new place, on screen now.
+                app.receive();
                 app.drag_scrollbar(x, y);
+                if app
+                    .drag_paint
+                    .is_none_or(|at| at.elapsed() >= Duration::from_millis(8))
+                {
+                    app.paint_now();
+                }
             } else if app.selecting {
                 app.drag_point = Some((x, y));
                 app.drag_to(x, y);
@@ -3453,6 +4556,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 app.drag_scrollbar(x, y);
                 app.drag = None;
                 ReleaseCapture();
+                app.end_thumb_drag();
                 app.invalidate();
             } else if app.selecting {
                 app.selecting = false;
@@ -3468,8 +4572,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 match hit {
                     Some(Hit::CopyBlock(index)) => app.copy_box(index),
                     Some(Hit::Heading(index)) => app.select_heading(index),
+                    Some(Hit::Fold(index)) => app.toggle_fold(index),
+                    Some(Hit::Match(index)) => app.go_to_match(index),
                     Some(Hit::Command(0)) => app.hide_edit(),
-                    Some(Hit::Command(NEXT)) if app.edit_mode.is_some() => app.submit(),
+                    Some(Hit::Command(NEXT)) if app.edit_mode.is_some() => {
+                        app.submit(!test_host::key_pressed(VK_SHIFT as i32))
+                    }
+                    // Links inside the document go to the heading they name.
+                    Some(Hit::Link(url)) if url.starts_with('#') => app.follow_anchor(&url),
                     Some(Hit::Command(id)) => app.command(id),
                     Some(Hit::LoadImage(url)) => {
                         let ticket = app.io_ticket;
@@ -3522,7 +4632,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_CAPTURECHANGED | WM_CANCELMODE => {
             app.selecting = false;
             app.drag_point = None;
-            app.drag = None;
+            if app.drag.take().is_some() {
+                app.end_thumb_drag();
+            }
             app.pressed = None;
             if msg == WM_CANCELMODE {
                 ReleaseCapture();
@@ -3547,6 +4659,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             | Hit::Link(_)
                             | Hit::LoadImage(_)
                             | Hit::Heading(_)
+                            | Hit::Fold(_)
+                            | Hit::Match(_)
                             | Hit::CopyBlock(_)
                     )
                 )
@@ -3556,24 +4670,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 && app
                     .mouse
                     .is_some_and(|(x, y)| app.reading_area(x, y) && !clickable);
+            // The filter box's padding belongs to the text field.
+            let field = app
+                .mouse
+                .is_some_and(|(x, y)| app.hit(x, y) == Some(Hit::Command(FILTER_BOX)));
             SetCursor(LoadCursorW(
                 null_mut(),
-                if clickable {
+                if clickable && !field {
                     IDC_HAND
-                } else if text {
+                } else if text || field {
                     IDC_IBEAM
                 } else {
                     IDC_ARROW
                 },
             ));
             1
-        }
-        WM_CTLCOLOREDIT => {
-            let p = app.palette();
-            SetTextColor(wp as HDC, p.fg);
-            SetBkColor(wp as HDC, p.bg);
-            SetDCBrushColor(wp as HDC, p.bg);
-            GetStockObject(DC_BRUSH) as isize
         }
         WM_DROPFILES => {
             let drop = wp as HDROP;
@@ -3797,7 +4908,7 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
                 100,
                 30,
                 hwnd,
-                501usize as HMENU,
+                FIND_ID as HMENU,
                 instance,
                 null(),
             );
@@ -3811,6 +4922,34 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             });
             SendMessageW(a.edit, WM_SETFONT, font as usize, 1);
             SendMessageW(a.edit, 0x00c5, 8192, 0);
+            // The outline's filter box, after the Find box among the children.
+            a.filter = CreateWindowExW(
+                0,
+                w("EDIT").as_ptr(),
+                w("").as_ptr(),
+                WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL as u32,
+                0,
+                0,
+                100,
+                20,
+                hwnd,
+                FILTER_ID as HMENU,
+                instance,
+                null(),
+            );
+            SetWindowPos(
+                a.filter,
+                HWND_BOTTOM,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+            let small = a.filter_font();
+            SendMessageW(a.filter, WM_SETFONT, small as usize, 1);
+            SendMessageW(a.filter, 0x00c5, 256, 0);
+            a.filter_cue();
             a.update_checks();
             let mut rect = RECT::default();
             GetClientRect(hwnd, &mut rect);
@@ -3857,24 +4996,51 @@ pub fn run(path: Option<PathBuf>) -> Result<(), String> {
             if result <= 0 {
                 break;
             }
-            let edit = app.borrow().edit;
+            let (edit, filter) = {
+                let a = app.borrow();
+                (a.edit, a.filter)
+            };
+            // Reader shortcuts that also work while a box has the focus.
+            let shortcut = || {
+                test_host::key_pressed(VK_CONTROL as i32)
+                    && matches!(msg.wParam, 0x4f | 0x46 | 0x47 | 0x54 | 0x45 | 0xbc | 0x42)
+            };
             if msg.message == WM_KEYDOWN && msg.hwnd == edit {
                 let mut a = app.borrow_mut();
-                if msg.wParam == VK_RETURN as usize {
-                    a.submit();
+                // Enter / F3 go to the next match, with Shift the previous one.
+                if msg.wParam == VK_RETURN as usize || msg.wParam == VK_F3 as usize {
+                    a.submit(!test_host::key_pressed(VK_SHIFT as i32));
                     continue;
                 }
                 if msg.wParam == VK_ESCAPE as usize {
                     a.hide_edit();
                     continue;
                 }
-                if msg.wParam == VK_F3 as usize {
-                    a.submit();
+                if shortcut() {
+                    a.keyboard(msg.wParam, true);
                     continue;
                 }
-                if test_host::key_pressed(VK_CONTROL as i32)
-                    && matches!(msg.wParam, 0x4f | 0x46 | 0x47 | 0x54 | 0x45 | 0xbc)
-                {
+            }
+            // Alt+C while Find is open: match case. Handled before translation, so
+            // no menu-less Alt beep follows.
+            if msg.message == WM_SYSKEYDOWN && msg.wParam == 0x43 {
+                let mut a = app.borrow_mut();
+                if a.edit_mode == Some(FIND) && [edit, filter, a.hwnd].contains(&msg.hwnd) {
+                    a.command(MATCH_CASE);
+                    continue;
+                }
+            }
+            if msg.message == WM_KEYDOWN && msg.hwnd == filter {
+                let mut a = app.borrow_mut();
+                if msg.wParam == VK_RETURN as usize {
+                    a.filter_enter();
+                    continue;
+                }
+                if msg.wParam == VK_ESCAPE as usize {
+                    a.clear_filter();
+                    continue;
+                }
+                if shortcut() {
                     a.keyboard(msg.wParam, true);
                     continue;
                 }
@@ -3924,6 +5090,36 @@ mod tests {
             // The primary button draws page-coloured text on the accent.
             assert!(contrast(p.page, p.accent) >= 4.5, "{name} primary button");
             assert!(!skin_name(theme).is_empty());
+        }
+    }
+    #[test]
+    fn find_marks_keep_text_readable_and_the_current_one_stands_out() {
+        for theme in Theme::ALL {
+            let p = Palette::new(theme.resolve(false));
+            let name = skin_name(theme);
+            for current in [false, true] {
+                let mark = p.find_mark(current);
+                assert!(contrast(p.fg, mark) >= 4.5, "{name} text on a find mark");
+            }
+            // The current match is the stronger of the two against the page.
+            assert!(
+                contrast(p.page, p.find_mark(true)) > contrast(p.page, p.find_mark(false)),
+                "{name} current find mark"
+            );
+            // Marks are a change of hue more than of lightness: some channel moves
+            // by at least 40 levels, the current one's by 30 more.
+            let distance = |a: u32, b: u32| {
+                (0..3)
+                    .map(|i| ((a >> (8 * i)) & 255).abs_diff((b >> (8 * i)) & 255))
+                    .max()
+                    .unwrap_or(0)
+            };
+            let (other, current) = (p.find_mark(false), p.find_mark(true));
+            assert!(distance(p.page, other) >= 40, "{name} find mark visible");
+            assert!(
+                distance(p.page, current) >= distance(p.page, other) + 30,
+                "{name} current find mark distinct"
+            );
         }
     }
     #[test]

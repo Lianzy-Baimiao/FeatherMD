@@ -34,7 +34,7 @@ jobs:
             [IO.File]::WriteAllText($identity, $env:STORE_IDENTITY_JSON, [Text.UTF8Encoding]::new($false))
             $identityArgs = @('--identity', $identity)
           }
-          python packaging/msix.py --binary target/store/release/feathermd.exe --version 1.0.13.0 @identityArgs --output dist/wack-candidate --makeappx $sdk.FullName
+          python packaging/msix.py --binary target/store/release/feathermd.exe --version 1.0.14.0 @identityArgs --output dist/wack-candidate --makeappx $sdk.FullName
           if ($LASTEXITCODE) { throw 'Packaging failed' }
       - name: Disposable supplemental WACK
         shell: pwsh

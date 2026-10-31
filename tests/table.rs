@@ -218,6 +218,44 @@ fn tables_need_a_header_and_delimiter_row_and_end_at_other_blocks() {
 }
 
 #[test]
+fn an_empty_header_row_gives_way_to_the_first_body_row() {
+    // As Word converters write tables: an empty header row above the real one.
+    let page = plain(&[
+        "|  |  |",
+        "| --- | --- |",
+        "| 表名称 | 实体名称 |",
+        "| T_A | 单据头 |",
+        "",
+        "| | |",
+        "| --- | --- |",
+    ]);
+    let blocks = markdown::blocks(&page, false);
+    assert_eq!(blocks[0].kind, Kind::Spacer);
+    assert_eq!(
+        (blocks[0].start, blocks[0].end),
+        (page[0].start, page[1].end)
+    );
+    let rows: Vec<(bool, Vec<String>)> = blocks[1..3]
+        .iter()
+        .map(|b| {
+            let row = b.table.as_ref().unwrap();
+            assert_eq!(row.group, page[0].start);
+            (row.header, row.cells.iter().map(|c| cell_text(c)).collect())
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (true, vec!["表名称".to_string(), "实体名称".into()]),
+            (false, vec!["T_A".into(), "单据头".into()])
+        ]
+    );
+    // An empty header with no row below it stays as written.
+    let last = blocks.last().unwrap();
+    assert!(last.table.as_ref().is_some_and(|t| t.header));
+}
+
+#[test]
 fn tables_stop_before_quotes_lists_and_headings_and_skip_code() {
     let page = plain(&[
         "a | b",

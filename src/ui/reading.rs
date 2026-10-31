@@ -39,9 +39,125 @@ impl Palette {
     pub(super) fn stripe(&self) -> u32 {
         mix(self.page, self.code, 55)
     }
+    /// Background of Find's matches in the text: amber, the current one stronger.
+    pub(super) fn find_mark(&self, current: bool) -> u32 {
+        let (hue, weight) = match (self.is_dark(), current) {
+            (false, true) => (rgb(255, 150, 30), 55),
+            (false, false) => (rgb(255, 214, 64), 40),
+            (true, true) => (rgb(220, 120, 20), 48),
+            (true, false) => (rgb(200, 160, 40), 26),
+        };
+        mix(self.page, hue, weight)
+    }
+}
+
+/// Per visible row, Find's matches on it: displayed units `(a, b)` of its block and
+/// whether it is the current match.
+type Marks = Vec<Vec<(usize, usize, bool)>>;
+
+/// First index of `needle` in `units` at or after `from`; ASCII letters of either
+/// case when `fold`.
+fn find_units(units: &[u16], needle: &[u16], from: usize, fold: bool) -> Option<usize> {
+    if needle.is_empty() || units.len() < needle.len() {
+        return None;
+    }
+    let lower = |u: u16| if (65..=90).contains(&u) { u + 32 } else { u };
+    (from..=units.len() - needle.len()).find(|&i| {
+        let here = &units[i..i + needle.len()];
+        if fold {
+            here.iter().zip(needle).all(|(&a, &b)| lower(a) == lower(b))
+        } else {
+            here == needle
+        }
+    })
 }
 
 impl App {
+    /// Find's matches in the visible rows `first..end` of the preview: per row the
+    /// displayed units `(a, b)` of each match in its block and whether it is the
+    /// current one; with Find closed only the current one. The flag says the
+    /// current match was placed, so its row needs no whole-row highlight.
+    fn find_marks(&self, first: usize, end: usize) -> (Marks, bool) {
+        let mut out = vec![Vec::new(); end.saturating_sub(first)];
+        let open = self.edit_mode == Some(FIND) && self.listed();
+        let (Some(layout), Some(page)) = (&self.layout, &self.page) else {
+            return (out, false);
+        };
+        if self.query.is_empty() || self.settings.raw || (!open && self.found.is_none()) {
+            return (out, false);
+        }
+        let needle: Vec<u16> = self.query.encode_utf16().collect();
+        let rows = &layout.rows;
+        let mut placed = false;
+        let mut index = first;
+        while index < end {
+            let block = rows[index].start;
+            let from = rows[..index]
+                .iter()
+                .rposition(|r| r.start != block)
+                .map_or(0, |i| i + 1);
+            let to = index
+                + rows[index..]
+                    .iter()
+                    .take_while(|r| r.start == block)
+                    .count();
+            let span = &rows[from..to];
+            let units = select::units(span, block);
+            // Which occurrence in the block is the current match, counted in its line.
+            let wanted = self
+                .found
+                .filter(|&f| f >= block && f < rows[index].end)
+                .and_then(|f| self.occurrence(page, block, f));
+            let mut at = 0;
+            let mut k = 0;
+            while let Some(i) = find_units(&units, &needle, at, !self.match_case) {
+                let current = wanted == Some(k);
+                placed |= current;
+                if open || current {
+                    for row in from.max(first)..to.min(end) {
+                        out[row - first].push((i, i + needle.len(), current));
+                    }
+                }
+                at = i + needle.len();
+                k += 1;
+            }
+            index = to;
+        }
+        (out, placed)
+    }
+    /// How many matches of the query come before the one at byte `found` in the
+    /// source line that starts at `start`; None when that cannot be told.
+    fn occurrence(&self, page: &Page, start: u64, found: u64) -> Option<usize> {
+        if self.listed()
+            && self
+                .matches
+                .items
+                .binary_search_by_key(&found, |m| m.offset)
+                .is_ok()
+        {
+            let before = self.matches.items.partition_point(|m| m.offset < start);
+            let at = self.matches.items.partition_point(|m| m.offset < found);
+            return Some(at - before);
+        }
+        // Not listed: count in the line itself (UTF-8 text keeps its byte offsets).
+        if page.encoding != feathermd::encoding::Encoding::Utf8 || page.invalid_utf8 {
+            return None;
+        }
+        let line = line_of(&page.lines, start)?;
+        let text = line.text.get(..(found - line.start) as usize)?;
+        // Escaped punctuation (`T\_NAME`) matches too, as Find counts it.
+        let text = match self.format() {
+            Format::Markdown => markdown::unescape(text),
+            _ => text.to_owned(),
+        };
+        Some(if self.match_case {
+            text.matches(self.query.as_str()).count()
+        } else {
+            text.to_ascii_lowercase()
+                .matches(self.query.to_ascii_lowercase().as_str())
+                .count()
+        })
+    }
     /// Paints the layout rows from `self.top` down to `bottom`, starting at `y`.
     pub(super) unsafe fn paint_rows(&mut self, dc: HDC, p: Palette, mut y: i32, bottom: i32) {
         let left = self.left();
@@ -56,6 +172,42 @@ impl App {
         let bar_color = soft(p.edge, p.muted, 35);
         let stripe = p.stripe();
         let table_pad = self.reading_fonts.scale(crate::layout::CELL_PAD_Y);
+        let visible_end = Viewport::new(&layout.rows, bottom - y)
+            .visible_end(self.top)
+            .min(layout.rows.len());
+        // Find's matches as marks on the text; the whole row only when the current
+        // one cannot be placed (inside markup, a link or a legacy encoding).
+        let (marks, placed) = self.find_marks(self.top, visible_end);
+        self.find_placed = placed;
+        // After a jump, a table wider than the column scrolls to the match's column.
+        if !self.loading && std::mem::take(&mut self.reveal_found) {
+            'reveal: for (slot, row_marks) in marks.iter().enumerate() {
+                let row = &layout.rows[self.top + slot];
+                let scrolls = !self.settings.wrap
+                    || row
+                        .table
+                        .as_ref()
+                        .and_then(|t| t.edges.last())
+                        .is_some_and(|&edge| edge + 1 > body_width);
+                for &(a, b, _) in row_marks.iter().filter(|m| m.2 && scrolls) {
+                    for (first, run) in select::runs(row) {
+                        let fonts = &mut self.reading_fonts;
+                        let Some((from, to)) =
+                            select::extent(run, first, (a, b), |r| pens(dc, fonts, r))
+                        else {
+                            continue;
+                        };
+                        // Extents are from the text origin; the column shows
+                        // `horizontal .. horizontal + body_width` of it.
+                        if from < self.horizontal || to > self.horizontal + body_width {
+                            self.horizontal = (from - self.s(48)).max(0);
+                        }
+                        break 'reveal;
+                    }
+                }
+            }
+            self.horizontal = self.horizontal.min(self.horizontal_max());
+        }
         // Code boxes: one rounded sheet behind each visible run of code rows. A box
         // that continues off screen extends past the clip so its corners stay hidden.
         if !raw {
@@ -105,7 +257,10 @@ impl App {
             };
             // Preview selection: the units of this row it covers; only the selected
             // characters are highlighted, in tables too.
-            let found = self.found.is_some_and(|n| n >= row.start && n < row.end);
+            let found = !placed && self.found.is_some_and(|n| n >= row.start && n < row.end);
+            let row_marks = marks
+                .get(index.wrapping_sub(self.top))
+                .map_or(&[][..], Vec::as_slice);
             let cover = preview
                 .and_then(|(from, to)| select::covered(row, from, to))
                 .filter(|_| !found);
@@ -315,6 +470,23 @@ impl App {
                         },
                         wash,
                     );
+                }
+                for &(a, b, current) in row_marks {
+                    let fonts = &mut self.reading_fonts;
+                    if let Some((from, to)) =
+                        select::extent(run, first, (a, b), |r| pens(dc, fonts, r))
+                    {
+                        Self::fill(
+                            dc,
+                            &RECT {
+                                left: left + from - shift,
+                                top: y + row.baseline - run.ascent - self.s(1),
+                                right: left + to - shift,
+                                bottom: y + row.baseline + run.descent + self.s(1),
+                            },
+                            p.find_mark(current),
+                        );
+                    }
                 }
                 if let Some((a, b)) = band {
                     Self::fill(

@@ -42,7 +42,7 @@ The other screenshots in this README show the Simplified Chinese interface; ever
 
 Opening a Markdown file should not start a browser first.
 
-FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.13 Windows x64 EXE is about **1.11 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
+FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry, and it is offline by default. It contacts GitHub Releases only when you enable or manually run update checks; web images load only after you click and confirm each URL. The v0.1.14 Windows x64 EXE is about **1.20 MiB** (four interface languages, code highlighting and local image decoding included) and needs no .NET, VC++ runtime or other third-party runtime.
 
 **Large files are not loaded whole before they show.** Only the nearby 128 KiB is read at a time; reading and searching run in the background and only visible lines are drawn. The file's total size does not decide how much memory the first page needs.
 
@@ -57,6 +57,18 @@ FeatherMD uses Win32 and GDI/GDI+: no Electron, WebView, JavaScript or telemetry
 7. **More → Language…** switches the interface language; it applies as soon as you save.
 
 Windows 10 (1607+) / Windows 11 **x64**. Tested on Windows 11 x64; other versions have not each been checked on real hardware. No installer and no administrator rights. The EXE is not code-signed yet, so Windows SmartScreen may warn about an unknown publisher; check the source and the SHA-256 instead of turning protection off.
+
+### Outline and search
+
+**Outline filter:** type in the box above the outline to filter it. Every space-separated word must appear (case does not matter); each match is listed with its parents, the parents in a lighter colour. Enter goes to the first match, Esc clears the box.
+
+**Outline tree:** entries indent by heading level. Documents converted from Word and the like often put every heading at one level (all `####`, say) and keep the hierarchy only in the numbers (`1`, `1.1`, `1.1.1`); those headings nest by their numbers, and an unnumbered heading belongs to the numbered one before it. A long outline opens with its deeper levels folded, at most about 500 entries listed; click the triangle to unfold or fold. Rows are denser, so more entries fit on screen. In a document that nests by its numbers, headings in the text take their size from that depth too (`1` largest, `1.1.1` smaller), instead of all looking alike.
+
+**Ctrl+F results:** as you type, a panel at the right lists every match in the document with its line number and the text around it, the match highlighted. Matches are marked in the text too, the current one stronger, and a wide table scrolls sideways to the match's column. Enter / F3 goes to the next match, Shift+Enter / Shift+F3 to the previous one, and clicking a result goes there; the status bar says "Match 3 of 57 · line 905". The panel lists the first 1000 matches; Enter keeps finding the ones after them. In a narrow window the panel hides and Find works as before. Letters match in either case by default (`readme` finds `README`); click **Aa** at the right of the Find box or press **Alt+C** to match case. Search runs in the background in cancellable 256 KiB chunks. Converters often write underscores in Markdown as `\_` (`T\_BD\_CONTACT`); searching for `T_BD_CONTACT` finds those too, and results show the text without the backslashes.
+
+**Links inside a document:** a link such as `[text](#heading)` goes to that heading (GitHub's anchor rules, or the heading's own text). In converted documents, the plain list items under a table of contents that name headings (at least three, most of them matching) become links and indent by level. Links the author wrote are kept as they are; links to other files still do not open.
+
+![FeatherMD with the outline filtered by "表格" (tables) and Find listing 31 matches of "目录" (outline) at the right, the current one marked in the text (Simplified Chinese interface)](docs/outline-find.png)
 
 ### Plain text and logs
 
@@ -163,6 +175,8 @@ Columns fit the window: when the table fits, each column keeps its content width
 
 When there are too many columns for even the narrowest readable width (about six characters each), only that table scrolls horizontally (bottom scrollbar, Shift+wheel or the left/right arrow keys); the text and tables that fit stay in place. With word wrap off, tables keep their content width and scroll with the text.
 
+Converters often write an empty header row (`|  |  |`) above the real one. When every header cell is empty, that row leaves only a thin gap and the first row below it is shown as the header.
+
 ![FeatherMD table fitted to the window](docs/reading-table.png)
 
 ### Character selection
@@ -243,9 +257,10 @@ Details and Microsoft's documentation are in [File associations](docs/FILE_ASSOC
 - A custom title bar, frame and window buttons, with no separate toolbar, leave more room for the text.
 - A collapsible outline of headings scrolls with its own wheel and jumps to the heading you click; it is built in the background without delaying the first page.
 - Custom vertical and horizontal scrollbars support dragging and paging on the track. After a quick drag far away and back, a stale page never pulls the reading position away. Short files hide the scrollbars they do not need.
+- Dragging the scrollbar fast through a large file lays out only the text near the thumb and repaints on every move; the whole page follows when you let go. Documents full of tables no longer stutter while dragged.
 - End shows the whole last screen, even when the last paragraph is long and wrapped. PageUp / PageDown page by the real line heights and keep one overlapping line, so large headings never make you skip text. Paging back across cached pages keeps the wrap position of long paragraphs, and Copy without a selection takes the lines actually visible.
 
-A Markdown outline lists `#` to `######` headings and skips code fences. To keep large files responsive it scans at most the first **16 MiB** (plain-text chapters the first 256 MiB; a log's time index the whole file, see "Plain text and logs") and shows up to **4096 headings**, with a note at the bottom when a limit is reached. Setext (underlined) headings are not listed; reading and full-text search are not limited to the outline's range. Reload (F5) rebuilds the outline.
+A Markdown outline lists `#` to `######` headings and skips code fences. To keep large files responsive it scans at most the first **16 MiB** (plain-text chapters the first 256 MiB; a log's time index the whole file, see "Plain text and logs") and shows up to **16384 headings** (enough for converted specifications with ten thousand headings), with a note at the bottom when a limit is reached. Setext (underlined) headings are not listed; reading and full-text search are not limited to the outline's range. Reload (F5) rebuilds the outline.
 
 ### Shortcuts
 
@@ -253,8 +268,10 @@ A Markdown outline lists `#` to `######` headings and skips code fences. To keep
 | --- | --- |
 | Open a file | Ctrl+O / drag and drop |
 | Show / hide the outline | Ctrl+B / the toggle by the outline |
-| Find in the background (case-sensitive source search) | Ctrl+F |
-| Next match (wraps at the end) | Enter / F3 |
+| Find in the background (source search, every match listed at the right) | Ctrl+F |
+| Match case while finding | Alt+C / Aa at the right of the Find box |
+| Next / previous match (wraps at the end) | Enter / F3 · Shift+Enter / Shift+F3 |
+| Filter the outline | The box above the outline (Esc clears it) |
 | Cancel the search / close the search bar | Esc |
 | Go to a byte percentage | Ctrl+G |
 | Start / end of the file | Home / End |

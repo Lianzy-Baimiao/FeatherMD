@@ -1,6 +1,7 @@
 //! Bounded, cancellable outlines by format: Markdown ATX headings, plain-text chapters,
 //! and a log's time index (or its error lines). No whole-file allocation or link
-//! execution; each line contributes at most a 4096-byte prefix.
+//! execution; each line contributes at most a 4096-byte prefix. Entries get their
+//! tree depth from `toc`.
 use crate::{
     document::Document,
     encoding::Encoding,
@@ -16,7 +17,7 @@ use std::{
 pub const CHUNK_BYTES: usize = 256 * 1024;
 pub const LINE_PREFIX_BYTES: usize = 4096;
 pub const MAX_SCAN_BYTES: u64 = 16 * 1024 * 1024;
-pub const MAX_HEADINGS: usize = 4096;
+pub const MAX_HEADINGS: usize = 16384;
 pub const MAX_HEADING_CHARS: usize = 160;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -24,6 +25,9 @@ pub struct Heading {
     pub offset: u64,
     pub level: u8,
     pub text: String,
+    /// Depth in the outline tree, from 1 (`toc::assign_depths`): heading levels,
+    /// refined by section numbers where a document numbers its headings.
+    pub depth: u8,
     /// Error and warning lines under a log time entry.
     pub errors: u32,
     pub warnings: u32,
@@ -54,6 +58,10 @@ pub struct Outline {
     /// Error and warning lines of the whole log.
     pub errors: u64,
     pub warnings: u64,
+    /// Anchors and titles of a Markdown outline, for links inside the document.
+    pub contents: crate::toc::Contents,
+    /// Its headings number their hierarchy at one level (see `toc::levels`).
+    pub numbered: bool,
 }
 
 /// Bytes an outline of `format` reads: Markdown headings and text chapters within a
@@ -156,6 +164,11 @@ fn scan_reader(
         sink.line(&mut line, line_start, &mut result);
     }
     let capped = sink.done(&mut result);
+    let numbered = crate::toc::assign_depths(&mut result.headings);
+    if format == Format::Markdown {
+        result.contents = crate::toc::Contents::new(&result.headings);
+        result.numbered = numbered;
+    }
     result.limited = full || capped || result.scanned < result.size;
     result.complete = !result.limited;
     Ok((epoch.load(Ordering::Relaxed) == ticket).then_some(result))
@@ -390,7 +403,7 @@ impl LogScan {
                     level: 1,
                     text,
                     errors: 1,
-                    warnings: 0,
+                    ..Heading::default()
                 })
                 .collect();
             return self.problems_capped;
@@ -418,6 +431,7 @@ impl LogScan {
                     text: day_label(&segment.stamp),
                     errors,
                     warnings,
+                    ..Heading::default()
                 });
             }
             let text = if step < 86_400 {
@@ -432,6 +446,7 @@ impl LogScan {
                 text,
                 errors: segment.errors,
                 warnings: segment.warnings,
+                ..Heading::default()
             });
         }
         self.segments_capped

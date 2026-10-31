@@ -1,5 +1,5 @@
 use feathermd::{
-    document::{Document, PAGE_BYTES, SEGMENT_BYTES, SearchResult},
+    document::{Document, MAX_MATCHES, PAGE_BYTES, Query, SEGMENT_BYTES, SearchResult},
     markdown::{self, Fence, Kind},
     settings::{Editor, Settings, Theme},
 };
@@ -300,6 +300,252 @@ fn search_cancel_empty_and_not_found() {
     );
     assert!(d.search("", 0, &epoch, 3).is_err());
     assert!(d.search(&"x".repeat(17000), 0, &epoch, 3).is_err());
+}
+#[test]
+fn find_all_lists_matches_with_lines_and_context() {
+    let f =
+        Fixture::new("\u{feff}needle 一\r\n\r\n\tx needle y needle\nneedleneedle end".as_bytes());
+    let d = f.doc();
+    let (epoch, progress) = (AtomicU64::new(1), AtomicU64::new(0));
+    let found = d.find_all("needle", &epoch, 1, &progress).unwrap().unwrap();
+    assert!(!found.more);
+    let shape: Vec<(u64, &str, &str)> = found
+        .items
+        .iter()
+        .map(|m| (m.line, m.before.as_str(), m.after.as_str()))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (1, "", " 一"),
+            (3, "x ", " y needle"),
+            (3, "x needle y ", ""),
+            (4, "", "needle end"),
+            (4, "needle", " end"),
+        ]
+    );
+    let bytes = fs::read(&f.0).unwrap();
+    for m in &found.items {
+        assert_eq!(&bytes[m.offset as usize..m.offset as usize + 6], b"needle");
+    }
+    assert_eq!(progress.load(Ordering::Relaxed), d.size);
+    // Matches never overlap.
+    let f = Fixture::new(b"aaaa");
+    let offsets: Vec<u64> = f
+        .doc()
+        .find_all("aa", &epoch, 1, &progress)
+        .unwrap()
+        .unwrap()
+        .items
+        .iter()
+        .map(|m| m.offset)
+        .collect();
+    assert_eq!(offsets, [0, 2]);
+}
+#[test]
+fn find_all_crosses_reads_stops_at_its_cap_and_cancels() {
+    // One match ends the first 256 KiB read halfway, one starts the next line.
+    let mut data = vec![b'x'; 256 * 1024 - 3];
+    data.extend_from_slice(b"needle\nneedle");
+    let f = Fixture::new(&data);
+    let (epoch, progress) = (AtomicU64::new(1), AtomicU64::new(0));
+    let found = f
+        .doc()
+        .find_all("needle", &epoch, 1, &progress)
+        .unwrap()
+        .unwrap();
+    let at: Vec<(u64, u64)> = found.items.iter().map(|m| (m.offset, m.line)).collect();
+    let first = 256 * 1024 - 3;
+    assert_eq!(at, [(first, 1), (first + 7, 2)]);
+    // The context of a match in a long line starts at a whole character.
+    assert!(found.items[0].before.chars().all(|c| c == 'x'));
+    assert_eq!(found.items[0].before.len(), 240);
+    // 240 bytes back lands inside a character: the context starts after it.
+    let mut wide = "中".repeat(100).into_bytes();
+    wide.extend_from_slice(b"xab");
+    let f = Fixture::new(&wide);
+    let found = f
+        .doc()
+        .find_all("ab", &epoch, 1, &progress)
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.items[0].before, format!("{}x", "中".repeat(79)));
+    let f = Fixture::new("ab ".repeat(MAX_MATCHES + 500).as_bytes());
+    let found = f
+        .doc()
+        .find_all("ab", &epoch, 1, &progress)
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.items.len(), MAX_MATCHES);
+    assert!(found.more);
+    assert!(
+        f.doc()
+            .find_all("ab", &epoch, 2, &progress)
+            .unwrap()
+            .is_none()
+    );
+    assert!(f.doc().find_all("", &epoch, 1, &progress).is_err());
+    assert!(
+        f.doc()
+            .find_all(&"x".repeat(17000), &epoch, 1, &progress)
+            .is_err()
+    );
+    let none = f
+        .doc()
+        .find_all("zz", &epoch, 1, &progress)
+        .unwrap()
+        .unwrap();
+    assert!(none.items.is_empty() && !none.more);
+}
+#[test]
+fn markdown_search_finds_backslash_escaped_punctuation() {
+    // Converted documents escape every underscore: what the preview shows as
+    // T_BD_CONTACT is T\_BD\_CONTACT in the file.
+    let text = "| T\\_BD\\_CONTACT | x |\nT_BD_CONTACT here\nT\\*Y and T\\_BD\\_CONTACT\\.\n";
+    let f = Fixture::new(text.as_bytes());
+    let d = f.doc();
+    let (epoch, progress) = (AtomicU64::new(1), AtomicU64::new(0));
+    let found = d
+        .find_all("T_BD_CONTACT", &epoch, 1, &progress)
+        .unwrap()
+        .unwrap();
+    let shape: Vec<(usize, u64, &str, &str)> = found
+        .items
+        .iter()
+        .map(|m| {
+            (
+                m.offset as usize,
+                m.line,
+                m.before.as_str(),
+                m.after.as_str(),
+            )
+        })
+        .collect();
+    let first = text.find("T\\_BD").unwrap();
+    let second = text.find("T_BD").unwrap();
+    let third = text.rfind("T\\_BD").unwrap();
+    // Snippets read as the preview shows them, without the backslashes.
+    assert_eq!(
+        shape,
+        [
+            (first, 1, "| ", " | x |"),
+            (second, 2, "", " here"),
+            (third, 3, "T*Y and ", "."),
+        ]
+    );
+    assert_eq!(found.items.len(), 3);
+    assert_eq!(
+        d.find_all("T*Y", &epoch, 1, &progress)
+            .unwrap()
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert_eq!(
+        d.search("T_BD_CONTACT", 0, &epoch, 1).unwrap(),
+        SearchResult::Found(first as u64)
+    );
+    assert_eq!(
+        d.search("T_BD_CONTACT", third as u64 + 1, &epoch, 1)
+            .unwrap(),
+        SearchResult::Found(first as u64)
+    );
+    // Plain text has no Markdown escapes: only the literal line matches.
+    let mut plain = Document::open(&f.0).unwrap();
+    plain.format = feathermd::plain::Format::Text;
+    let found = plain
+        .find_all("T_BD_CONTACT", &epoch, 1, &progress)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        found
+            .items
+            .iter()
+            .map(|m| m.offset as usize)
+            .collect::<Vec<_>>(),
+        [second]
+    );
+    assert_eq!(markdown::unescape("T\\_A\\\\_B \\x \\"), "T_A\\_B \\x \\");
+}
+#[test]
+fn find_matches_letters_of_either_case_unless_told_otherwise() {
+    let text = "Needle needle NEEDLE nEEDLE 针needle\n";
+    let f = Fixture::new(text.as_bytes());
+    let d = f.doc();
+    let (epoch, progress) = (AtomicU64::new(1), AtomicU64::new(0));
+    let any = Query {
+        text: "needle",
+        match_case: false,
+    };
+    let found = d.find_all(any, &epoch, 1, &progress).unwrap().unwrap();
+    // Each match shows the text as the file has it.
+    let texts: Vec<&str> = found.items.iter().map(|m| m.text.as_str()).collect();
+    assert_eq!(texts, ["Needle", "needle", "NEEDLE", "nEEDLE", "needle"]);
+    let exact = d.find_all("needle", &epoch, 1, &progress).unwrap().unwrap();
+    assert_eq!(exact.items.len(), 2);
+    assert_eq!(
+        d.search(
+            Query {
+                text: "NEEDLE",
+                match_case: false
+            },
+            1,
+            &epoch,
+            1
+        )
+        .unwrap(),
+        SearchResult::Found(7)
+    );
+    assert_eq!(
+        d.search("NEEDLE", 1, &epoch, 1).unwrap(),
+        SearchResult::Found(14)
+    );
+    // Escaped Markdown and either case together.
+    let f = Fixture::new("T\\_Bd\\_contact\n".as_bytes());
+    let found = f
+        .doc()
+        .find_all(
+            Query {
+                text: "t_bd_CONTACT",
+                match_case: false,
+            },
+            &epoch,
+            1,
+            &progress,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.items.len(), 1);
+    assert_eq!(found.items[0].text, "T_Bd_contact");
+}
+#[test]
+fn a_query_without_letters_finds_the_same_matches_in_either_mode() {
+    // Such a query skips folding the windows; the matches must not change.
+    let text = "表单2307 x 表单2307_1\n表单2307\n";
+    let f = Fixture::new(text.as_bytes());
+    let d = f.doc();
+    let (epoch, progress) = (AtomicU64::new(1), AtomicU64::new(0));
+    for text in ["表单2307", "2307_1", "_"] {
+        let any = Query {
+            text,
+            match_case: false,
+        };
+        let folded = d.find_all(any, &epoch, 1, &progress).unwrap().unwrap();
+        let exact = d.find_all(text, &epoch, 1, &progress).unwrap().unwrap();
+        let at = |m: &feathermd::document::Matches| {
+            m.items
+                .iter()
+                .map(|m| (m.offset, m.line))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(at(&folded), at(&exact), "{text}");
+        assert!(!exact.items.is_empty(), "{text}");
+        assert_eq!(
+            d.search(any, 0, &epoch, 1).unwrap(),
+            d.search(text, 0, &epoch, 1).unwrap()
+        );
+    }
 }
 #[test]
 fn fence_marker_length_and_indent() {

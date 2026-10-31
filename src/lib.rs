@@ -12,6 +12,7 @@ pub mod scrollbar;
 pub mod settings;
 pub mod table;
 pub mod text;
+pub mod toc;
 pub mod update;
 pub mod worker;
 

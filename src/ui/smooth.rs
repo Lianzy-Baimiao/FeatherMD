@@ -13,6 +13,9 @@ pub(super) const UPDATE: usize = 10007;
 pub(super) const GLOBE: usize = 10008;
 pub(super) const COPY: usize = 10009;
 pub(super) const CONTRAST: usize = 10010;
+/// Outline fold marks: an open entry points down, a folded one right.
+pub(super) const UNFOLDED: usize = 10011;
+pub(super) const FOLDED: usize = 10012;
 
 pub(super) struct Session(usize);
 impl Session {
@@ -348,6 +351,8 @@ unsafe fn draw(dc: HDC, r: RECT, id: usize, color: u32, scale: f32, weight: f32)
             c.line(&[(-4.0, 8.0), (4.0, 8.0)]);
         }
         THEME_PICKER => c.line(&[(-2.5, -1.0), (0.0, 1.5), (2.5, -1.0)]),
+        UNFOLDED => c.line(&[(-3.5, -1.75), (0.0, 1.75), (3.5, -1.75)]),
+        FOLDED => c.line(&[(-1.75, -3.5), (1.75, 0.0), (-1.75, 3.5)]),
         SETTINGS => {
             for x in [-6.0, 0.0, 6.0] {
                 c.ellipse(x - 1.5, -1.5, 3.0, 3.0, true);
